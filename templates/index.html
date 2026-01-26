@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lead Gen Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --color-primary: #0284c7;
+            --color-primary-hover: #0369a1;
+            --color-success: #16a34a;
+            --color-warning: #ea580c;
+            --color-danger: #dc2626;
+            --color-bg: #0f172a;
+            --color-surface: #1e293b;
+            --color-text: #f1f5f9;
+            --color-text-secondary: #cbd5e1;
+            --color-border: #334155;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--color-bg);
+            color: var(--color-text);
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            width: 260px;
+            background: var(--color-surface);
+            border-right: 1px solid var(--color-border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--color-primary);
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: transparent;
+            color: var(--color-text-secondary);
+            border: none;
+            text-align: left;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .nav-item:hover {
+            background: rgba(2, 132, 199, 0.1);
+            color: var(--color-primary);
+        }
+
+        .nav-item.active {
+            background: rgba(2, 132, 199, 0.2);
+            color: var(--color-primary);
+            border-left: 3px solid var(--color-primary);
+            padding-left: 13px;
+        }
+
+        /* MAIN CONTENT */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: var(--color-surface);
+            border-bottom: 1px solid var(--color-border);
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--color-primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--color-border);
+            color: var(--color-text);
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+        }
+
+        .btn-danger {
+            background: var(--color-danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+        .btn-success {
+            background: var(--color-success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #15803d;
+        }
+
+        .btn-sm {
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        /* CONTENT AREA */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background: var(--color-bg);
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        /* STATS GRID */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--color-primary);
+        }
+
+        .stat-change {
+            font-size: 12px;
+            color: var(--color-success);
+        }
+
+        /* TABLES */
+        .table-container {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: rgba(2, 132, 199, 0.1);
+            padding: 14px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--color-border);
+            font-size: 13px;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: rgba(2, 132, 199, 0.05);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending {
+            background: rgba(234, 88, 12, 0.2);
+            color: var(--color-warning);
+        }
+
+        .status-qualified {
+            background: rgba(22, 163, 74, 0.2);
+            color: var(--color-success);
+        }
+
+        .status-sent {
+            background: rgba(2, 132, 199, 0.2);
+            color: var(--color-primary);
+        }
+
+        .status-replied {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+
+        /* PROCESS MONITOR */
+        .process {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .process-info {
+            flex: 1;
+        }
+
+        .process-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .process-details {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+        }
+
+        .process-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--color-warning);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.running {
+            background: var(--color-success);
+        }
+
+        .status-dot.stopped {
+            background: var(--color-danger);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* LOGS */
+        .logs-container {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 16px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+            color: var(--color-text-secondary);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-time {
+            color: var(--color-primary);
+            margin-right: 10px;
+        }
+
+        .log-success {
+            color: var(--color-success);
+        }
+
+        .log-error {
+            color: var(--color-danger);
+        }
+
+        .log-warning {
+            color: var(--color-warning);
+        }
+
+        /* FORMS */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-text);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            background: var(--color-bg);
+            color: var(--color-text);
+            font-size: 13px;
+            transition: border 0.2s;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+        }
+
+        /* MODAL */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--color-text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: var(--color-text);
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            justify-content: flex-end;
+        }
+
+        /* PROGRESS BAR */
+        .progress {
+            width: 100%;
+            height: 6px;
+            background: var(--color-border);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--color-primary);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* ALERTS */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .alert-success {
+            background: rgba(22, 163, 74, 0.1);
+            color: var(--color-success);
+            border: 1px solid rgba(22, 163, 74, 0.3);
+        }
+
+        .alert-warning {
+            background: rgba(234, 88, 12, 0.1);
+            color: var(--color-warning);
+            border: 1px solid rgba(234, 88, 12, 0.3);
+        }
+
+        .alert-error {
+            background: rgba(220, 38, 38, 0.1);
+            color: var(--color-danger);
+            border: 1px solid rgba(220, 38, 38, 0.3);
+        }
+
+        /* SCROLLBAR */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--color-bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--color-border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 200px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .process {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .header-actions {
+                flex-direction: column;
+                width: 100%;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <div class="logo">
+                📊 LeadGen Pro
+            </div>
+            <nav class="nav-menu">
+                <button class="nav-item active" onclick="showSection('dashboard')">
+                    📈 Dashboard
+                </button>
+                <button class="nav-item" onclick="showSection('campaigns')">
+                    📧 Campaigns
+                </button>
+                <button class="nav-item" onclick="showSection('processes')">
+                    ⚙️ Processes
+                </button>
+                <button class="nav-item" onclick="showSection('leads')">
+                    👥 Leads
+                </button>
+                <button class="nav-item" onclick="showSection('settings')">
+                    ⚡ Settings
+                </button>
+            </nav>
+        </div>
+
+        <!-- MAIN -->
+        <div class="main">
+            <!-- HEADER -->
+            <div class="header">
+                <h1 id="pageTitle">Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="openModal('runAll')">
+                        ▶️ Start All Processes
+                    </button>
+                    <button class="btn btn-secondary" onclick="refreshData()">
+                        🔄 Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- CONTENT -->
+            <div class="content">
+                <!-- DASHBOARD SECTION -->
+                <div id="dashboard" class="section active">
+                    <div class="alert alert-success">
+                        ✓ System ready. All processes stopped. Click "Start All Processes" to begin.
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Leads</div>
+                            <div class="stat-value" id="totalLeads">0</div>
+                            <div class="stat-change">↑ 0 today</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Qualified Leads</div>
+                            <div class="stat-value" id="qualifiedLeads">0</div>
+                            <div class="stat-change">↑ 0% conversion</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Emails Sent</div>
+                            <div class="stat-value" id="emailsSent">0</div>
+                            <div class="stat-change">Today: 0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Replies</div>
+                            <div class="stat-value" id="replies">0</div>
+                            <div class="stat-change">↑ 0% reply rate</div>
+                        </div>
+                    </div>
+
+                    <h2 style="margin-top: 30px; margin-bottom: 16px; font-size: 16px; font-weight: 600;">Recent Activity</h2>
+                    <div class="logs-container" id="activityLogs">
+                        <div class="log-entry">
+                            <span class="log-time">[12:00]</span>
+                            <span class="log-success">✓ System initialized</span>
+                        </div>
+                        <div class="log-entry">
+                            <span class="log-time">[12:00]</span>
+                            Dashboard ready. Awaiting user action.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CAMPAIGNS SECTION -->
+                <div id="campaigns" class="section">
+                    <h2 style="margin-bottom: 20px; font-size: 18px; font-weight: 600;">Email Campaigns</h2>
+
+                    <button class="btn btn-primary" onclick="openModal('newCampaign')" style="margin-bottom: 20px;">
+                        + New Campaign
+                    </button>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Campaign</th>
+                                    <th>Status</th>
+                                    <th>Emails Sent</th>
+                                    <th>Open Rate</th>
+                                    <th>Reply Rate</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="campaignsTable">
+                                <tr>
+                                    <td>Interior Designers - Ahmedabad</td>
+                                    <td><span class="status-badge status-sent">Sent</span></td>
+                                    <td>42</td>
+                                    <td>28%</td>
+                                    <td>4%</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-secondary">View</button>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>Plumbers - Mumbai</td>
+                                    <td><span class="status-badge status-pending">Pending</span></td>
+                                    <td>0</td>
+                                    <td>0%</td>
+                                    <td>0%</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary">Send</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PROCESSES SECTION -->
+                <div id="processes" class="section">
+                    <h2 style="margin-bottom: 20px; font-size: 18px; font-weight: 600;">Running Processes</h2>
+
+                    <div class="process">
+                        <div class="process-info">
+                            <div class="process-name">🕷️ Web Scraper</div>
+                            <div class="process-details">Collecting leads from directories</div>
+                        </div>
+                        <div class="process-status">
+                            <div class="status-dot stopped"></div>
+                            <button class="btn btn-sm btn-primary" onclick="startProcess('scraper')">Start</button>
+                        </div>
+                    </div>
+
+                    <div class="process">
+                        <div class="process-info">
+                            <div class="process-name">🔍 Audit Engine</div>
+                            <div class="process-details">Analyzing websites for issues</div>
+                        </div>
+                        <div class="process-status">
+                            <div class="status-dot stopped"></div>
+                            <button class="btn btn-sm btn-primary" onclick="startProcess('auditor')">Start</button>
+                        </div>
+                    </div>
+
+                    <div class="process">
+                        <div class="process-info">
+                            <div class="process-name">✉️ Email Generator</div>
+                            <div class="process-details">Creating personalized emails with AI</div>
+                        </div>
+                        <div class="process-status">
+                            <div class="status-dot stopped"></div>
+                            <button class="btn btn-sm btn-primary" onclick="startProcess('emailgen')">Start</button>
+                        </div>
+                    </div>
+
+                    <div class="process">
+                        <div class="process-info">
+                            <div class="process-name">📤 Email Sender</div>
+                            <div class="process-details">Sending campaigns via Gmail</div>
+                        </div>
+                        <div class="process-status">
+                            <div class="status-dot stopped"></div>
+                            <button class="btn btn-sm btn-primary" onclick="startProcess('sender')">Start</button>
+                        </div>
+                    </div>
+
+                    <div class="process">
+                        <div class="process-info">
+                            <div class="process-name">📊 Analytics</div>
+                            <div class="process-details">Tracking metrics and reporting</div>
+                        </div>
+                        <div class="process-status">
+                            <div class="status-dot stopped"></div>
+                            <button class="btn btn-sm btn-primary" onclick="startProcess('analytics')">Start</button>
+                        </div>
+                    </div>
+
+                    <h2 style="margin-top: 30px; margin-bottom: 16px; font-size: 16px; font-weight: 600;">Process Logs</h2>
+                    <div class="logs-container" id="processLogs">
+                        <div class="log-entry">
+                            <span class="log-time">[12:00]</span>
+                            All processes stopped and ready
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LEADS SECTION -->
+                <div id="leads" class="section">
+                    <h2 style="margin-bottom: 20px; font-size: 18px; font-weight: 600;">Lead Database</h2>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Business Name</th>
+                                    <th>Category</th>
+                                    <th>Location</th>
+                                    <th>Website</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leadsTable">
+                                <!-- Leads will be populated here -->
+                            </tbody>
+                                <tr>
+                                    <td>XYZ Interior Design</td>
+                                    <td>Interior Designers</td>
+                                    <td>Ahmedabad</td>
+                                    <td><a href="#" style="color: var(--color-primary);">xyz-interiors.com</a></td>
+                                    <td><span class="status-badge status-qualified">Qualified</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Quick Plumbing Services</td>
+                                    <td>Plumber</td>
+                                    <td>Mumbai</td>
+                                    <td><a href="#" style="color: var(--color-primary);">quickplumbing.com</a></td>
+                                    <td><span class="status-badge status-pending">Pending</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SETTINGS SECTION -->
+                <div id="settings" class="section">
+                    <h2 style="margin-bottom: 20px; font-size: 18px; font-weight: 600;">Settings</h2>
+
+                    <div style="max-width: 500px;">
+                        <div class="form-group">
+                            <label class="form-label">Gmail Email</label>
+                            <input type="email" class="form-input" value="your_email@gmail.com" id="gmailEmail">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Gmail Password (App)</label>
+                            <input type="password" class="form-input" value="••••••••" id="gmailPassword">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Ollama URL</label>
+                            <input type="text" class="form-input" value="http://localhost:11434" id="ollamaUrl">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Emails Per Day</label>
+                            <input type="number" class="form-input" value="50" id="emailsPerDay">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Scrape Category</label>
+                            <select class="form-select" id="scrapeCategory">
+                                <option>Interior Designers</option>
+                                <option>Plumbers</option>
+                                <option>Electricians</option>
+                                <option>Event Managers</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Scrape City</label>
+                            <select class="form-select" id="scrapeCity">
+                                <option>Ahmedabad</option>
+                                <option>Mumbai</option>
+                                <option>Delhi</option>
+                                <option>Bangalore</option>
+                                <option>Pune</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+                        <button class="btn btn-secondary" onclick="testConnection()">🔗 Test Connection</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+    <div id="runAllModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Start All Processes</span>
+                <button class="modal-close" onclick="closeModal('runAll')">×</button>
+            </div>
+            <p style="margin-bottom: 20px; color: var(--color-text-secondary); font-size: 14px;">
+                This will start all processes in sequence:
+            </p>
+            <ol style="margin-left: 20px; margin-bottom: 20px; color: var(--color-text-secondary); font-size: 14px; line-height: 1.8;">
+                <li>Web Scraper (2:00 AM daily)</li>
+                <li>Audit Engine (3:00 AM daily)</li>
+                <li>Email Generator (7:00 AM daily)</li>
+                <li>Email Sender (8:00 AM daily)</li>
+                <li>Analytics (11:00 PM daily)</li>
+            </ol>
+            <div class="progress">
+                <div class="progress-bar" id="processProgress"></div>
+            </div>
+            <p id="processStatus" style="margin-top: 10px; font-size: 12px; color: var(--color-text-secondary);">Waiting to start...</p>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('runAll')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmStartAll()">▶️ Start</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="newCampaignModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Create New Campaign</span>
+                <button class="modal-close" onclick="closeModal('newCampaign')">×</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Campaign Name</label>
+                <input type="text" class="form-input" placeholder="e.g., Interior Designers - Ahmedabad">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Category</label>
+                <select class="form-select">
+                    <option>Interior Designers</option>
+                    <option>Plumbers</option>
+                    <option>Electricians</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">City</label>
+                <select class="form-select">
+                    <option>Ahmedabad</option>
+                    <option>Mumbai</option>
+                    <option>Delhi</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Lead Count</label>
+                <input type="number" class="form-input" placeholder="100" value="100">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('newCampaign')">Cancel</button>
+                <button class="btn btn-primary" onclick="createCampaign()">✓ Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // NAVIGATION
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+            const section = document.getElementById(sectionId);
+            if (section) section.classList.add('active');
+            
+            // Find the button that was clicked or the one corresponding to the section
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                if (item.getAttribute('onclick').includes(sectionId)) {
+                    item.classList.add('active');
+                }
+            });
+
+            const titles = {
+                'dashboard': 'Dashboard',
+                'campaigns': 'Email Campaigns',
+                'processes': 'Running Processes',
+                'leads': 'Lead Database',
+                'settings': 'Settings'
+            };
+            document.getElementById('pageTitle').textContent = titles[sectionId] || 'Dashboard';
+            
+            if (sectionId === 'leads') fetchLeads();
+        }
+
+        // MODALS
+        function openModal(modalName) {
+            const modalMap = { 'runAll': 'runAllModal', 'newCampaign': 'newCampaignModal' };
+            const modalId = modalMap[modalName];
+            if (modalId) document.getElementById(modalId).classList.add('active');
+        }
+
+        function closeModal(modalName) {
+            const modalMap = { 'runAll': 'runAllModal', 'newCampaign': 'newCampaignModal' };
+            const modalId = modalMap[modalName];
+            if (modalId) document.getElementById(modalId).classList.remove('active');
+        }
+
+        // API CALLS
+        async function startProcess(processName) {
+            try {
+                const response = await fetch('/api/process/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ process: processName })
+                });
+                const data = await response.json();
+                if (data.status === 'started') {
+                    addLog(`✓ Started ${processName}`, 'success');
+                    runningProcesses[processName] = true;
+                    updateProcessStatus();
+                }
+            } catch (error) {
+                addLog(`✗ Error starting ${processName}: ${error}`, 'error');
+            }
+        }
+
+        async function stopProcess(processName) {
+            try {
+                const response = await fetch('/api/process/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ process: processName })
+                });
+                const data = await response.json();
+                if (data.status === 'stopped') {
+                    addLog(`✗ Stopped ${processName}`, 'error');
+                    runningProcesses[processName] = false;
+                    updateProcessStatus();
+                }
+            } catch (error) {
+                addLog(`✗ Error stopping ${processName}: ${error}`, 'error');
+            }
+        }
+
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                document.getElementById('totalLeads').textContent = data.totalLeads;
+                document.getElementById('qualifiedLeads').textContent = data.qualifiedLeads;
+                document.getElementById('emailsSent').textContent = data.emailsSent;
+                document.getElementById('replies').textContent = data.replies;
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+
+        async function fetchLeads() {
+            try {
+                const response = await fetch('/api/leads');
+                const leads = await response.json();
+                const tableBody = document.getElementById('leadsTable');
+                tableBody.innerHTML = '';
+                leads.forEach(lead => {
+                    const tr = document.createElement('tr');
+                    const statusClass = lead.status === 'qualified' ? 'status-qualified' : 'status-pending';
+                    tr.innerHTML = `
+                        <td>${lead.business_name}</td>
+                        <td>${lead.category}</td>
+                        <td>${lead.location}</td>
+                        <td><a href="${lead.website}" target="_blank" style="color: var(--color-primary);">${lead.website}</a></td>
+                        <td><span class="status-badge ${statusClass}">${lead.status}</span></td>
+                    `;
+                    tableBody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error fetching leads:', error);
+            }
+        }
+
+        function updateProcessStatus() {
+            const processItems = document.querySelectorAll('.process');
+            const processKeys = ['scraper', 'auditor', 'emailgen', 'sender'];
+            
+            processItems.forEach((item, index) => {
+                const key = processKeys[index];
+                if (!key) return;
+                const dot = item.querySelector('.status-dot');
+                const isRunning = runningProcesses[key];
+                dot.classList.remove('running', 'stopped');
+                dot.classList.add(isRunning ? 'running' : 'stopped');
+                
+                const btn = item.querySelector('.btn');
+                if (isRunning) {
+                    btn.textContent = 'Stop';
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-danger');
+                    btn.onclick = () => stopProcess(key);
+                } else {
+                    btn.textContent = 'Start';
+                    btn.classList.remove('btn-danger');
+                    btn.classList.add('btn-primary');
+                    btn.onclick = () => startProcess(key);
+                }
+            });
+        }
+
+        function confirmStartAll() {
+            closeModal('runAll');
+            addLog('Starting all processes...', 'warning');
+            const processes = ['scraper', 'auditor', 'emailgen', 'sender'];
+            let delay = 0;
+
+            processes.forEach((process, index) => {
+                setTimeout(() => {
+                    startProcess(process);
+                    const progress = ((index + 1) / processes.length) * 100;
+                    document.getElementById('processProgress').style.width = progress + '%';
+                }, delay);
+                delay += 2000;
+            });
+        }
+
+        // LOGS
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const logsContainer = document.getElementById('activityLogs');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            const typeClass = type === 'success' ? 'log-success' : type === 'error' ? 'log-error' : type === 'warning' ? 'log-warning' : '';
+            logEntry.innerHTML = `<span class="log-time">[${time}]</span> <span class="${typeClass}">${message}</span>`;
+            logsContainer.insertBefore(logEntry, logsContainer.firstChild);
+            if (logsContainer.children.length > 50) logsContainer.removeChild(logsContainer.lastChild);
+        }
+
+        function refreshData() {
+            addLog('🔄 Refreshing data...', 'info');
+            updateStats();
+            fetchLeads();
+        }
+
+        // INIT
+        updateStats();
+        updateProcessStatus();
+    </script>
+</body>
+</html>
