@@ -1,16 +1,75 @@
 [project]
 name = "web-contractor"
 version = "0.1.0"
-description = "Add your description here"
+description = "Lead generation and outreach automation system for web contractors"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
-    "apscheduler>=3.11.2",
-    "beautifulsoup4>=4.14.3",
     "flask>=3.1.2",
     "flask-cors>=6.0.2",
-    "pysqlite3>=0.6.0",
-    "python-dotenv>=1.2.1",
+    
+    # Web scraping and automation
     "requests>=2.32.5",
+    "beautifulsoup4>=4.14.3",
     "selenium>=4.40.0",
+    "webdriver-manager>=4.0.0",
+    
+    "pysqlite3>=0.6.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    
+    # Scheduling and background tasks
+    "apscheduler>=3.11.2",
+    
+    # Configuration and environment
+    "python-dotenv>=1.2.1",
+    
+    # API integrations
+    "googlemaps>=4.10.0",
+    "facebook-sdk>=3.1.0",
+    
+    # Data validation
+    "pydantic>=2.0.0",
+    
+    # Logging and monitoring
+    "loguru>=0.7.0",
+    
+    # Configuration
+    "pyyaml>=6.0",
+    
+    # Development and testing
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

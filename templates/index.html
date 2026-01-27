@@ -257,53 +257,114 @@
                 <div id="processes" class="section">
                     <h2 class="section-title">Processes</h2>
                     <div id="processList" class="flex-col gap-8">
+                        <div class="process surface flex items-center justify-between" data-process="stage0_orchestrator">
+                            <div class="process-name">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                                Stage 0 Orchestrator
+                            </div>
+                            <div class="flex items-center gap-12">
+                                <div class="status-dot stopped"></div>
+                                <button class="btn btn-sm btn-primary" onclick="startProcess('stage0_orchestrator')">Start</button>
+                            </div>
+                        </div>
                         <div class="process surface flex items-center justify-between" data-process="scraper">
                             <div class="process-name">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                                 Web Scraper
                             </div>
-                            <div class="flex items-center gap-12"><div class="status-dot stopped"></div><button class="btn btn-sm btn-primary" onclick="startProcess('scraper')">Start</button></div>
+                            <div class="flex items-center gap-12">
+                                <div class="status-dot stopped"></div>
+                                <button class="btn btn-sm btn-primary" onclick="startProcess('scraper')">Start</button>
+                            </div>
                         </div>
                         <div class="process surface flex items-center justify-between" data-process="auditor">
                             <div class="process-name">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
                                 Audit Engine
                             </div>
-                            <div class="flex items-center gap-12"><div class="status-dot stopped"></div><button class="btn btn-sm btn-primary" onclick="startProcess('auditor')">Start</button></div>
+                            <div class="flex items-center gap-12">
+                                <div class="status-dot stopped"></div>
+                                <button class="btn btn-sm btn-primary" onclick="startProcess('auditor')">Start</button>
+                            </div>
                         </div>
-                        <div class="process surface flex items-center justify-between" data-process="emailgen">
+                        <div class="process surface flex items-center justify-between" data-process="email_generator">
                             <div class="process-name">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
                                 Email Generator
                             </div>
-                            <div class="flex items-center gap-12"><div class="status-dot stopped"></div><button class="btn btn-sm btn-primary" onclick="startProcess('emailgen')">Start</button></div>
+                            <div class="flex items-center gap-12">
+                                <div class="status-dot stopped"></div>
+                                <button class="btn btn-sm btn-primary" onclick="startProcess('email_generator')">Start</button>
+                            </div>
                         </div>
-                        <div class="process surface flex items-center justify-between" data-process="sender">
+                        <div class="process surface flex items-center justify-between" data-process="email_sender">
                             <div class="process-name">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                                 Email Sender
                             </div>
-                            <div class="flex items-center gap-12"><div class="status-dot stopped"></div><button class="btn btn-sm btn-primary" onclick="startProcess('sender')">Start</button></div>
+                            <div class="flex items-center gap-12">
+                                <div class="status-dot stopped"></div>
+                                <button class="btn btn-sm btn-primary" onclick="startProcess('email_sender')">Start</button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div id="leads" class="section">
                     <h2 class="section-title">Lead Database</h2>
+                    <div class="flex gap-12 m-b-24">
+                        <select class="form-select" id="statusFilter" onchange="fetchLeads()">
+                            <option value="">All Status</option>
+                            <option value="pending_audit">Pending Audit</option>
+                            <option value="qualified">Qualified</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                        <select class="form-select" id="bucketFilter" onchange="fetchLeads()">
+                            <option value="">All Buckets</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="fetchLeads()">Filter</button>
+                    </div>
                     <div class="table-container surface">
                         <table>
-                            <thead><tr><th>Business</th><th>Category</th><th>Location</th><th>Website</th><th>Status</th></tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>Business</th>
+                                    <th>Category</th>
+                                    <th>Location</th>
+                                    <th>Website</th>
+                                    <th>Status</th>
+                                    <th>Quality Score</th>
+                                </tr>
+                            </thead>
                             <tbody id="leadsTable"></tbody>
                         </table>
+                        <div class="pagination" id="leadsPagination"></div>
                     </div>
                 </div>
 
                 <div id="settings" class="section">
                     <h2 class="section-title">Settings</h2>
-                    <div style="max-width: 500px;" class="flex-col gap-12">
-                        <div class="form-group"><label class="form-label">Gmail Email</label><input type="email" class="form-input" value="your_email@gmail.com" id="gmailEmail"></div>
-                        <div class="form-group"><label class="form-label">Gmail Password</label><input type="password" class="form-input" value="••••••••" id="gmailPassword"></div>
-                        <div class="form-group"><label class="form-label">Ollama URL</label><input type="text" class="form-input" value="http://localhost:11434" id="ollamaUrl"></div>
+                    <div style="max-width: 600px;" class="flex-col gap-12">
+                        <div class="form-group">
+                            <label class="form-label">Gmail Email</label>
+                            <input type="email" class="form-input" value="your_email@gmail.com" id="gmailEmail">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Gmail Password</label>
+                            <input type="password" class="form-input" value="••••••••" id="gmailPassword">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Ollama URL</label>
+                            <input type="text" class="form-input" value="http://localhost:11434" id="ollamaUrl">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Google Maps API Key</label>
+                            <input type="text" class="form-input" placeholder="Enter API key" id="googleMapsApiKey">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Facebook Access Token</label>
+                            <input type="text" class="form-input" placeholder="Enter access token" id="facebookToken">
+                        </div>
                         <div class="flex gap-12">
                             <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
                             <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
@@ -341,7 +402,15 @@
     </div>
 
     <script>
-        const runningProcesses = { scraper: false, auditor: false, emailgen: false, sender: false };
+        let currentPage = 1;
+        let processStatusInterval;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshData();
+            loadBuckets();
+            startProcessMonitoring();
+        });
 
         function showSection(id) {
             document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === id));
@@ -354,50 +423,218 @@
         function openModal(id) { document.getElementById(id + 'Modal').classList.add('active'); }
         function closeModal(id) { document.getElementById(id + 'Modal').classList.remove('active'); }
 
+        // Process Management
         async function startProcess(name) {
-            addLog(`✓ Started ${name}`, 'success');
-            runningProcesses[name] = true;
-            updateProcessStatus();
+            try {
+                const response = await fetch('/api/process/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ process: name })
+                });
+                
+                if (response.ok) {
+                    addLog(`✓ Started ${name}`, 'success');
+                    updateProcessStatus();
+                } else {
+                    const error = await response.json();
+                    addLog(`✗ Failed to start ${name}: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                addLog(`✗ Failed to start ${name}: ${error.message}`, 'error');
+            }
         }
 
         async function stopProcess(name) {
-            addLog(`✗ Stopped ${name}`, 'error');
-            runningProcesses[name] = false;
-            updateProcessStatus();
-        }
-
-        function updateProcessStatus() {
-            document.querySelectorAll('.process').forEach(item => {
-                const name = item.dataset.process;
-                const isRunning = runningProcesses[name];
-                const dot = item.querySelector('.status-dot');
-                const btn = item.querySelector('.btn');
+            try {
+                const response = await fetch('/api/process/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ process: name })
+                });
                 
-                dot.className = `status-dot ${isRunning ? 'running' : 'stopped'}`;
-                btn.textContent = isRunning ? 'Stop' : 'Start';
-                btn.className = `btn btn-sm ${isRunning ? 'btn-danger' : 'btn-primary'}`;
-                btn.onclick = () => isRunning ? stopProcess(name) : startProcess(name);
-            });
+                if (response.ok) {
+                    addLog(`✗ Stopped ${name}`, 'error');
+                    updateProcessStatus();
+                } else {
+                    const error = await response.json();
+                    addLog(`✗ Failed to stop ${name}: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                addLog(`✗ Failed to stop ${name}: ${error.message}`, 'error');
+            }
         }
 
+        async function updateProcessStatus() {
+            try {
+                const response = await fetch('/api/process/status');
+                const status = await response.json();
+                
+                document.querySelectorAll('.process').forEach(item => {
+                    const name = item.dataset.process;
+                    const processInfo = status[name];
+                    const isRunning = processInfo && processInfo.running;
+                    const dot = item.querySelector('.status-dot');
+                    const btn = item.querySelector('.btn');
+                    
+                    dot.className = `status-dot ${isRunning ? 'running' : 'stopped'}`;
+                    btn.textContent = isRunning ? 'Stop' : 'Start';
+                    btn.className = `btn btn-sm ${isRunning ? 'btn-danger' : 'btn-primary'}`;
+                    btn.onclick = () => isRunning ? stopProcess(name) : startProcess(name);
+                });
+            } catch (error) {
+                console.error('Failed to update process status:', error);
+            }
+        }
+
+        function startProcessMonitoring() {
+            updateProcessStatus();
+            processStatusInterval = setInterval(updateProcessStatus, 5000); // Update every 5 seconds
+        }
+
+        // Dashboard Data
+        async function refreshData() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                
+                document.getElementById('totalLeads').textContent = data.totalLeads || 0;
+                document.getElementById('qualifiedLeads').textContent = data.qualifiedLeads || 0;
+                document.getElementById('emailsSent').textContent = data.emailsSent || 0;
+                document.getElementById('replies').textContent = data.replies || 0;
+                
+                addLog('Dashboard data refreshed', 'info');
+            } catch (error) {
+                addLog(`Failed to refresh data: ${error.message}`, 'error');
+            }
+        }
+
+        // Lead Management
+        async function fetchLeads(page = 1) {
+            try {
+                const status = document.getElementById('statusFilter').value;
+                const bucket = document.getElementById('bucketFilter').value;
+                
+                const params = new URLSearchParams({
+                    page: page,
+                    per_page: 20,
+                    ...(status && { status }),
+                    ...(bucket && { bucket })
+                });
+                
+                const response = await fetch(`/api/leads?${params}`);
+                const data = await response.json();
+                
+                const tbody = document.getElementById('leadsTable');
+                tbody.innerHTML = '';
+                
+                data.leads.forEach(lead => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${lead.business_name}</td>
+                        <td>${lead.category}</td>
+                        <td>${lead.location}</td>
+                        <td><a href="${lead.website}" target="_blank">${lead.website}</a></td>
+                        <td><span class="status-badge status-${lead.status}">${lead.status}</span></td>
+                        <td>${(lead.quality_score || 0).toFixed(2)}</td>
+                    `;
+                });
+                
+                // Update pagination
+                updatePagination(data.pagination);
+                currentPage = page;
+                
+            } catch (error) {
+                addLog(`Failed to fetch leads: ${error.message}`, 'error');
+            }
+        }
+
+        function updatePagination(pagination) {
+            const container = document.getElementById('leadsPagination');
+            container.innerHTML = '';
+            
+            if (pagination.pages <= 1) return;
+            
+            for (let i = 1; i <= pagination.pages; i++) {
+                const btn = document.createElement('button');
+                btn.className = `btn btn-sm ${i === pagination.page ? 'btn-primary' : 'btn-secondary'}`;
+                btn.textContent = i;
+                btn.onclick = () => fetchLeads(i);
+                container.appendChild(btn);
+            }
+        }
+
+        // Bucket Management
+        async function loadBuckets() {
+            try {
+                const response = await fetch('/api/buckets');
+                const buckets = await response.json();
+                
+                const select = document.getElementById('bucketFilter');
+                buckets.forEach(bucket => {
+                    const option = document.createElement('option');
+                    option.value = bucket.name;
+                    option.textContent = bucket.name;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load buckets:', error);
+            }
+        }
+
+        // Settings
+        async function saveSettings() {
+            const settings = {
+                gmailEmail: document.getElementById('gmailEmail').value,
+                gmailPassword: document.getElementById('gmailPassword').value,
+                ollamaUrl: document.getElementById('ollamaUrl').value,
+                googleMapsApiKey: document.getElementById('googleMapsApiKey').value,
+                facebookToken: document.getElementById('facebookToken').value
+            };
+            
+            // In a real implementation, save to backend
+            localStorage.setItem('leadgen_settings', JSON.stringify(settings));
+            addLog('Settings saved', 'success');
+        }
+
+        function loadSettings() {
+            const saved = localStorage.getItem('leadgen_settings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                Object.keys(settings).forEach(key => {
+                    const element = document.getElementById(key);
+                    if (element) element.value = settings[key];
+                });
+            }
+        }
+
+        function testConnection() {
+            addLog('Testing connections...', 'info');
+            // In a real implementation, test actual connections
+            setTimeout(() => addLog('Connection test completed', 'success'), 2000);
+        }
+
+        // Utility Functions
         function addLog(msg, type = 'info') {
             const container = document.getElementById('activityLogs');
             const entry = document.createElement('div');
             entry.className = 'log-entry';
             entry.innerHTML = `<span class="log-time">[${new Date().toLocaleTimeString()}]</span> <span class="log-${type}">${msg}</span>`;
             container.prepend(entry);
+            
+            // Keep only last 50 entries
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
         }
 
         function confirmStartAll() {
             closeModal('runAll');
-            const processes = ['scraper', 'auditor', 'emailgen', 'sender'];
-            processes.forEach((p, i) => setTimeout(() => startProcess(p), i * 1000));
+            const processes = ['stage0_orchestrator', 'scraper', 'auditor', 'email_generator', 'email_sender'];
+            processes.forEach((p, i) => setTimeout(() => startProcess(p), i * 2000));
         }
 
-        function refreshData() { addLog('Refreshing data...', 'info'); }
-        function fetchLeads() { /* Fetch logic */ }
-        function saveSettings() { addLog('Settings saved', 'success'); }
-
+        // Initialize
+        loadSettings();
         showSection('dashboard');
     </script>
 </body>

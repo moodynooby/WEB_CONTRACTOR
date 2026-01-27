@@ -1,21 +1,38 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_from_directory
 from flask_cors import CORS
 import json
 import threading
 import subprocess
 import sqlite3
 import os
+import time
+from datetime import datetime, timedelta
+from typing import Dict, List
+
+# Import new pipeline orchestrator
+from core.pipeline_orchestrator import PipelineOrchestrator
+from agents.quality_control_agent import QualityControlAgent
+
+# Import legacy components for backward compatibility
+from core.db import get_database_stats, log_scraping_session, record_analytic
+from agents.email_sender import send_pending_emails
 
 app = Flask(__name__)
 CORS(app)
 
-# Store process states
+# Initialize pipeline orchestrator
+pipeline = PipelineOrchestrator()
+quality_control = QualityControlAgent()
+
+# Store process states and threads
 processes = {
-    'scraper': False,
-    'auditor': False,
-    'email_generator': False,
-    'email_sender': False,
-    'analytics': False
+    'full_pipeline': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'stage0': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'stage_a': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'stage_b': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'stage_c': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'quality_control': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
+    'email_sender': {'running': False, 'thread': None, 'start_time': None, 'progress': 0}
 }
 
 def get_db_connection():
@@ -33,28 +50,32 @@ def index():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
-    
+    """Get comprehensive pipeline statistics"""
     try:
-        cursor = conn.cursor()
+        pipeline_status = pipeline.get_pipeline_status()
+        db_stats = pipeline_status['database_stats']
+        quality_dashboard = pipeline_status['quality_dashboard']
         
-        total_leads = cursor.execute('SELECT COUNT(*) FROM leads').fetchone()[0]
-        qualified_leads = cursor.execute('SELECT COUNT(*) FROM audits WHERE qualified = 1').fetchone()[0]
-        emails_sent = cursor.execute('SELECT COUNT(*) FROM email_campaigns WHERE status = "sent"').fetchone()[0]
-        replies = cursor.execute('SELECT COUNT(*) FROM email_campaigns WHERE replied = 1').fetchone()[0]
+        # Extract key metrics for frontend
+        total_leads = db_stats.get('total_leads', 0)
+        qualified_leads = quality_dashboard.get('qualified_leads', 0)
+        emails_sent = db_stats.get('emails_by_status', {}).get('sent', 0)
+        replies = db_stats.get('emails_by_status', {}).get('replied', 0)
+        
+        # Get monthly progress from Stage 0
+        monthly_progress = pipeline_status['stage_stats'].get('stage0', {})
         
         return jsonify({
             'totalLeads': total_leads,
             'qualifiedLeads': qualified_leads,
             'emailsSent': emails_sent,
-            'replies': replies
+            'replies': replies,
+            'monthlyProgress': monthly_progress,
+            'pipelineState': pipeline_status['pipeline_state'],
+            'qualityIssues': quality_dashboard.get('recent_alerts', 0)
         })
-    except sqlite3.Error as e:
-        return jsonify({'error': f'Database query failed: {e}'}), 500
-    finally:
-        conn.close()
+    except Exception as e:
+        return jsonify({'error': f'Stats retrieval failed: {e}'}), 500
 
 @app.route('/api/leads', methods=['GET'])
 def get_leads():
@@ -64,11 +85,49 @@ def get_leads():
     
     try:
         cursor = conn.cursor()
-        leads = cursor.execute('''
-            SELECT l.business_name, l.category, l.location, l.website, l.status 
+        
+        # Get query parameters
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        status = request.args.get('status', '')
+        bucket = request.args.get('bucket', '')
+        
+        # Build query
+        where_clause = "WHERE 1=1"
+        params = []
+        
+        if status:
+            where_clause += " AND l.status = ?"
+            params.append(status)
+        
+        if bucket:
+            where_clause += " AND l.bucket = ?"
+            params.append(bucket)
+        
+        # Get total count
+        count_query = f"SELECT COUNT(*) FROM leads l {where_clause}"
+        total = cursor.execute(count_query, params).fetchone()[0]
+        
+        # Get paginated results
+        offset = (page - 1) * per_page
+        query = f'''
+            SELECT l.business_name, l.category, l.location, l.website, l.status, l.quality_score, l.bucket, l.source
             FROM leads l
-        ''').fetchall()
-        return jsonify([dict(ix) for ix in leads])
+            {where_clause}
+            ORDER BY l.created_at DESC
+            LIMIT ? OFFSET ?
+        '''
+        leads = cursor.execute(query, params + [per_page, offset]).fetchall()
+        
+        return jsonify({
+            'leads': [dict(ix) for ix in leads],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'pages': (total + per_page - 1) // per_page
+            }
+        })
     except sqlite3.Error as e:
         return jsonify({'error': f'Database query failed: {e}'}), 500
     finally:
@@ -76,35 +135,224 @@ def get_leads():
 
 @app.route('/api/process/start', methods=['POST'])
 def start_process():
+    """Start a pipeline process"""
     process_key = request.json['process']
     
-    # Map frontend names to filenames
-    mapping = {
-        'scraper': 'scraper.py',
-        'auditor': 'auditor.py',
-        'emailgen': 'email_generator.py',
-        'sender': 'email_sender.py',
-        'analytics': 'analytics.py'
-    }
+    if process_key not in processes:
+        return jsonify({'error': 'Invalid process'}), 400
     
-    script_name = mapping.get(process_key)
-    if not script_name:
-        return jsonify({'status': 'error', 'message': 'Unknown process'}), 400
+    if processes[process_key]['running']:
+        return jsonify({'error': 'Process already running'}), 400
+    
+    def run_process():
+        try:
+            processes[process_key]['running'] = True
+            processes[process_key]['start_time'] = datetime.now()
+            processes[process_key]['progress'] = 0
+            
+            if process_key == 'full_pipeline':
+                # Run complete pipeline
+                results = pipeline.run_full_pipeline(manual_mode=True)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'stage0':
+                # Run Stage 0 only
+                results = pipeline.run_individual_stage('stage0', daily_mode=True)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'stage_a':
+                # Run Stage A only
+                results = pipeline.run_individual_stage('stage_a', max_queries_per_source=50)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'stage_b':
+                # Run Stage B only
+                results = pipeline.run_individual_stage('stage_b', batch_size=50)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'stage_c':
+                # Run Stage C only
+                results = pipeline.run_individual_stage('stage_c', batch_size=50)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'quality_control':
+                # Run quality control only
+                results = pipeline.run_individual_stage('quality_control', comprehensive=True)
+                processes[process_key]['progress'] = 100
+                
+            elif process_key == 'email_sender':
+                # Send pending emails
+                sent_count = send_pending_emails()
+                processes[process_key]['progress'] = 100
+                
+        except Exception as e:
+            print(f"Process {process_key} failed: {e}")
+        finally:
+            processes[process_key]['running'] = False
+            processes[process_key]['thread'] = None
+    
+    thread = threading.Thread(target=run_process)
+    thread.daemon = True
+    thread.start()
+    
+    processes[process_key]['thread'] = thread
+    
+    return jsonify({'status': 'started'})
 
-    processes[process_key] = True
+@app.route('/api/process/status', methods=['GET'])
+def get_process_status():
+    status = {}
+    for key, process in processes.items():
+        status[key] = {
+            'running': process['running'],
+            'progress': process['progress'],
+            'start_time': process['start_time'].isoformat() if process['start_time'] else None
+        }
+    return jsonify(status)
 
-    # Start actual Python script
-    subprocess.Popen(['python3', script_name])
+@app.route('/api/buckets', methods=['GET'])
+def get_buckets():
+    """Get all lead buckets with their configurations"""
+    try:
+        buckets = pipeline.stage0.bucket_manager.buckets
+        bucket_list = []
+        for bucket in buckets:
+            bucket_list.append({
+                'name': bucket.name,
+                'categories': bucket.categories,
+                'conversion_probability': bucket.conversion_probability,
+                'monthly_target': bucket.monthly_target,
+                'intent_profile': bucket.intent_profile
+            })
+        return jsonify(bucket_list)
+    except Exception as e:
+        return jsonify({'error': f'Bucket retrieval failed: {e}'}), 500
 
-    return jsonify({'status': 'started', 'process': process_key})
+@app.route('/api/analytics', methods=['GET'])
+def get_analytics():
+    """Get detailed analytics data"""
+    try:
+        pipeline_status = pipeline.get_pipeline_status()
+        
+        # Get scraping logs for last 7 days
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source, DATE(scrape_date) as date, 
+                   SUM(leads_found) as found, 
+                   SUM(leads_saved) as saved
+            FROM scraping_logs 
+            WHERE scrape_date >= date('now', '-7 days')
+            GROUP BY source, DATE(scrape_date)
+            ORDER BY date DESC
+        ''')
+        scraping_data = cursor.fetchall()
+        
+        # Get analytics metrics
+        cursor.execute('''
+            SELECT metric_name, metric_value, source, date_recorded
+            FROM analytics 
+            WHERE date_recorded >= date('now', '-30 days')
+            ORDER BY date_recorded DESC
+        ''')
+        analytics_data = cursor.fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            'scraping_logs': [dict(ix) for ix in scraping_data],
+            'analytics': [dict(ix) for ix in analytics_data],
+            'pipeline_status': pipeline_status,
+            'quality_dashboard': pipeline_status['quality_dashboard']
+        })
+    except Exception as e:
+        return jsonify({'error': f'Analytics retrieval failed: {e}'}), 500
 
 @app.route('/api/process/stop', methods=['POST'])
 def stop_process():
-    process_name = request.json['process']
-    processes[process_name] = False
-    # Note: This doesn't actually kill the process yet, just updates state.
-    # For a full implementation, we'd track PIDs.
+    process_key = request.json['process']
+    
+    if process_key not in processes:
+        return jsonify({'error': 'Invalid process'}), 400
+    
+    if not processes[process_key]['running']:
+        return jsonify({'error': 'Process not running'}), 400
+    
+    # Note: This is a simple implementation
+    # In production, you'd want proper thread cleanup
+    processes[process_key]['running'] = False
+    processes[process_key]['progress'] = 0
+    
     return jsonify({'status': 'stopped'})
+
+# Add new API endpoints for pipeline management
+
+@app.route('/api/pipeline/status', methods=['GET'])
+def get_pipeline_status():
+    """Get comprehensive pipeline status"""
+    try:
+        status = pipeline.get_pipeline_status()
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'error': f'Pipeline status retrieval failed: {e}'}), 500
+
+@app.route('/api/pipeline/recommendations', methods=['GET'])
+def get_pipeline_recommendations():
+    """Get pipeline optimization recommendations"""
+    try:
+        recommendations = pipeline.get_pipeline_recommendations()
+        return jsonify({'recommendations': recommendations})
+    except Exception as e:
+        return jsonify({'error': f'Recommendations retrieval failed: {e}'}), 500
+
+@app.route('/api/quality/check', methods=['POST'])
+def run_quality_check():
+    """Run quality control check"""
+    if processes['quality_control']['running']:
+        return jsonify({'error': 'Quality control already running'}), 400
+    
+    def run_qc():
+        try:
+            processes['quality_control']['running'] = True
+            processes['quality_control']['start_time'] = datetime.now()
+            processes['quality_control']['progress'] = 0
+            
+            results = quality_control.run_quality_check(comprehensive=True)
+            processes['quality_control']['progress'] = 100
+            
+        except Exception as e:
+            print(f"Quality control failed: {e}")
+        finally:
+            processes['quality_control']['running'] = False
+            processes['quality_control']['thread'] = None
+    
+    thread = threading.Thread(target=run_qc)
+    thread.daemon = True
+    thread.start()
+    
+    processes['quality_control']['thread'] = thread
+    
+    return jsonify({'status': 'started'})
+
+@app.route('/api/stages', methods=['GET'])
+def get_stages():
+    """Get available pipeline stages and their status"""
+    stages = []
+    for stage_key, config in pipeline.stage_configs.items():
+        stage_info = {
+            'key': stage_key,
+            'name': stage_key.replace('_', ' ').title(),
+            'enabled': config['enabled'],
+            'schedule': config['schedule'],
+            'priority': config['priority'],
+            'running': processes.get(stage_key, {}).get('running', False)
+        }
+        stages.append(stage_info)
+    
+    return jsonify({'stages': stages})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
