@@ -37,6 +37,72 @@ class AuditResult:
     qualification_status: bool
     audit_timestamp: datetime
     estimated_fix_cost: str
+    llm_analysis: Optional[Dict] = None
+
+class OllamaAuditor:
+    """LLM-based technical critique and hook generator"""
+    
+    def __init__(self):
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        self.ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+        self.model_name = os.getenv('OLLAMA_MODEL', 'llama3.2')
+        self.enabled = self._test_connection()
+
+    def _test_connection(self) -> bool:
+        """Test connection to Ollama"""
+        try:
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+
+    def analyze_website(self, business_name: str, metrics: Dict, soup: BeautifulSoup) -> Dict:
+        """Get LLM-based qualitative analysis and outreach hooks"""
+        if not self.enabled:
+            return {"error": "Ollama not available"}
+
+        # Extract context
+        title = soup.find('title').text.strip() if soup.find('title') else "N/A"
+        headings = [h.text.strip() for h in soup.find_all(['h1', 'h2'])[:5]]
+        
+        prompt = f"""Analyze this website's technical and UX state for a cold outreach campaign.
+BUSINESS: {business_name}
+WEBSITE TITLE: {title}
+TOP HEADINGS: {headings}
+METRICS:
+- Response Time: {metrics.get('response_time', 'N/A')}s
+- Has SSL: {metrics.get('has_ssl', 'N/A')}
+- Mobile Ready: {metrics.get('has_viewport', 'N/A')}
+- Google Analytics: {metrics.get('has_google_analytics', 'N/A')}
+
+TASK:
+1. Provide a 2-sentence technical critique (be specific but professional).
+2. Identify the 'Business Impact' of these issues (how it loses them money).
+3. Generate 3 unique 'Personalized Hooks' for an email subject line or opening.
+
+FORMAT: Return ONLY a JSON object with:
+{{
+  "critique": "...",
+  "business_impact": "...",
+  "hooks": ["...", "...", "..."]
+}}"""
+
+        try:
+            response = requests.post(f"{self.ollama_url}/api/generate", json={
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json"
+            }, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json().get('response', '{}')
+                return json.loads(result)
+            return {"error": f"Ollama error: {response.status_code}"}
+        except Exception as e:
+            return {"error": str(e)}
 
 class TechnicalAuditor:
     """Core technical auditing engine"""
@@ -46,6 +112,9 @@ class TechnicalAuditor:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
+        
+        # Initialize LLM Auditor
+        self.llm_auditor = OllamaAuditor()
         
         # SSL context for HTTPS sites
         self.ssl_context = ssl.create_default_context()
@@ -176,6 +245,9 @@ class TechnicalAuditor:
             # Estimate fix cost
             estimated_fix_cost = self._estimate_fix_cost(issues)
             
+            # Perform LLM analysis
+            llm_analysis = self.llm_auditor.analyze_website(business_name, technical_metrics, soup)
+            
         except Exception as e:
             print(f"Error auditing {url}: {e}")
             issues.append(WebsiteIssue(
@@ -199,7 +271,8 @@ class TechnicalAuditor:
             technical_metrics=technical_metrics,
             qualification_status=qualification_status,
             audit_timestamp=datetime.now(),
-            estimated_fix_cost=estimated_fix_cost
+            estimated_fix_cost=estimated_fix_cost,
+            llm_analysis=llm_analysis
         )
     
     def _test_protocols(self, url: str) -> Tuple[Optional[requests.Response], Optional[requests.Response]]:
@@ -487,8 +560,8 @@ class StageBAuditor:
         
         cursor.execute('''
         INSERT OR REPLACE INTO audits
-        (lead_id, overall_score, issues_json, technical_metrics, qualified, audit_date, estimated_fix_cost)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (lead_id, overall_score, issues_json, technical_metrics, qualified, audit_date, estimated_fix_cost, llm_analysis)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             audit_result.lead_id,
             audit_result.overall_score,
@@ -496,7 +569,8 @@ class StageBAuditor:
             metrics_json,
             audit_result.qualification_status,
             audit_result.audit_timestamp.isoformat(),
-            audit_result.estimated_fix_cost
+            audit_result.estimated_fix_cost,
+            json.dumps(audit_result.llm_analysis) if audit_result.llm_analysis else None
         ))
         
         conn.commit()
@@ -637,5 +711,11 @@ if __name__ == '__main__':
         print(f"\nIssues Found ({len(audit_result.issues)}):")
         for issue in audit_result.issues:
             print(f"  - {issue.issue_type} ({issue.severity}): {issue.description}")
+            
+        if audit_result.llm_analysis:
+            print(f"\n=== LLM ANALYSIS ===")
+            print(f"Critique: {audit_result.llm_analysis.get('critique', 'N/A')}")
+            print(f"Business Impact: {audit_result.llm_analysis.get('business_impact', 'N/A')}")
+            print(f"Hooks: {', '.join(audit_result.llm_analysis.get('hooks', []))}")
     else:
         print("Invalid choice")

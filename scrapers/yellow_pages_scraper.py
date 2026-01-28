@@ -1,186 +1,165 @@
-import requests
-from bs4 import BeautifulSoup
+"""
+Yellow Pages Scraper using Selenium
+Scrapes business leads from local directories
+"""
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import time
 import random
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional
+from urllib.parse import quote
 from scrapers.base_scraper import BaseScraper
 
 class YellowPagesScraper(BaseScraper):
-    """Enhanced Yellow Pages and local directory scraper with bucket integration"""
+    """Enhanced Yellow Pages scraper using Selenium automation"""
     
-    def __init__(self):
+    def __init__(self, headless: bool = True):
         super().__init__('yellow_pages')
+        self.headless = headless
+        self.driver = None
         
-        # Indian business directories
-        self.directories = {
-            'yellow_co': {
-                'base_url': 'https://yellow.co.in',
-                'search_path': '/search',
-                'enabled': True
-            },
-            'justdial': {
-                'base_url': 'https://www.justdial.com',
-                'search_path': '/search',
-                'enabled': False  # Requires more complex handling
-            },
-            'sulekha': {
-                'base_url': 'https://www.sulekha.com',
-                'search_path': '/search',
-                'enabled': False  # Requires more complex handling
-            }
-        }
-    
+    def _setup_driver(self) -> webdriver.Chrome:
+        """Setup Chrome WebDriver with options"""
+        chrome_options = Options()
+        if self.headless:
+            chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--ignore-certificate-errors")
+        
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            return driver
+        except Exception as e:
+            print(f"Failed to setup WebDriver: {e}")
+            return None
+
     def scrape_yellow_directory(self, max_queries: int = 20) -> List[Dict]:
-        """Enhanced scraper with bucket-based targeting"""
-        
-        queries = self.bucket_manager.get_search_queries()
-        all_leads = []
-        
-        # Limit queries for testing
-        queries = queries[:max_queries]
-        
-        for i, query in enumerate(queries):
-            print(f"\n[{i+1}/{len(queries)}] Searching: {query['query']}")
+        """Main scraping function for Yellow Pages using discovery plan"""
+        self.driver = self._setup_driver()
+        if not self.driver:
+            return []
             
-            # Try different directories
-            for dir_name, dir_config in self.directories.items():
-                if not dir_config['enabled']:
-                    continue
-                    
-                leads = self._scrape_directory(dir_name, query)
+        all_leads = []
+        try:
+            queries = self.bucket_manager.get_search_queries()
+            targeted_queries = queries[:max_queries]
+            
+            print(f"Executing {len(targeted_queries)} Yellow Pages searches...")
+            
+            for i, query in enumerate(targeted_queries):
+                print(f"\n[{i+1}/{len(targeted_queries)}] Searching: {query['query']}")
+                leads = self._scrape_directory(query)
                 all_leads.extend(leads)
                 
                 if leads:
-                    print(f"  ✓ Found {len(leads)} leads from {dir_name}")
+                    print(f"  ✓ Found {len(leads)} leads")
+                    
+                if i < len(targeted_queries) - 1:
+                    time.sleep(random.uniform(5, 10))
+                    
+        finally:
+            if self.driver:
+                self.driver.quit()
                 
-                # Add delay between directories
-                if dir_name != list(self.directories.keys())[-1]:
-                    time.sleep(random.uniform(3, 6))
-            
-            # Add delay between queries
-            if i < len(queries) - 1:
-                time.sleep(random.uniform(5, 8))
-        
         return all_leads
-    
-    def _scrape_directory(self, directory: str, query: Dict) -> List[Dict]:
-        """Scrape a specific directory"""
-        
-        if directory == 'yellow_co':
-            return self._scrape_yellow_co(query)
-        elif directory == 'justdial':
-            return self._scrape_justdial(query)
-        elif directory == 'sulekha':
-            return self._scrape_sulekha(query)
-        
-        return []
-    
-    def _scrape_yellow_co(self, query: Dict) -> List[Dict]:
-        """Scrape yellow.co.in"""
-        search_term = query['query'].replace(' ', '+')
-        url = f"https://yellow.co.in/search/{search_term}"
+
+    def _scrape_directory(self, query: Dict) -> List[Dict]:
+        """Scrape a specific directory using the query"""
+        search_term = query['query']
+        # Try a generic yellow pages search if specific URL fails
+        search_url = f"https://www.yellowpages.in/search/{query['city'].lower()}/{search_term.replace(' ', '-')}"
         
         try:
-            # Use ethical_scraper.make_request which handles rate limiting and robots.txt
-            response = self.ethical_scraper.make_request(url, timeout=10)
+            self.rate_limiter.wait_if_needed()
+            self.driver.get(search_url)
             
-            if not response:
+            # Wait for results
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".listing, .result, .business-card"))
+                )
+            except TimeoutException:
                 return []
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
+
+            listings = self.driver.find_elements(By.CSS_SELECTOR, ".listing, .result, .business-card")
             leads = []
             
-            # Look for listing containers
-            listings = soup.find_all('div', class_=re.compile(r'listing|result|business'))
-            
-            for listing in listings[:50]:  # Limit per search
+            for listing in listings[:20]:
                 try:
-                    lead = self._parse_yellow_co_listing(listing, query)
+                    lead = self._parse_listing(listing, query)
                     if lead:
                         leads.append(lead)
                 except Exception:
                     continue
-            
             return leads
             
         except Exception as e:
-            print(f"    ✗ Error scraping yellow.co.in: {e}")
+            print(f"  ✗ Error searching Yellow Pages: {e}")
             return []
-    
-    def _parse_yellow_co_listing(self, listing, query: Dict) -> Dict:
-        """Parse individual listing from yellow.co.in"""
-        
-        # Extract website first (primary requirement)
-        website_elem = listing.find('a', href=re.compile(r'http'))
-        website = website_elem.get('href') if website_elem else ''
-        
-        if not website:
+
+    def _parse_listing(self, listing, query: Dict) -> Optional[Dict]:
+        """Parse individual listing card"""
+        try:
+            # Dynamic selectors based on common patterns
+            name = listing.find_element(By.CSS_SELECTOR, "h2, h3, .title, .name").text.strip()
+            
+            # Try to get website
+            try:
+                website = listing.find_element(By.CSS_SELECTOR, "a[href^='http']:not([href*='yellowpages'])").get_attribute('href')
+            except:
+                website = ''
+                
+            # Try to get phone
+            try:
+                phone = listing.find_element(By.CSS_SELECTOR, ".phone, .contact, .mobile").text.strip()
+                phone = re.sub(r'[^\d+]', '', phone)
+            except:
+                phone = ''
+                
+            if not website and not phone:
+                return None
+                
+            category = query['category']
+            city = self.extract_city_from_text(listing.text, target_city=query.get('city'))
+            
+            quality_score = self.calculate_quality_score({
+                'category': category,
+                'location': city,
+                'website': website,
+                'phone': phone
+            })
+            
+            return {
+                'business_name': name,
+                'phone': phone,
+                'website': website,
+                'location': city,
+                'category': category,
+                'source': 'yellow_pages',
+                'quality_score': quality_score,
+                'bucket': query.get('bucket', ''),
+                'tier': query.get('tier', ''),
+                'priority': query.get('priority', '')
+            }
+        except Exception:
             return None
-        
-        # Extract business name
-        name_elem = listing.find(['h2', 'h3', 'h4'], class_=re.compile(r'name|title|business'))
-        name = name_elem.text.strip() if name_elem else ''
-        
-        # Extract phone
-        phone_elem = listing.find(['span', 'div'], class_=re.compile(r'phone|mobile|contact'))
-        phone = phone_elem.text.strip() if phone_elem else ''
-        if phone:
-            phone = re.sub(r'[^\d+]', '', phone)
-        
-        # Calculate quality score
-        quality_score = self.calculate_quality_score({
-            'category': query['category'],
-            'location': query['city'],
-            'website': website,
-            'phone': phone
-        })
-        
-        return {
-            'business_name': name,
-            'phone': phone,
-            'website': website,
-            'location': query['city'],
-            'category': query['category'],
-            'source': 'yellow_co',
-            'quality_score': quality_score,
-            'bucket': query.get('bucket', ''),
-            'tier': query.get('tier', ''),
-            'priority': query.get('priority', '')
-        }
-    
-    def _scrape_justdial(self, query: Dict) -> List[Dict]:
-        """Placeholder for JustDial scraping"""
-        return []
-    
-    def _scrape_sulekha(self, query: Dict) -> List[Dict]:
-        """Placeholder for Sulekha scraping"""
-        return []
-
-# Legacy function for backward compatibility
-def scrape_yellow_directory():
-    """Legacy function - use YellowPagesScraper class instead"""
-    scraper = YellowPagesScraper()
-    leads = scraper.scrape_yellow_directory(max_queries=10)
-    scraper.save_to_database(leads)
-
-# Legacy function for backward compatibility
-def add_to_db(leads):
-    """Legacy function - use YellowPagesScraper.save_to_database instead"""
-    scraper = YellowPagesScraper()
-    scraper.save_to_database(leads)
 
 if __name__ == '__main__':
-    # Enhanced usage
-    scraper = YellowPagesScraper()
-    
+    scraper = YellowPagesScraper(headless=True)
     print("=== YELLOW PAGES LEAD SCRAPER ===")
-    
-    # Scrape leads based on bucket definitions
-    leads = scraper.scrape_yellow_directory(max_queries=15)
-    
+    leads = scraper.scrape_yellow_directory(max_queries=2)
     if leads:
         print(f"\nFound {len(leads)} total leads")
         scraper.save_to_database(leads)
     else:
-        print("No leads found")
+        print("No leads found.")

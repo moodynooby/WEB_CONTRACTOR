@@ -288,14 +288,14 @@ Technology Specialist''',
         
         return templates
     
-    def generate_email_with_ollama(self, business_name: str, issues: List[Dict], bucket_name: str) -> str:
+    def generate_email_with_ollama(self, business_name: str, issues: List[Dict], bucket_name: str, llm_analysis: Optional[Dict] = None) -> str:
         """Generate personalized email using Ollama LLM"""
         
         # Select best template
         template = self._select_best_template(issues, bucket_name)
         
         # Create prompt for Ollama
-        prompt = self._create_prompt(business_name, issues, template)
+        prompt = self._create_prompt(business_name, issues, template, llm_analysis)
         
         try:
             response = requests.post(f"{self.ollama_url}/api/generate", json={
@@ -342,13 +342,25 @@ Technology Specialist''',
         # Fallback to first available template
         return list(bucket_templates.values())[0]
     
-    def _create_prompt(self, business_name: str, issues: List[Dict], template: EmailTemplate) -> str:
+    def _create_prompt(self, business_name: str, issues: List[Dict], template: EmailTemplate, llm_analysis: Optional[Dict] = None) -> str:
         """Create prompt for Ollama"""
         issues_text = '\n'.join([f"- {issue['description']}" for issue in issues[:3]])
         
+        llm_context = ""
+        if llm_analysis:
+            critique = llm_analysis.get('critique', '')
+            impact = llm_analysis.get('business_impact', '')
+            hooks = ", ".join(llm_analysis.get('hooks', []))
+            llm_context = f"""
+TECHNICAL CRITIQUE FROM AUDITOR: {critique}
+BUSINESS IMPACT: {impact}
+PERSONALIZED HOOKS TO USE: {hooks}
+"""
+
         prompt = f"""Write a short cold email (110-130 words exactly) to {business_name}.
 
 BUSINESS TYPE: {template.bucket_name}
+{llm_context}
 ISSUES ON THEIR SITE:
 {issues_text}
 
@@ -359,13 +371,13 @@ TEMPLATE GUIDELINES:
 {template.body_template}
 
 REQUIREMENTS:
-1. Acknowledge their business briefly
-2. Mention 1-2 specific issues from the list
-3. Offer a clear solution (no hard selling)
-4. End with a simple, specific call-to-action
-5. Keep it conversational but {template.tone}
-6. Exactly 110-130 words
-7. Personalized to their business type
+1. Acknowledge their business briefly.
+2. USE ONE OF THE PERSONALIZED HOOKS provided above.
+3. Mention the specific 'BUSINESS IMPACT' identified by the auditor.
+4. Offer a clear solution (no hard selling).
+5. End with a simple, specific call-to-action.
+6. conversational but {template.tone}.
+7. Exactly 110-130 words.
 
 Write the email now:"""
 
@@ -430,7 +442,7 @@ class StageCEmailGenerator:
         cursor = conn.cursor()
         
         cursor.execute('''
-        SELECT l.id, l.business_name, l.bucket, a.issues_json, a.overall_score
+        SELECT l.id, l.business_name, l.bucket, a.issues_json, a.overall_score, a.llm_analysis
         FROM leads l
         JOIN audits a ON l.id = a.lead_id
         WHERE a.qualified = 1 
@@ -453,16 +465,17 @@ class StageCEmailGenerator:
         results = []
         generated_count = 0
         
-        for i, (lead_id, business_name, bucket, issues_json, overall_score) in enumerate(qualified_leads):
+        for i, (lead_id, business_name, bucket, issues_json, overall_score, llm_analysis_json) in enumerate(qualified_leads):
             print(f"\n[{i+1}/{len(qualified_leads)}] Generating email for: {business_name}")
             
             try:
-                # Parse issues
+                # Parse issues and llm_analysis
                 issues = json.loads(issues_json) if issues_json else []
+                llm_analysis = json.loads(llm_analysis_json) if llm_analysis_json else None
                 
                 # Generate email
                 email_body = self.ollama_generator.generate_email_with_ollama(
-                    business_name, issues, bucket or 'Interior Designers & Architects'
+                    business_name, issues, bucket or 'Interior Designers & Architects', llm_analysis
                 )
                 
                 # Create subject line

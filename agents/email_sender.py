@@ -23,7 +23,7 @@ def send_email(to_email, subject, body):
         <html><body style="font-family: Arial; line-height: 1.6;">
             <p>Hi,</p>
             <p>{body}</p>
-            <p>Best regards,<br>Your Name<br>
+            <p>Best regards,<br>Manas<br>
             <a href="https://man27.netlify.app">Web Services</a></p>
         </body></html>
         """

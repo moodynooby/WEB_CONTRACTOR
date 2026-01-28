@@ -10,39 +10,10 @@ class BaseScraper:
     """
     Base class for all scrapers, providing common utilities for:
     - Database operations
-    - Rate limiting
-    - City extraction
-    - Category determination
-    - User agent rotation
+    - Rate limiting (via core.rate_limiter)
+    - Quality scoring
     """
     
-    # Common Indian cities for extraction
-    INDIAN_CITIES = [
-        'Mumbai', 'Delhi', 'Bangalore', 'Bengaluru', 'Chennai', 'Kolkata', 'Hyderabad', 'Pune',
-        'Ahmedabad', 'Jaipur', 'Lucknow', 'Indore', 'Surat', 'Nagpur', 'Bhopal',
-        'Vadodara', 'Rajkot', 'Gandhinagar', 'Chandigarh', 'Coimbatore', 'Kochi',
-        'Visakhapatnam', 'Thiruvananthapuram', 'Noida', 'Gurgaon', 'Gurugram'
-    ]
-
-    # Common category keywords mapping
-    CATEGORY_KEYWORDS = {
-        'Interior Designer': ['interior design', 'interior designer', 'home decor', 'furniture', 'decor'],
-        'Architect': ['architect', 'architecture', 'building design', 'planner'],
-        'Plumber': ['plumber', 'plumbing', 'pipe repair', 'sanitary'],
-        'Electrician': ['electrician', 'electrical', 'wiring', 'power'],
-        'HVAC Service': ['hvac', 'air conditioning', 'ac repair', 'heating', 'cooling'],
-        'Pest Control': ['pest control', 'exterminator', 'termite', 'fumigation'],
-        'Cleaning Service': ['cleaning', 'house keeping', 'deep cleaning', 'sanitization'],
-        'Event Management': ['event', 'wedding', 'party planner', 'corporate event', 'conference'],
-        'Photography Studio': ['photography', 'photo studio', 'photographer', 'wedding photo'],
-        'Marketing Consultant': ['marketing', 'digital marketing', 'advertising', 'branding', 'seo'],
-        'Graphics Designer': ['graphic', 'logo design', 'illustrator', 'visual design', 'creative'],
-        'Accountant': ['accountant', 'ca', 'chartered accountant', 'audit', 'taxation', 'bookkeeping'],
-        'Tax Consultant': ['tax consultant', 'gst', 'income tax', 'tax return'],
-        'Legal Services': ['lawyer', 'advocate', 'attorney', 'legal', 'law firm', 'notary'],
-        'IT Services': ['software', 'web development', 'app development', 'it solution', 'tech'],
-    }
-
     def __init__(self, source_name: str):
         self.source_name = source_name
         self.bucket_manager = LeadBucketManager()
@@ -51,10 +22,6 @@ class BaseScraper:
         self.session = self.ethical_scraper.session
         # Expose rate_limiter directly for non-HTTP scrapers (like Selenium)
         self.rate_limiter = self.ethical_scraper.rate_limiter
-
-    def _rate_limit(self) -> None:
-        """Enforce rate limits using the centralized limiter"""
-        self.rate_limiter.wait_if_needed()
 
     def save_to_database(self, leads: List[Dict], source: Optional[str] = None) -> int:
         """
@@ -94,8 +61,6 @@ class BaseScraper:
                 ))
                 saved_count += 1
             except sqlite3.IntegrityError:
-                # Duplicate business name, skip
-                # (In a real app, we might want to update fields instead of skipping)
                 continue
             except Exception as e:
                 print(f"Error saving lead {lead.get('business_name')}: {e}")
@@ -106,35 +71,46 @@ class BaseScraper:
         print(f"\n✓ Saved {saved_count} new leads to database from {current_source}")
         return saved_count
 
-    def extract_city(self, text: str) -> str:
-        """Extract Indian city from text (address/location)"""
+    def calculate_quality_score(self, lead_data: Dict) -> float:
+        """Wrapper around bucket_manager's quality score"""
+        return self.bucket_manager.calculate_lead_quality_score(lead_data)
+
+    def extract_city_from_text(self, text: str, target_city: Optional[str] = None) -> str:
+        """
+        Extract city from text. If target_city is provided, checks for it.
+        Otherwise uses a general extraction logic.
+        """
         if not text:
-            return 'Unknown'
+            return target_city or 'Unknown'
             
-        text_lower = text.lower()
-        for city in self.INDIAN_CITIES:
-            if city.lower() in text_lower:
-                return city
-        
-        # Fallback: try to extract from last part of comma-separated string
+        if target_city and target_city.lower() in text.lower():
+            return target_city
+            
+        # Fallback to simple comma parsing
         parts = text.split(',')
         if len(parts) >= 2:
             return parts[-2].strip()
             
-        return 'Unknown'
+        return target_city or 'Unknown'
 
     def determine_category(self, text: str, default: str = 'Other') -> str:
-        """Determine category based on keywords in text"""
-        text_lower = text.lower()
+        """
+        Dynamically determine category based on LeadBucketManager definitions.
+        """
+        if not text:
+            return default
+            
+        text = text.lower()
         
-        for category, keywords in self.CATEGORY_KEYWORDS.items():
-            for keyword in keywords:
-                if keyword in text_lower:
+        # Check all buckets and their categories
+        for bucket in self.bucket_manager.buckets:
+            for category in bucket.categories:
+                if category.lower() in text:
                     return category
-                    
+            
+            # Also check bucket name keywords
+            if bucket.name.lower() in text:
+                return bucket.categories[0]
+                
         return default
-
-    def calculate_quality_score(self, lead_data: Dict) -> float:
-        """Wrapper around bucket_manager's quality score"""
-        return self.bucket_manager.calculate_lead_quality_score(lead_data)
 

@@ -194,7 +194,7 @@ class GoogleMapsScraper(BaseScraper):
             rating = place.get('rating', 0)
             
             # Extract city from address
-            city = self.extract_city(address)
+            city = self.extract_city_from_text(address)
             
             # Determine category
             category = self.determine_category(f"{search_query} {name}", default='Local Service Provider')

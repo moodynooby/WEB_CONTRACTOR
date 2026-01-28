@@ -1,208 +1,186 @@
 """
-Facebook Business Pages Scraper
-Uses Graph API and web scraping for business page discovery
+Facebook Business Pages Scraper using Selenium
+Finds business pages through public search and extracts basic info
 """
 
-import requests
-import json
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import time
 import random
 import re
 from typing import List, Dict, Optional
+from urllib.parse import quote
 from scrapers.base_scraper import BaseScraper
 
 class FacebookScraper(BaseScraper):
-    """Facebook Business Pages scraper with API and web fallback"""
+    """Facebook Business Pages scraper using Selenium automation"""
     
-    def __init__(self, access_token: Optional[str] = None):
+    def __init__(self, headless: bool = True):
         super().__init__('facebook')
-        self.access_token = access_token
+        self.headless = headless
+        self.driver = None
+        self.base_url = "https://www.facebook.com"
         
-        # API endpoints
-        self.graph_api_url = "https://graph.facebook.com/v18.0"
-        self.web_search_url = "https://www.facebook.com/search/pages/"
-    
-    def search_pages_api(self, query: str, limit: int = 50) -> List[Dict]:
-        """Search Facebook pages using Graph API"""
-        if not self.access_token:
-            print("Warning: No Facebook access token provided, using web fallback")
-            return self._scrape_web_fallback(query)
+    def _setup_driver(self) -> webdriver.Chrome:
+        """Setup Chrome WebDriver with options"""
+        chrome_options = Options()
+        if self.headless:
+            chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
         
-        params = {
-            'q': query,
-            'type': 'page',
-            'limit': limit,
-            'fields': 'name,category,about,phone,website,location,fan_count',
-            'access_token': self.access_token
-        }
+        # Specific Facebook user agent
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
         
         try:
-            # Use ethical scraper for rate limiting
-            response = self.ethical_scraper.make_request(
-                f"{self.graph_api_url}/search", 
-                params=params
-            )
-            
-            if not response:
-                return []
-                
-            data = response.json()
-            
-            if 'error' in data:
-                print(f"Facebook API Error: {data['error']['message']}")
-                return []
-            
-            pages = []
-            for page_data in data.get('data', []):
-                page = self._process_page_data(page_data, query)
-                if page:
-                    pages.append(page)
-            
-            return pages
-            
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            return driver
         except Exception as e:
-            print(f"Facebook API request failed: {e}")
-            return []
-    
-    def _process_page_data(self, page_data: Dict, search_query: str) -> Optional[Dict]:
-        """Process and validate Facebook page data"""
+            print(f"Failed to setup WebDriver: {e}")
+            return None
+
+    def _scrape_web_fallback(self, query: str) -> List[Dict]:
+        """Scrape Facebook search results for pages"""
+        if not self.driver:
+            self.driver = self._setup_driver()
+            if not self.driver:
+                return []
+
         try:
-            name = page_data.get('name', '')
-            category = page_data.get('category', '')
-            about = page_data.get('about', '')
-            phone = page_data.get('phone', '')
-            website = page_data.get('website', '')
-            location = page_data.get('location', {})
-            fan_count = page_data.get('fan_count', 0)
+            encoded_query = quote(query)
+            # Facebook page search URL pattern
+            search_url = f"https://www.facebook.com/search/pages/?q={encoded_query}"
             
-            # Skip if no website
-            if not website:
+            self.rate_limiter.wait_if_needed()
+            self.driver.get(search_url)
+            
+            # Wait for results
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='feed'], div[aria-label='Search Results']"))
+                )
+            except TimeoutException:
+                print(f"  ✗ Timeout waiting for results for query: {query}")
+                return []
+
+            # Scroll to load a few results
+            for _ in range(2):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(2, 4))
+
+            # Find page elements (Facebook uses dynamic classes, but role='article' or specific child structures are common)
+            # This is a generic approach for public search
+            page_elements = self.driver.find_elements(By.CSS_SELECTOR, "div[role='article']")
+            
+            leads = []
+            for elem in page_elements[:15]:  # Limit per query
+                try:
+                    lead = self._parse_page_element(elem, query)
+                    if lead:
+                        leads.append(lead)
+                except Exception:
+                    continue
+                    
+            return leads
+
+        except Exception as e:
+            print(f"  ✗ Error scraping Facebook web: {e}")
+            return []
+
+    def _parse_page_element(self, element, query_text: str) -> Optional[Dict]:
+        """Parse individual page item from search results"""
+        try:
+            # Facebook's DOM is complex; these selectors might need refinement
+            # Look for titles/links
+            link_elem = element.find_element(By.CSS_SELECTOR, "a[role='link']")
+            name = link_elem.text.strip()
+            page_url = link_elem.get_attribute('href')
+            
+            if not name or not page_url:
                 return None
+                
+            # Basic info often appears in spans
+            info_text = element.text
             
-            # Extract city from location
-            city = location.get('city', 'Unknown') if location else 'Unknown'
+            # Use BaseScraper to determine data
+            # In web results, we often don't have direct phone/website without visiting
+            # For now, we capture what's visible
             
-            # Determine business category using BaseScraper's method
-            # Combine text fields for better matching
-            context_text = f"{search_query} {category} {about} {name}"
-            business_category = self.determine_category(context_text, default=category or 'Other')
+            # Determine category (often mentioned in search results)
+            # Default to query's category if not found
+            category = self.determine_category(info_text, default='Business')
             
-            # Calculate quality score using BaseScraper's wrapper
-            quality_score = self.calculate_quality_score({
-                'category': business_category,
-                'location': city,
-                'website': website,
-                'phone': phone
-            })
+            # Calculate quality score
+            lead_data = {
+                'business_name': name,
+                'category': category,
+                'source': 'facebook',
+                'facebook_url': page_url
+            }
             
-            # Boost score for pages with good engagement
-            if fan_count > 1000:
-                quality_score += 0.05
-            if fan_count > 5000:
-                quality_score += 0.05
+            quality_score = self.calculate_quality_score(lead_data)
             
             return {
                 'business_name': name,
-                'category': business_category,
-                'location': city,
-                'phone': phone,
-                'website': website,
-                'facebook_category': category,
-                'about': about,
-                'fan_count': fan_count,
-                'source': 'facebook_api',
-                'quality_score': min(quality_score, 1.0),
-                'search_query': search_query
+                'category': category,
+                'location': 'Unknown',
+                'website': '', # Would require visiting page
+                'source': 'facebook',
+                'facebook_url': page_url,
+                'quality_score': quality_score
             }
-            
-        except Exception as e:
-            print(f"Error processing Facebook page data: {e}")
+        except Exception:
             return None
-    
-    def _scrape_web_fallback(self, query: str) -> List[Dict]:
-        """Fallback web scraping when API is not available"""
-        print(f"Using web fallback for Facebook search: {query}")
-        # This would implement web scraping of Facebook search results
-        return []
-    
+
     def scrape_by_buckets(self, max_queries: int = 15) -> List[Dict]:
-        """Scrape Facebook pages based on bucket definitions"""
-        queries = self.bucket_manager.get_search_queries()
+        """Main scraping function for Facebook using discovery plan"""
+        self.driver = self._setup_driver()
+        if not self.driver:
+            return []
+            
         all_leads = []
-        
-        # Limit queries for testing
-        queries = queries[:max_queries]
-        
-        print(f"Executing {len(queries)} Facebook searches...")
-        
-        for i, query in enumerate(queries):
-            print(f"\n[{i+1}/{len(queries)}] Searching: {query['query']}")
-            
-            pages = self.search_pages_api(query['query'], limit=25)
-            
-            for page in pages:
-                # Add bucket information
-                page['bucket'] = query.get('bucket', '')
-                page['tier'] = query.get('tier', '')
-                page['priority'] = query.get('priority', '')
-                all_leads.append(page)
-            
-            if pages:
-                print(f"  ✓ Found {len(pages)} Facebook pages")
-            
-            # Add delay between searches
-            if i < len(queries) - 1:
-                time.sleep(random.uniform(2, 4))
-        
-        return all_leads
-    
-    def get_page_insights(self, page_id: str) -> Dict:
-        """Get additional insights for a Facebook page (API required)"""
-        if not self.access_token:
-            return {}
-        
-        params = {
-            'metric': 'page_impressions,page_engaged_users,page_fan_adds',
-            'period': 'week',
-            'access_token': self.access_token
-        }
-        
         try:
-            response = self.ethical_scraper.make_request(
-                f"{self.graph_api_url}/{page_id}/insights",
-                params=params
-            )
-            return response.json() if response else {}
-        except Exception as e:
-            print(f"Error getting page insights: {e}")
-            return {}
+            queries = self.bucket_manager.get_search_queries()
+            targeted_queries = queries[:max_queries]
+            
+            print(f"Executing {len(targeted_queries)} Facebook searches...")
+            
+            for i, query in enumerate(targeted_queries):
+                print(f"\n[{i+1}/{len(targeted_queries)}] Searching: {query['query']}")
+                leads = self._scrape_web_fallback(query['query'])
+                
+                # Enrich with query data
+                for lead in leads:
+                    lead['bucket'] = query.get('bucket', '')
+                    lead['category'] = query.get('category', lead['category'])
+                    lead['location'] = lead.get('location') if lead.get('location') != 'Unknown' else query.get('city', 'Unknown')
+                    
+                all_leads.extend(leads)
+                if leads:
+                    print(f"  ✓ Found {len(leads)} Facebook pages")
+                    
+                if i < len(targeted_queries) - 1:
+                    time.sleep(random.uniform(5, 10))
+                    
+        finally:
+            if self.driver:
+                self.driver.quit()
+                
+        return all_leads
 
 if __name__ == '__main__':
-    # Demo usage
-    scraper = FacebookScraper()  # Add access token as parameter if available
-    
+    scraper = FacebookScraper(headless=True)
     print("=== FACEBOOK BUSINESS PAGES SCRAPER ===")
-    print("Note: For best results, provide a Facebook Graph API access token")
-    print("Get token from: https://developers.facebook.com/")
-    
-    # Scrape Facebook pages
-    leads = scraper.scrape_by_buckets(max_queries=10)
-    
+    leads = scraper.scrape_by_buckets(max_queries=2)
     if leads:
         print(f"\nFound {len(leads)} total leads")
-        
-        # Show sample leads
-        print("\n=== SAMPLE LEADS ===")
-        for lead in leads[:5]:
-            print(f"{lead['business_name']} ({lead['category']})")
-            print(f"  Location: {lead['location']}")
-            print(f"  Website: {lead['website']}")
-            print(f"  Facebook Category: {lead.get('facebook_category', 'N/A')}")
-            print(f"  Fans: {lead.get('fan_count', 0):,}")
-            print(f"  Quality Score: {lead.get('quality_score', 0):.2f}")
-            print()
-        
-        # Save to database
         scraper.save_to_database(leads)
     else:
-        print("No leads found. Consider adding Facebook API access token for better results.")
+        print("No leads found.")

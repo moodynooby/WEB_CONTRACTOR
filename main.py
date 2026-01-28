@@ -353,6 +353,111 @@ def get_stages():
         stages.append(stage_info)
     
     return jsonify({'stages': stages})
+    
+@app.route('/api/review/list', methods=['GET'])
+def list_reviewable_emails():
+    """List pending emails for leads that passed Stage B quality filter"""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        # Filter for qualified leads with score >= 0.7
+        query = '''
+            SELECT 
+                ec.id as campaign_id,
+                l.id as lead_id,
+                l.business_name,
+                l.website,
+                l.email as lead_email,
+                a.overall_score,
+                a.llm_analysis,
+                ec.subject,
+                ec.body,
+                l.bucket
+            FROM email_campaigns ec
+            JOIN leads l ON ec.lead_id = l.id
+            JOIN audits a ON l.id = a.lead_id
+            WHERE ec.status = 'pending'
+            AND a.overall_score >= 0.7
+            AND a.qualified = 1
+            ORDER BY a.overall_score DESC
+        '''
+        cursor.execute(query)
+        emails = [dict(ix) for ix in cursor.fetchall()]
+        
+        # Parse JSON in llm_analysis if present
+        for email in emails:
+            if email['llm_analysis']:
+                try:
+                    email['llm_analysis'] = json.loads(email['llm_analysis'])
+                except:
+                    pass
+                    
+        return jsonify({'emails': emails})
+    except sqlite3.Error as e:
+        return jsonify({'error': f'Database query failed: {e}'}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/review/action', methods=['POST'])
+def review_action():
+    """Perform action on a pending email (send, ignore, edit)"""
+    data = request.json
+    campaign_id = data.get('campaignId')
+    action = data.get('action') # 'send', 'ignore'
+    body = data.get('body') # Optional revised body
+    
+    if not campaign_id or not action:
+        return jsonify({'error': 'Missing campaignId or action'}), 400
+        
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        
+        if action == 'ignore':
+            cursor.execute('UPDATE email_campaigns SET status = "ignored" WHERE id = ?', (campaign_id,))
+            conn.commit()
+            return jsonify({'status': 'ignored'})
+            
+        elif action == 'send':
+            # Get email details first
+            cursor.execute('''
+                SELECT l.email, l.business_name, l.id as lead_id, ec.subject, ec.body 
+                FROM email_campaigns ec 
+                JOIN leads l ON ec.lead_id = l.id 
+                WHERE ec.id = ?
+            ''', (campaign_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                return jsonify({'error': 'Campaign not found'}), 404
+                
+            lead_email = row['email'] or f"contact@{row['business_name'].lower().replace(' ', '')}.com"
+            subject = row['subject']
+            final_body = body if body else row['body']
+            
+            from agents.email_sender import send_email
+            if send_email(lead_email, subject, final_body):
+                cursor.execute('''
+                    UPDATE email_campaigns 
+                    SET status = "sent", body = ?, sent_at = ? 
+                    WHERE id = ?
+                ''', (final_body, datetime.now().isoformat(), campaign_id))
+                conn.commit()
+                return jsonify({'status': 'sent'})
+            else:
+                return jsonify({'error': 'SMTP failure'}), 500
+                
+        return jsonify({'error': 'Invalid action'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

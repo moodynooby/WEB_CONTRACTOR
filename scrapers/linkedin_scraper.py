@@ -28,14 +28,7 @@ class LinkedInScraper(BaseScraper):
         # LinkedIn specific settings
         self.linkedin_base_url = "https://www.linkedin.com"
         self.search_url = "https://www.linkedin.com/search/results/all/"
-        
-        # B2B focused categories
-        self.b2b_categories = [
-            "Event Management", "Photography Studio", "Marketing Consultant", 
-            "Graphics Designer", "Digital Marketing Agency", "Business Consulting",
-            "IT Services", "Software Development", "Web Design", "Content Marketing"
-        ]
-    
+
     def _setup_driver(self) -> webdriver.Chrome:
         """Setup Chrome WebDriver with options"""
         chrome_options = Options()
@@ -90,18 +83,10 @@ class LinkedInScraper(BaseScraper):
             company_url = link_elem.get_attribute('href') if link_elem else ''
             
             # Extract city from location using BaseScraper
-            city = self.extract_city(location)
+            city = self.extract_city_from_text(location, target_city=search_query.get('city'))
             
-            # Determine category using BaseScraper
-            context_text = f"{search_query['category']} {description} {name}"
-            category = self.determine_category(context_text, default=search_query['category'])
-            
-            # Skip if not in target categories (approximate match)
-            is_b2b = any(cat.lower() in category.lower() for cat in self.b2b_categories)
-            if not is_b2b:
-                # If exact match fails, check if determined category is close
-                if category not in self.b2b_categories:
-                     return None
+            # Use category from query
+            category = search_query['category']
             
             # Try to visit company page for website
             website = self._extract_company_website(company_url) if company_url else ''
@@ -181,15 +166,14 @@ class LinkedInScraper(BaseScraper):
         all_leads = []
         
         try:
-            # Get B2B focused queries
+            # Get queries from bucket manager or provided plan
             queries = self.bucket_manager.get_search_queries()
-            b2b_queries = [q for q in queries if q['category'] in self.b2b_categories]
-            b2b_queries = b2b_queries[:max_searches]
+            targeted_queries = queries[:max_searches]
             
-            print(f"Executing {len(b2b_queries)} LinkedIn searches...")
+            print(f"Executing {len(targeted_queries)} LinkedIn searches...")
             
-            for i, query in enumerate(b2b_queries):
-                print(f"\n[{i+1}/{len(b2b_queries)}] Searching: {query['query']}")
+            for i, query in enumerate(targeted_queries):
+                print(f"\n[{i+1}/{len(targeted_queries)}] Searching: {query['query']}")
                 
                 leads = self._search_linkedin(query)
                 all_leads.extend(leads)
@@ -198,7 +182,7 @@ class LinkedInScraper(BaseScraper):
                     print(f"  ✓ Found {len(leads)} companies")
                 
                 # Longer delay between LinkedIn searches
-                if i < len(b2b_queries) - 1:
+                if i < len(targeted_queries) - 1:
                     time.sleep(random.uniform(10, 20))
             
         except Exception as e:
