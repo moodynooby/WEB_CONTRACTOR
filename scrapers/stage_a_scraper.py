@@ -163,7 +163,7 @@ class StageAScraper:
         self.sessions[source] = session
         return session
     
-    def scrape_with_anti_blocking(self, source: str, max_queries: int = 50) -> Dict:
+    def scrape_with_anti_blocking(self, source: str, max_queries: int = 50, plan: List[Dict] = None) -> Dict:
         """Main scraping method with anti-blocking"""
         print(f"=== STAGE A: INTELLIGENT SCRAPER - {source.upper()} ===")
         
@@ -182,9 +182,9 @@ class StageAScraper:
         
         try:
             if source == 'google_maps':
-                leads = self._scrape_google_maps_safe(max_queries, session)
+                leads = self._scrape_google_maps_safe(max_queries, session, plan=plan)
             elif source == 'yellow_pages':
-                leads = self._scrape_yellow_pages_safe(max_queries, session)
+                leads = self._scrape_yellow_pages_safe(max_queries, session, plan=plan)
             elif source == 'linkedin':
                 leads = self._scrape_linkedin_safe(max_queries, session)
             elif source == 'facebook':
@@ -216,10 +216,10 @@ class StageAScraper:
         
         return results
     
-    def _scrape_google_maps_safe(self, max_queries: int, session: ScrapingSession) -> List[Dict]:
+    def _scrape_google_maps_safe(self, max_queries: int, session: ScrapingSession, plan: List[Dict] = None) -> List[Dict]:
         """Safe Google Maps scraping with anti-blocking"""
         leads = []
-        queries = self.bucket_manager.get_search_queries()
+        queries = plan if plan else self.bucket_manager.get_search_queries()
         queries = queries[:max_queries]
         
         for i, query in enumerate(queries):
@@ -259,10 +259,10 @@ class StageAScraper:
         
         return leads
     
-    def _scrape_yellow_pages_safe(self, max_queries: int, session: ScrapingSession) -> List[Dict]:
+    def _scrape_yellow_pages_safe(self, max_queries: int, session: ScrapingSession, plan: List[Dict] = None) -> List[Dict]:
         """Safe Yellow Pages scraping with anti-blocking"""
         leads = []
-        queries = self.bucket_manager.get_search_queries()
+        queries = plan if plan else self.bucket_manager.get_search_queries()
         queries = queries[:max_queries]
         
         for i, query in enumerate(queries):
@@ -380,11 +380,15 @@ class StageAScraper:
         if results['blocked_domains']:
             print(f"Blocked Domains: {', '.join(results['blocked_domains'])}")
     
-    def run_all_sources(self, max_queries_per_source: int = 50) -> Dict:
-        """Run all scraping sources with anti-blocking"""
-        print("=== STAGE A: INTELLIGENT SCRAPER - ALL SOURCES ===")
+    def run_all_sources(self, max_queries_per_source: int = 50, plan: List[Dict] = None) -> Dict:
+        """Run all scraping sources with anti-blocking using an optional plan"""
+        print("=== STAGE A: EXECUTION - SCRAPING DISCOVERIES ===")
         
         sources = ['google_maps', 'yellow_pages', 'linkedin', 'facebook']
+        # Filter sources based on plan if provided
+        if plan:
+            print(f"Executing plan with {len(plan)} targeted queries")
+        
         all_results = {
             'total_leads_found': 0,
             'total_leads_saved': 0,
@@ -397,22 +401,27 @@ class StageAScraper:
         
         for source in sources:
             print(f"\n{'='*50}")
-            result = self.scrape_with_anti_blocking(source, max_queries_per_source)
+            # For now, only Google and Yellow Pages use the granular query plan
+            plan_for_source = [q for q in plan if q.get('source', 'google_maps') == source] if plan else None
+            
+            if source == 'google_maps':
+                result = self.scrape_with_anti_blocking(source, max_queries_per_source, plan=plan_for_source)
+            elif source == 'yellow_pages':
+                result = self.scrape_with_anti_blocking(source, max_queries_per_source, plan=plan_for_source)
+            else:
+                result = self.scrape_with_anti_blocking(source, max_queries_per_source)
+                
             all_results['source_results'][source] = result
             all_results['total_leads_found'] += result['leads_found']
             all_results['total_leads_saved'] += result['leads_saved']
             all_results['blocked_domains_total'].update(result['blocked_domains'])
             
-            # Add delay between sources
             if source != sources[-1]:
-                time.sleep(30)  # 30 second delay between sources
+                time.sleep(10) # reduced delay
         
         all_results['total_duration'] = time.time() - start_time
         all_results['blocked_domains_total'] = list(all_results['blocked_domains_total'])
-        
-        # Print final summary
         self._print_final_summary(all_results)
-        
         return all_results
     
     def _print_final_summary(self, results: Dict):

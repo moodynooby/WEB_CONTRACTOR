@@ -105,35 +105,31 @@ class PipelineOrchestrator:
         }
         
         try:
-            # Stage 0: Lead Discovery & Bucket Definition
+            # Stage 0: Planning & Target Generation
             if self.stage_configs['stage0']['enabled']:
                 self.pipeline_state['current_stage'] = 'Stage 0'
-                print(f"\n📍 STAGE 0: LEAD DISCOVERY & BUCKET DEFINITION")
+                print(f"\n📍 STAGE 0: PLANNING & TARGET GENERATION")
                 
                 try:
-                    stage0_results = self.stage0.run_full_discovery(daily_mode=not manual_mode)
+                    plan = self.stage0.get_discovery_plan(daily_mode=not manual_mode)
                     results['stages_completed'].append('Stage 0')
-                    results['total_leads_generated'] = stage0_results.get('total_leads_saved', 0)
-                    print(f"✅ Stage 0 completed: {results['total_leads_generated']} leads")
+                    print(f"✅ Stage 0 completed: Generated plan with {len(plan)} queries")
+                    
+                    # Stage A: Execution - Intelligent Scraper
+                    if self.stage_configs['stage_a']['enabled']:
+                        self.pipeline_state['current_stage'] = 'Stage A'
+                        print(f"\n🔍 STAGE A: EXECUTION - INTELLIGENT SCRAPER")
+                        
+                        stage_a_results = self.stage_a.run_all_sources(
+                            max_queries_per_source=50 if manual_mode else 100,
+                            plan=plan
+                        )
+                        results['stages_completed'].append('Stage A')
+                        results['total_leads_generated'] = stage_a_results.get('total_leads_saved', 0)
+                        print(f"✅ Stage A completed: {results['total_leads_generated']} leads saved")
                 except Exception as e:
-                    error_msg = f"Stage 0 failed: {str(e)}"
-                    results['stages_failed'].append('Stage 0')
-                    results['errors'].append(error_msg)
-                    print(f"❌ {error_msg}")
-            
-            # Stage A: Intelligent Scraper with Anti-Blocking
-            if self.stage_configs['stage_a']['enabled']:
-                self.pipeline_state['current_stage'] = 'Stage A'
-                print(f"\n🔍 STAGE A: INTELLIGENT SCRAPER WITH ANTI-BLOCKING")
-                
-                try:
-                    stage_a_results = self.stage_a.run_all_sources(max_queries_per_source=50 if manual_mode else 100)
-                    results['stages_completed'].append('Stage A')
-                    results['total_leads_generated'] += stage_a_results.get('total_leads_saved', 0)
-                    print(f"✅ Stage A completed: {stage_a_results.get('total_leads_saved', 0)} additional leads")
-                except Exception as e:
-                    error_msg = f"Stage A failed: {str(e)}"
-                    results['stages_failed'].append('Stage A')
+                    error_msg = f"Discovery flow failed: {str(e)}"
+                    results['stages_failed'].append('Stage 0/A')
                     results['errors'].append(error_msg)
                     print(f"❌ {error_msg}")
             
@@ -230,8 +226,9 @@ class PipelineOrchestrator:
         
         try:
             if stage_name == 'stage0':
-                results = self.stage0.run_full_discovery(**kwargs)
+                results = self.stage0.get_discovery_plan(**kwargs)
             elif stage_name == 'stage_a':
+                # If stage_a is run individually, it can get its own plan if none provided
                 results = self.stage_a.run_all_sources(**kwargs)
             elif stage_name == 'stage_b':
                 results = self.stage_b.audit_pending_leads(**kwargs)

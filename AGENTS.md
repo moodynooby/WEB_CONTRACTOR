@@ -27,8 +27,8 @@ Cloud Components
 └─ Google Sheets (campaign tracking)
 
 
-Stage 0: Lead Discovery & Bucket Definition
-Stage A: Intelligent Scraper with Anti-Blocking
+Stage 0: Planning & Analytics (What do we need to scrape today?)
+Stage A: Execution (Go scrape it!)
 Stage B: "Needs Update" Auditor Engine
 Stage C: AI-Powered Messaging
 Quality Control Agent
