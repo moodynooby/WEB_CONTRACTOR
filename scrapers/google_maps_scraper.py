@@ -62,9 +62,17 @@ class GoogleMapsScraper(BaseScraper):
             # Wait for results to load
             try:
                 self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='feed']")))
-            except:
-                print("Results feed not found. Query might be too specific or captcha appeared.")
-                return []
+            except Exception as e:
+                print(f"Results feed not found: {e}. Trying alternative approach...")
+                # Try to find results using different selectors
+                try:
+                    result_elements = self.driver.find_elements(By.CSS_SELECTOR, "div[data-result-index], a[href*='/maps/place/']")
+                    if not result_elements:
+                        print("No results found with alternative selectors either.")
+                        return []
+                except:
+                    print("No results found. Query might be too specific or captcha appeared.")
+                    return []
 
             # Scroll to load more results
             feed = self.driver.find_element(By.CSS_SELECTOR, "div[role='feed']")
@@ -79,9 +87,25 @@ class GoogleMapsScraper(BaseScraper):
                     break
                 last_height = new_height
 
-            # Extract result links
-            result_elements = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/maps/place/']")
-            print(f"Found {len(result_elements)} potential matches")
+            # Extract result links with multiple selector attempts
+            selectors = [
+                "a[href*='/maps/place/']",
+                "div[data-result-index] a",
+                "div[role='article'] a",
+                "a[jsaction*='mouseover']"
+            ]
+            
+            result_elements = []
+            for selector in selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    result_elements = elements
+                    print(f"Found {len(elements)} results using selector: {selector}")
+                    break
+            
+            if not result_elements:
+                print("No results found with any selector")
+                return []
             
             places = []
             seen_urls = set()
@@ -184,9 +208,9 @@ class GoogleMapsScraper(BaseScraper):
         try:
             website = place.get('website', '')
             
-            # Skip if no website (primary requirement)
-            if not website:
-                return None
+            # Allow businesses without websites for demo (comment out for production)
+            # if not website:
+            #     return None
             
             name = place.get('name', '')
             address = place.get('address', '')
@@ -272,27 +296,4 @@ class GoogleMapsScraper(BaseScraper):
         return all_leads
 
 if __name__ == '__main__':
-    # Demo usage
     scraper = GoogleMapsScraper()
-    
-    print("=== GOOGLE MAPS SELENIUM LEAD SCRAPER ===")
-    
-    # Scrape a few queries for testing
-    leads = scraper.scrape_by_buckets(max_queries_per_bucket=1)
-    
-    if leads:
-        print(f"\nFound {len(leads)} total leads")
-        
-        # Show sample leads
-        print("\n=== SAMPLE LEADS ===")
-        for lead in leads[:5]:
-            print(f"{lead['business_name']} ({lead['category']})")
-            print(f"  Location: {lead['city']}")
-            print(f"  Website: {lead['website']}")
-            print(f"  Quality Score: {lead.get('quality_score', 0):.2f}")
-            print()
-        
-        # Save to database
-        scraper.save_to_database(leads)
-    else:
-        print("No leads found using Selenium.")

@@ -4,8 +4,11 @@ Defines geographic and industry segments with highest conversion probability
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import json
+import random
+import os
+from datetime import datetime
 
 @dataclass
 class GeographicSegment:
@@ -28,9 +31,11 @@ class LeadBucket:
 class LeadBucketManager:
     """Manages lead bucket definitions and targeting strategies"""
     
-    def __init__(self):
+    def __init__(self, config_file: Optional[str] = None):
+        self.config_file = config_file or os.getenv('LEAD_BUCKETS_CONFIG', 'lead_buckets_config.json')
         self.geographic_focus = self._define_geographic_focus()
         self.buckets = self._define_buckets()
+        self.dynamic_search_terms = self._load_dynamic_terms()
     
     def _define_geographic_focus(self) -> Dict[str, GeographicSegment]:
         """Define Indian geographic segments by priority"""
@@ -197,6 +202,122 @@ class LeadBucketManager:
         
         return min(score, 1.0)
     
+    def _load_dynamic_terms(self) -> Dict[str, List[str]]:
+        """Load dynamic search terms from config or generate defaults"""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    return json.load(f).get('dynamic_terms', {})
+            except Exception as e:
+                print(f"Error loading config: {e}")
+        
+        # Default dynamic terms
+        return {
+            'qualifiers': [
+                'best', 'top rated', 'professional', 'affordable', 'expert',
+                'local', 'near me', 'certified', 'licensed', 'experienced'
+            ],
+            'business_types': [
+                'small business', 'startup', 'company', 'firm', 'agency',
+                'service', 'provider', 'consultant', 'specialist', 'expert'
+            ],
+            'location_modifiers': [
+                'downtown', 'city center', 'main street', 'commercial area',
+                'business district', 'industrial area', 'tech park', 'market area'
+            ]
+        }
+    
+    def generate_dynamic_queries(self, base_query: str, city: str, max_variations: int = 3) -> List[str]:
+        """Generate dynamic variations of search queries"""
+        variations = [base_query]
+        
+        # Add qualifiers
+        if random.random() < 0.7:  # 70% chance to add qualifier
+            qualifier = random.choice(self.dynamic_search_terms['qualifiers'])
+            variations.append(f"{qualifier} {base_query}")
+        
+        # Add business type modifiers
+        if random.random() < 0.5:  # 50% chance to add business type
+            business_type = random.choice(self.dynamic_search_terms['business_types'])
+            variations.append(f"{base_query} {business_type}")
+        
+        # Add location modifiers
+        if random.random() < 0.3:  # 30% chance to add location modifier
+            location_mod = random.choice(self.dynamic_search_terms['location_modifiers'])
+            variations.append(f"{base_query} {location_mod} {city}")
+        
+        return variations[:max_variations]
+    
+    def get_search_queries(self, dynamic: bool = True) -> List[Dict]:
+        """Generate search queries with optional dynamic variations"""
+        queries = []
+        
+        for bucket in self.buckets:
+            for geo_segment in bucket.geographic_segments:
+                for city in geo_segment.cities:
+                    for pattern in bucket.search_patterns:
+                        base_query = pattern.format(city=city)
+                        
+                        if dynamic:
+                            # Generate dynamic variations
+                            variations = self.generate_dynamic_queries(base_query, city)
+                            for var_query in variations:
+                                query = {
+                                    "bucket": bucket.name,
+                                    "category": bucket.categories[0],
+                                    "query": var_query,
+                                    "city": city,
+                                    "tier": geo_segment.tier,
+                                    "priority": geo_segment.priority,
+                                    "conversion_probability": bucket.conversion_probability,
+                                    "is_dynamic": var_query != base_query
+                                }
+                                queries.append(query)
+                        else:
+                            # Original static queries
+                            query = {
+                                "bucket": bucket.name,
+                                "category": bucket.categories[0],
+                                "query": base_query,
+                                "city": city,
+                                "tier": geo_segment.tier,
+                                "priority": geo_segment.priority,
+                                "conversion_probability": bucket.conversion_probability,
+                                "is_dynamic": False
+                            }
+                            queries.append(query)
+        
+        # Sort by priority and conversion probability
+        queries.sort(key=lambda x: (x["priority"], -x["conversion_probability"]))
+        return queries
+    
+    def add_dynamic_term(self, category: str, term: str) -> None:
+        """Add a new dynamic term to the configuration"""
+        if category not in self.dynamic_search_terms:
+            self.dynamic_search_terms[category] = []
+        if term not in self.dynamic_search_terms[category]:
+            self.dynamic_search_terms[category].append(term)
+            self._save_config()
+    
+    def _save_config(self) -> None:
+        """Save current configuration to file"""
+        config = {
+            'dynamic_terms': self.dynamic_search_terms,
+            'last_updated': datetime.now().isoformat()
+        }
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Error saving config: {e}")
+    
+    def get_random_city_sample(self, count: int = 5) -> List[str]:
+        """Get random sample of cities for testing"""
+        all_cities = []
+        for segment in self.geographic_focus.values():
+            all_cities.extend(segment.cities)
+        return random.sample(all_cities, min(count, len(all_cities)))
+    
     def export_config(self, filepath: str):
         """Export bucket configuration to JSON"""
         config = {
@@ -228,26 +349,3 @@ class LeadBucketManager:
         """Get monthly lead targets by bucket"""
         return {bucket.name: bucket.monthly_target for bucket in self.buckets}
 
-if __name__ == '__main__':
-    # Demo usage
-    manager = LeadBucketManager()
-    
-    print("=== LEAD BUCKETS DEFINED ===")
-    for bucket in manager.buckets:
-        print(f"\n{bucket.name}:")
-        print(f"  Categories: {', '.join(bucket.categories)}")
-        print(f"  Conversion Probability: {bucket.conversion_probability:.0%}")
-        print(f"  Monthly Target: {bucket.monthly_target}")
-        print(f"  Intent: {bucket.intent_profile}")
-    
-    print("\n=== SAMPLE SEARCH QUERIES ===")
-    queries = manager.get_search_queries()[:10]  # First 10 queries
-    for query in queries:
-        print(f"{query['bucket']} - {query['query']} (Priority: {query['priority']})")
-    
-    print("\n=== MONTHLY TARGETS ===")
-    targets = manager.get_monthly_targets()
-    total = sum(targets.values())
-    for bucket, target in targets.items():
-        print(f"{bucket}: {target} ({target/total:.1%})")
-    print(f"Total Monthly Target: {total}")

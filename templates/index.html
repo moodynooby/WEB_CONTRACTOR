@@ -39,25 +39,86 @@
         }
 
         /* Layout Utilities */
-        .flex { display: flex; }
-        .flex-col { flex-direction: column; }
-        .items-center { align-items: center; }
-        .justify-between { justify-content: space-between; }
-        .gap-4 { gap: 4px; }
-        .gap-8 { gap: 8px; }
-        .gap-12 { gap: 12px; }
-        .mb-4 { margin-bottom: 16px; }
-        .mt-8 { margin-top: 32px; }
+        .flex {
+            display: flex;
+        }
+
+        .flex-col {
+            flex-direction: column;
+        }
+
+        .items-center {
+            align-items: center;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .gap-4 {
+            gap: 4px;
+        }
+
+        .gap-8 {
+            gap: 8px;
+        }
+
+        .gap-12 {
+            gap: 12px;
+        }
+
+        .mb-4 {
+            margin-bottom: 16px;
+        }
+
+        .mt-8 {
+            margin-top: 32px;
+        }
 
         /* Layout */
-        .container { display: flex; height: 100vh; }
-        .surface { background: var(--surface); border-radius: var(--radius); }
-        
+        .surface {
+            background: var(--surface);
+            border-radius: var(--radius);
+        }
+
+        /* Layout */
+        .container {
+            display: flex;
+            height: 100vh;
+            /* already there */
+            overflow: hidden;
+            /* prevent page scroll */
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            /* ensure full viewport */
+        }
+
+        .content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            /* vertical scrollbar inside content */
+            overflow-x: hidden;
+            /* avoid horizontal scroll if not needed */
+        }
+
         /* Sidebar */
-        .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--outline); padding: 20px; }
-        .nav-item { 
-            padding: 8px 16px; 
-            border-radius: var(--radius); 
+        .sidebar {
+            width: 260px;
+            background: var(--surface);
+            border-right: 1px solid var(--outline);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .nav-item {
+            padding: 8px 16px;
+            border-radius: var(--radius);
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -71,22 +132,48 @@
             width: 100%;
             text-align: left;
         }
-        .nav-item:hover { background: rgba(208, 188, 255, 0.08); }
-        .nav-item.active { background: var(--primary); color: var(--on-primary); }
+
+        .nav-item:hover {
+            background: rgba(208, 188, 255, 0.08);
+        }
+
+        .nav-item.active {
+            background: var(--primary);
+            color: var(--on-primary);
+        }
 
         /* Main Content */
-        .main { flex: 1; display: flex; flex-direction: column; }
-        .header { background: var(--surface); border-bottom: 1px solid var(--outline); padding: 12px 24px; }
-        .header h1 { font-size: 20px; font-weight: 400; color: var(--on-surface); }
-        .content { flex: 1; padding: 24px; }
-        .section { display: none; }
-        .section.active { display: block; }
-        .section-title { font-size: 18px; font-weight: 500; color: var(--on-surface); margin-bottom: 16px; }
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--outline);
+            padding: 12px 24px;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 400;
+            color: var(--on-surface);
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--on-surface);
+            margin-bottom: 16px;
+        }
 
         /* Buttons */
-        .btn { 
-            padding: 8px 16px; 
-            border-radius: var(--radius); 
+        .btn {
+            padding: 8px 16px;
+            border-radius: var(--radius);
             border: none;
             cursor: pointer;
             font-size: 14px;
@@ -96,10 +183,27 @@
             align-items: center;
             gap: 8px;
         }
-        .btn-primary { background: var(--primary); color: var(--on-primary); }
-        .btn-secondary { background: transparent; color: var(--primary); border: 1px solid var(--outline); }
-        .btn-danger { background: var(--error); color: white; }
-        .btn-sm { padding: 4px 12px; font-size: 12px; }
+
+        .btn-primary {
+            background: var(--primary);
+            color: var(--on-primary);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--primary);
+            border: 1px solid var(--outline);
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
 
         /* CARDS & TABLES */
         .stats-grid {
@@ -159,26 +263,96 @@
         }
 
         /* PROCESSES & LOGS */
-        .process { padding: 12px 20px; margin-bottom: 8px; }
-        .process-name { font-size: 15px; font-weight: 500; color: var(--on-surface); display: flex; align-items: center; gap: 8px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warning); }
-        .status-dot.running { background: var(--success); }
-        .status-dot.stopped { background: var(--error); }
-        .logs-container { padding: 16px; height: 300px; overflow-y: auto; font-family: 'Roboto Mono', monospace; font-size: 12px; border-radius: var(--radius); }
-        .log-entry { padding: 4px 0; border-bottom: 1px solid var(--outline); color: var(--on-surface); }
-        .log-time { color: var(--primary); margin-right: 8px; }
-        .log-success { color: var(--success); }
-        .log-error { color: var(--error); }
+        .process {
+            padding: 12px 20px;
+            margin-bottom: 8px;
+        }
+
+        .process-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--on-surface);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--warning);
+        }
+
+        .status-dot.running {
+            background: var(--success);
+        }
+
+        .status-dot.stopped {
+            background: var(--error);
+        }
+
+        .logs-container {
+            padding: 16px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 12px;
+            border-radius: var(--radius);
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid var(--outline);
+            color: var(--on-surface);
+        }
+
+        .log-time {
+            color: var(--primary);
+            margin-right: 8px;
+        }
+
+        .log-success {
+            color: var(--success);
+        }
+
+        .log-error {
+            color: var(--error);
+        }
 
         /* MODALS */
-        .modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); align-items: center; justify-content: center; }
-        .modal.active { display: flex; }
-        .modal-content { padding: 24px; max-width: 440px; width: 90%; background: var(--surface); border-radius: var(--radius); }
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            padding: 24px;
+            max-width: 440px;
+            width: 90%;
+            background: var(--surface);
+            border-radius: var(--radius);
+        }
 
         /* Responsive */
         @media (max-width: 768px) {
-            .container { flex-direction: column; }
-            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--outline); }
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--outline);
+            }
         }
     </style>
 </head>
@@ -334,7 +508,8 @@
                                 </div>
                             </div>
 
-                            <div class="grid surface p-24" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 10px;">
+                            <div class="grid surface p-24"
+                                style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 10px;">
                                 <div style="padding: 24px;">
                                     <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Leads by
                                         Source
@@ -343,7 +518,7 @@
                                         <!-- Source bars will be injected here -->
                                     </div>
                                 </div>
-                                <div  style="padding: 24px;">
+                                <div style="padding: 24px;">
                                     <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Pipeline
                                         Efficiency</h3>
                                     <div class="flex-col gap-12">
@@ -367,6 +542,7 @@
                             </div>
                         </div>
                     </div>
+
 
                 </div>
 
@@ -495,14 +671,13 @@
                 });
 
                 if (response.ok) {
-                    addLog(`✓ Started ${name}`, 'success');
                     updateProcessStatus();
                 } else {
                     const error = await response.json();
-                    addLog(`✗ Failed to start ${name}: ${error.error}`, 'error');
+                    console.error(`Failed to start ${name}:`, error.error);
                 }
             } catch (error) {
-                addLog(`✗ Failed to start ${name}: ${error.message}`, 'error');
+                console.error(`Failed to start ${name}:`, error.message);
             }
         }
 
@@ -515,14 +690,13 @@
                 });
 
                 if (response.ok) {
-                    addLog(`✗ Stopped ${name}`, 'error');
                     updateProcessStatus();
                 } else {
                     const error = await response.json();
-                    addLog(`✗ Failed to stop ${name}: ${error.error}`, 'error');
+                    console.error(`Failed to stop ${name}:`, error.error);
                 }
             } catch (error) {
-                addLog(`✗ Failed to stop ${name}: ${error.message}`, 'error');
+                console.error(`Failed to stop ${name}:`, error.message);
             }
         }
 
@@ -530,7 +704,8 @@
             const container = document.getElementById('reviewContainer');
             try {
                 const response = await fetch('/api/review/list');
-                const data = await response.json();
+                const result = await response.json();
+                const data = result.data || result;
 
                 if (!data.emails || data.emails.length === 0) {
                     container.innerHTML = '<div class="surface p-24" style="text-align: center;"><p>No high-quality leads pending review.</p></div>';
@@ -602,7 +777,6 @@
 
                 const result = await response.json();
                 if (result.status) {
-                    addLog(`✓ Email ${action === 'send' ? 'sent' : 'ignored'} for campaign ${campaignId}`, 'success');
                     fetchReviewList();
                 } else {
                     alert(`Action failed: ${result.error}`);
@@ -619,7 +793,8 @@
         async function updateProcessStatus() {
             try {
                 const response = await fetch('/api/process/status');
-                const status = await response.json();
+                const result = await response.json();
+                const status = result.data || result;
 
                 document.querySelectorAll('.process').forEach(item => {
                     const name = item.dataset.process;
@@ -649,7 +824,8 @@
         async function refreshData() {
             try {
                 const response = await fetch('/api/stats');
-                const data = await response.json();
+                const result = await response.json();
+                const data = result.data || result;
 
                 // Top Level Stats
                 document.getElementById('totalLeads').textContent = data.totalLeads || 0;
@@ -659,10 +835,8 @@
 
                 // Detailed Analytics (if in analytics view)
                 renderDetailedAnalytics(data);
-
-                addLog('Data refreshed', 'info');
             } catch (error) {
-                addLog(`Failed to refresh data: ${error.message}`, 'error');
+                console.error('Failed to refresh data:', error.message);
             }
         }
 
@@ -745,7 +919,8 @@
                 });
 
                 const response = await fetch(`/api/leads?${params}`);
-                const data = await response.json();
+                const result = await response.json();
+                const data = result.data || result;
 
                 const tbody = document.getElementById('leadsTable');
                 tbody.innerHTML = '';
@@ -766,7 +941,7 @@
                 currentPage = page;
 
             } catch (error) {
-                addLog(`Failed to fetch leads: ${error.message}`, 'error');
+                console.error('Failed to fetch leads:', error.message);
             }
         }
 
@@ -787,7 +962,8 @@
         async function loadBuckets() {
             try {
                 const response = await fetch('/api/buckets');
-                const buckets = await response.json();
+                const result = await response.json();
+                const buckets = result.data || result;
                 const select = document.getElementById('bucketFilter');
                 buckets.forEach(bucket => {
                     const option = document.createElement('option');
@@ -798,15 +974,6 @@
             } catch (error) {
                 console.error('Failed to load buckets:', error);
             }
-        }
-
-        function addLog(msg, type = 'info') {
-            const container = document.getElementById('activityLogs');
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${new Date().toLocaleTimeString()}]</span> <span class="log-${type}">${msg}</span>`;
-            container.prepend(entry);
-            while (container.children.length > 50) container.removeChild(container.lastChild);
         }
 
         function confirmStartAll() {
