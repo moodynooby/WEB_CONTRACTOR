@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, render_template, send_from_directory
 from flask_cors import CORS
+from flask_mail import Mail, Message
 import json
 import threading
 import subprocess
@@ -9,16 +10,49 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 
+# Import API utilities
+from core.api_utils import (
+    limiter, log_request, log_response, add_security_headers,
+    handle_api_error, handle_validation_error, handle_general_error,
+    validate_json, validate_query, rate_limit, success_response,
+    ProcessStartSchema, ProcessStopSchema, LeadsQuerySchema, ReviewActionSchema,
+    APIError, ValidationError
+)
+from loguru import logger
+
 # Import new pipeline orchestrator
 from core.pipeline_orchestrator import PipelineOrchestrator
 from agents.quality_control_agent import QualityControlAgent
 
 # Import legacy components for backward compatibility
 from core.db import get_database_stats, log_scraping_session, record_analytic
-from agents.email_sender import send_pending_emails
+from agents.email_sender import send_pending_emails, fetch_reviewable_emails, update_campaign_status, send_email
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}})
+
+# Configure Flask-Mail
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('GMAIL_EMAIL')
+app.config['MAIL_PASSWORD'] = os.getenv('GMAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('GMAIL_EMAIL')
+
+# Initialize rate limiter
+limiter.init_app(app)
+
+# Register middleware
+app.before_request(log_request)
+app.after_request(log_response)
+app.after_request(add_security_headers)
+
+# Register error handlers
+app.register_error_handler(APIError, handle_api_error)
+app.register_error_handler(ValidationError, handle_validation_error)
+app.register_error_handler(Exception, handle_general_error)
+
+mail = Mail(app)
 
 # Initialize pipeline orchestrator
 pipeline = PipelineOrchestrator()
@@ -49,6 +83,7 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/stats', methods=['GET'])
+@rate_limit('30 per minute')
 def get_stats():
     """Get comprehensive pipeline statistics"""
     try:
@@ -65,7 +100,7 @@ def get_stats():
         # Get monthly progress from Stage 0
         monthly_progress = pipeline_status['stage_stats'].get('stage0', {})
         
-        return jsonify({
+        data = {
             'totalLeads': total_leads,
             'qualifiedLeads': qualified_leads,
             'emailsSent': emails_sent,
@@ -73,24 +108,28 @@ def get_stats():
             'monthlyProgress': monthly_progress,
             'pipelineState': pipeline_status['pipeline_state'],
             'qualityIssues': quality_dashboard.get('recent_alerts', 0)
-        })
+        }
+        
+        return success_response(data, 'Statistics retrieved successfully')
     except Exception as e:
-        return jsonify({'error': f'Stats retrieval failed: {e}'}), 500
+        raise APIError(f'Stats retrieval failed: {e}', 500)
 
 @app.route('/api/leads', methods=['GET'])
+@rate_limit('60 per minute')
+@validate_query(LeadsQuerySchema)
 def get_leads():
     conn = get_db_connection()
     if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
+        raise APIError('Database connection failed', 500)
     
     try:
         cursor = conn.cursor()
         
-        # Get query parameters
-        page = int(request.args.get('page', 1))
-        per_page = int(request.args.get('per_page', 20))
-        status = request.args.get('status', '')
-        bucket = request.args.get('bucket', '')
+        # Get validated query parameters
+        page = request.validated_query['page']
+        per_page = request.validated_query['per_page']
+        status = request.validated_query['status']
+        bucket = request.validated_query['bucket']
         
         # Build query
         where_clause = "WHERE 1=1"
@@ -119,7 +158,7 @@ def get_leads():
         '''
         leads = cursor.execute(query, params + [per_page, offset]).fetchall()
         
-        return jsonify({
+        data = {
             'leads': [dict(ix) for ix in leads],
             'pagination': {
                 'page': page,
@@ -127,22 +166,26 @@ def get_leads():
                 'total': total,
                 'pages': (total + per_page - 1) // per_page
             }
-        })
+        }
+        
+        return success_response(data, f'Retrieved {len(leads)} leads')
     except sqlite3.Error as e:
-        return jsonify({'error': f'Database query failed: {e}'}), 500
+        raise APIError(f'Database query failed: {e}', 500)
     finally:
         conn.close()
 
 @app.route('/api/process/start', methods=['POST'])
+@rate_limit('10 per minute')
+@validate_json(ProcessStartSchema)
 def start_process():
     """Start a pipeline process"""
-    process_key = request.json['process']
+    process_key = request.validated_json['process']
     
     if process_key not in processes:
-        return jsonify({'error': 'Invalid process'}), 400
+        raise APIError('Invalid process', 400)
     
     if processes[process_key]['running']:
-        return jsonify({'error': 'Process already running'}), 400
+        raise APIError('Process already running', 400)
     
     def run_process():
         try:
@@ -182,11 +225,11 @@ def start_process():
                 
             elif process_key == 'email_sender':
                 # Send pending emails
-                sent_count = send_pending_emails()
+                sent_count = send_pending_emails(mail)
                 processes[process_key]['progress'] = 100
                 
         except Exception as e:
-            print(f"Process {process_key} failed: {e}")
+            logger.error(f"Process {process_key} failed: {e}")
         finally:
             processes[process_key]['running'] = False
             processes[process_key]['thread'] = None
@@ -197,9 +240,10 @@ def start_process():
     
     processes[process_key]['thread'] = thread
     
-    return jsonify({'status': 'started'})
+    return success_response({'process': process_key}, f'Started {process_key} process')
 
 @app.route('/api/process/status', methods=['GET'])
+@rate_limit('30 per minute')
 def get_process_status():
     status = {}
     for key, process in processes.items():
@@ -208,9 +252,10 @@ def get_process_status():
             'progress': process['progress'],
             'start_time': process['start_time'].isoformat() if process['start_time'] else None
         }
-    return jsonify(status)
+    return success_response(status, 'Process status retrieved')
 
 @app.route('/api/buckets', methods=['GET'])
+@rate_limit('30 per minute')
 def get_buckets():
     """Get all lead buckets with their configurations"""
     try:
@@ -224,11 +269,12 @@ def get_buckets():
                 'monthly_target': bucket.monthly_target,
                 'intent_profile': bucket.intent_profile
             })
-        return jsonify(bucket_list)
+        return success_response(bucket_list, f'Retrieved {len(bucket_list)} buckets')
     except Exception as e:
-        return jsonify({'error': f'Bucket retrieval failed: {e}'}), 500
+        raise APIError(f'Bucket retrieval failed: {e}', 500)
 
 @app.route('/api/analytics', methods=['GET'])
+@rate_limit('20 per minute')
 def get_analytics():
     """Get detailed analytics data"""
     try:
@@ -237,7 +283,7 @@ def get_analytics():
         # Get scraping logs for last 7 days
         conn = get_db_connection()
         if not conn:
-            return jsonify({'error': 'Database connection failed'}), 500
+            raise APIError('Database connection failed', 500)
         
         cursor = conn.cursor()
         cursor.execute('''
@@ -262,57 +308,64 @@ def get_analytics():
         
         conn.close()
         
-        return jsonify({
+        data = {
             'scraping_logs': [dict(ix) for ix in scraping_data],
             'analytics': [dict(ix) for ix in analytics_data],
             'pipeline_status': pipeline_status,
             'quality_dashboard': pipeline_status['quality_dashboard']
-        })
+        }
+        
+        return success_response(data, 'Analytics data retrieved successfully')
     except Exception as e:
-        return jsonify({'error': f'Analytics retrieval failed: {e}'}), 500
+        raise APIError(f'Analytics retrieval failed: {e}', 500)
 
 @app.route('/api/process/stop', methods=['POST'])
+@rate_limit('10 per minute')
+@validate_json(ProcessStopSchema)
 def stop_process():
-    process_key = request.json['process']
+    process_key = request.validated_json['process']
     
     if process_key not in processes:
-        return jsonify({'error': 'Invalid process'}), 400
+        raise APIError('Invalid process', 400)
     
     if not processes[process_key]['running']:
-        return jsonify({'error': 'Process not running'}), 400
+        raise APIError('Process not running', 400)
     
     # Note: This is a simple implementation
     # In production, you'd want proper thread cleanup
     processes[process_key]['running'] = False
     processes[process_key]['progress'] = 0
     
-    return jsonify({'status': 'stopped'})
+    return success_response({'process': process_key}, f'Stopped {process_key} process')
 
 # Add new API endpoints for pipeline management
 
 @app.route('/api/pipeline/status', methods=['GET'])
+@rate_limit('30 per minute')
 def get_pipeline_status():
     """Get comprehensive pipeline status"""
     try:
         status = pipeline.get_pipeline_status()
-        return jsonify(status)
+        return success_response(status, 'Pipeline status retrieved')
     except Exception as e:
-        return jsonify({'error': f'Pipeline status retrieval failed: {e}'}), 500
+        raise APIError(f'Pipeline status retrieval failed: {e}', 500)
 
 @app.route('/api/pipeline/recommendations', methods=['GET'])
+@rate_limit('10 per minute')
 def get_pipeline_recommendations():
     """Get pipeline optimization recommendations"""
     try:
         recommendations = pipeline.get_pipeline_recommendations()
-        return jsonify({'recommendations': recommendations})
+        return success_response({'recommendations': recommendations}, 'Recommendations retrieved')
     except Exception as e:
-        return jsonify({'error': f'Recommendations retrieval failed: {e}'}), 500
+        raise APIError(f'Recommendations retrieval failed: {e}', 500)
 
 @app.route('/api/quality/check', methods=['POST'])
+@rate_limit('5 per minute')
 def run_quality_check():
     """Run quality control check"""
     if processes['quality_control']['running']:
-        return jsonify({'error': 'Quality control already running'}), 400
+        raise APIError('Quality control already running', 400)
     
     def run_qc():
         try:
@@ -324,7 +377,7 @@ def run_quality_check():
             processes['quality_control']['progress'] = 100
             
         except Exception as e:
-            print(f"Quality control failed: {e}")
+            logger.error(f"Quality control failed: {e}")
         finally:
             processes['quality_control']['running'] = False
             processes['quality_control']['thread'] = None
@@ -335,9 +388,10 @@ def run_quality_check():
     
     processes['quality_control']['thread'] = thread
     
-    return jsonify({'status': 'started'})
+    return success_response(None, 'Quality control check started')
 
 @app.route('/api/stages', methods=['GET'])
+@rate_limit('30 per minute')
 def get_stages():
     """Get available pipeline stages and their status"""
     stages = []
@@ -352,80 +406,39 @@ def get_stages():
         }
         stages.append(stage_info)
     
-    return jsonify({'stages': stages})
+    return success_response({'stages': stages}, f'Retrieved {len(stages)} stages')
     
 @app.route('/api/review/list', methods=['GET'])
+@rate_limit('30 per minute')
 def list_reviewable_emails():
     """List pending emails for leads that passed Stage B quality filter"""
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
-    
     try:
-        cursor = conn.cursor()
-        # Filter for qualified leads with score >= 0.7
-        query = '''
-            SELECT 
-                ec.id as campaign_id,
-                l.id as lead_id,
-                l.business_name,
-                l.website,
-                l.email as lead_email,
-                a.overall_score,
-                a.llm_analysis,
-                ec.subject,
-                ec.body,
-                l.bucket
-            FROM email_campaigns ec
-            JOIN leads l ON ec.lead_id = l.id
-            JOIN audits a ON l.id = a.lead_id
-            WHERE ec.status = 'pending'
-            AND a.overall_score >= 0.7
-            AND a.qualified = 1
-            ORDER BY a.overall_score DESC
-        '''
-        cursor.execute(query)
-        emails = [dict(ix) for ix in cursor.fetchall()]
-        
-        # Parse JSON in llm_analysis if present
-        for email in emails:
-            if email['llm_analysis']:
-                try:
-                    email['llm_analysis'] = json.loads(email['llm_analysis'])
-                except:
-                    pass
-                    
-        return jsonify({'emails': emails})
-    except sqlite3.Error as e:
-        return jsonify({'error': f'Database query failed: {e}'}), 500
-    finally:
-        conn.close()
+        emails = fetch_reviewable_emails()
+        return success_response({'emails': emails}, f'Retrieved {len(emails)} reviewable emails')
+    except Exception as e:
+        raise APIError(f'Database query failed: {e}', 500)
 
 @app.route('/api/review/action', methods=['POST'])
+@rate_limit('10 per minute')
+@validate_json(ReviewActionSchema)
 def review_action():
     """Perform action on a pending email (send, ignore, edit)"""
-    data = request.json
-    campaign_id = data.get('campaignId')
-    action = data.get('action') # 'send', 'ignore'
-    body = data.get('body') # Optional revised body
-    
-    if not campaign_id or not action:
-        return jsonify({'error': 'Missing campaignId or action'}), 400
-        
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
+    campaign_id = request.validated_json['campaignId']
+    action = request.validated_json['action']
+    body = request.validated_json.get('body')
     
     try:
-        cursor = conn.cursor()
-        
         if action == 'ignore':
-            cursor.execute('UPDATE email_campaigns SET status = "ignored" WHERE id = ?', (campaign_id,))
-            conn.commit()
-            return jsonify({'status': 'ignored'})
+            update_campaign_status(campaign_id, 'ignored')
+            return success_response({'campaignId': campaign_id}, 'Email ignored')
             
         elif action == 'send':
             # Get email details first
+            conn = get_db_connection()
+            if not conn:
+                raise APIError('Database connection failed', 500)
+                
+            cursor = conn.cursor()
             cursor.execute('''
                 SELECT l.email, l.business_name, l.id as lead_id, ec.subject, ec.body 
                 FROM email_campaigns ec 
@@ -433,31 +446,26 @@ def review_action():
                 WHERE ec.id = ?
             ''', (campaign_id,))
             row = cursor.fetchone()
+            conn.close()
             
             if not row:
-                return jsonify({'error': 'Campaign not found'}), 404
+                raise APIError('Campaign not found', 404)
                 
             lead_email = row['email'] or f"contact@{row['business_name'].lower().replace(' ', '')}.com"
             subject = row['subject']
             final_body = body if body else row['body']
             
-            from agents.email_sender import send_email
-            if send_email(lead_email, subject, final_body):
-                cursor.execute('''
-                    UPDATE email_campaigns 
-                    SET status = "sent", body = ?, sent_at = ? 
-                    WHERE id = ?
-                ''', (final_body, datetime.now().isoformat(), campaign_id))
-                conn.commit()
-                return jsonify({'status': 'sent'})
+            if send_email(lead_email, subject, final_body, mail):
+                update_campaign_status(campaign_id, 'sent', final_body)
+                return success_response({'campaignId': campaign_id}, 'Email sent successfully')
             else:
-                return jsonify({'error': 'SMTP failure'}), 500
+                raise APIError('SMTP failure', 500)
                 
-        return jsonify({'error': 'Invalid action'}), 400
+        raise APIError('Invalid action', 400)
+    except APIError:
+        raise
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
+        raise APIError(str(e), 500)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -13,8 +13,6 @@ import json
 # Import existing scrapers
 from scrapers.google_maps_scraper import GoogleMapsScraper
 from scrapers.yellow_pages_scraper import YellowPagesScraper
-from scrapers.linkedin_scraper import LinkedInScraper
-from scrapers.facebook_scraper import FacebookScraper
 from core.rate_limiter import get_scraper
 from core.lead_buckets import LeadBucketManager
 from core.db import log_scraping_session
@@ -40,9 +38,6 @@ class StageAScraper:
         
         # Initialize individual scrapers
         self.google_scraper = GoogleMapsScraper()
-        self.linkedin_scraper = LinkedInScraper()
-        self.facebook_scraper = FacebookScraper()
-        # Yellow Pages is skipped for now, but we keep the instance if needed later
         self.yellow_pages_scraper = YellowPagesScraper()
         
     def scrape_source(self, source: str, max_queries: int = 50, plan: List[Dict] = None) -> Dict:
@@ -55,13 +50,8 @@ class StageAScraper:
         try:
             if source == 'google_maps':
                 leads = self.google_scraper.scrape_by_buckets(max_queries_per_bucket=5)
-            elif source == 'linkedin':
-                leads = self.linkedin_scraper.scrape_linkedin_companies(max_searches=max_queries)
-            elif source == 'facebook':
-                leads = self.facebook_scraper.scrape_by_buckets(max_queries=max_queries)
             elif source == 'yellow_pages':
-                print("Skipping Yellow Pages as requested...")
-                leads = []
+                leads = self.yellow_pages_scraper.scrape_by_buckets(max_queries_per_bucket=5)
             else:
                 raise ValueError(f"Unknown source: {source}")
             
@@ -100,7 +90,7 @@ class StageAScraper:
         """Run all active scraping sources"""
         print("=== STAGE A: EXECUTION - SCRAPING DISCOVERIES ===")
         
-        sources = ['google_maps', 'linkedin', 'facebook']
+        sources = ['google_maps', 'yellow_pages']
         all_results = {
             'total_leads_found': 0,
             'total_leads_saved': 0,

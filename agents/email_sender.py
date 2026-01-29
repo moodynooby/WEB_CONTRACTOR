@@ -1,48 +1,116 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import sqlite3
+import json
 import time
 import random
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+from typing import Dict, List, Optional
+from flask import current_app
+from flask_mail import Message
 
 load_dotenv()
 
-def send_email(to_email, subject, body):
-    """Send via Gmail free tier"""
-
+def send_email(to_email, subject, body, mail_instance=None):
+    """Send via Flask-Mail"""
     try:
-        message = MIMEMultipart('alternative')
-        message['Subject'] = subject
-        message['From'] = os.getenv('GMAIL_EMAIL')
-        message['To'] = to_email
-
-        html = f"""
+        # Create message
+        html_body = f"""
         <html><body style="font-family: Arial; line-height: 1.6;">
             <p>Hi,</p>
             <p>{body}</p>
             <p>Best regards,<br>Manas<br>
-            <a href="https://man27.netlify.app">Web Services</a></p>
+            <a href="https://man27.netlify.app/services">Web Services</a></p>
         </body></html>
         """
-
-        part = MIMEText(html, 'html')
-        message.attach(part)
-
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(os.getenv('GMAIL_EMAIL'), os.getenv('GMAIL_PASSWORD'))
-        server.send_message(message)
-        server.quit()
-
+        
+        if mail_instance:
+            # Use provided mail instance (from Flask app)
+            msg = Message(
+                subject=subject,
+                recipients=[to_email],
+                html=html_body
+            )
+            mail_instance.send(msg)
+        else:
+            # Fallback to direct Flask app context
+            with current_app.app_context():
+                msg = Message(
+                    subject=subject,
+                    recipients=[to_email],
+                    html=html_body
+                )
+                current_app.extensions['mail'].send(msg)
+        
         return True
     except Exception as e:
         print(f"Email send error: {e}")
         return False
 
-def send_pending_emails():
+def fetch_reviewable_emails(min_score: float = 0.7) -> List[Dict]:
+    """Fetch pending emails for high-quality leads"""
+    conn = sqlite3.connect('leads.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    query = '''
+    SELECT 
+        ec.id as campaign_id,
+        l.id as lead_id,
+        l.business_name,
+        l.website,
+        l.email as lead_email,
+        a.overall_score,
+        a.llm_analysis,
+        ec.subject,
+        ec.body,
+        l.bucket
+    FROM email_campaigns ec
+    JOIN leads l ON ec.lead_id = l.id
+    JOIN audits a ON l.id = a.lead_id
+    WHERE ec.status = 'pending'
+    AND a.overall_score >= ?
+    AND a.qualified = 1
+    ORDER BY a.overall_score DESC
+    '''
+    
+    cursor.execute(query, (min_score,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    emails = [dict(row) for row in rows]
+    # Parse JSON in llm_analysis if present
+    for email in emails:
+        if email['llm_analysis']:
+            try:
+                email['llm_analysis'] = json.loads(email['llm_analysis'])
+            except:
+                pass
+    
+    return emails
+
+def update_campaign_status(campaign_id: int, status: str, body: Optional[str] = None):
+    """Update campaign status and optionally the body"""
+    conn = sqlite3.connect('leads.db')
+    cursor = conn.cursor()
+    
+    if body:
+        cursor.execute('''
+            UPDATE email_campaigns 
+            SET status = ?, body = ?, sent_at = ? 
+            WHERE id = ?
+        ''', (status, body, datetime.now().isoformat() if status == 'sent' else None, campaign_id))
+    else:
+        cursor.execute('''
+            UPDATE email_campaigns 
+            SET status = ?, sent_at = ? 
+            WHERE id = ?
+        ''', (status, datetime.now().isoformat() if status == 'sent' else None, campaign_id))
+        
+    conn.commit()
+    conn.close()
+
+def send_pending_emails(mail_instance=None):
     """Send all pending emails"""
     conn = sqlite3.connect('leads.db')
     cursor = conn.cursor()
@@ -66,7 +134,7 @@ def send_pending_emails():
             # In production, you'd get the actual email from the leads table
             to_email = f"contact@{business_name.lower().replace(' ', '')}.com"
             
-            success = send_email(to_email, subject, body)
+            success = send_email(to_email, subject, body, mail_instance)
             
             if success:
                 # Update status to sent

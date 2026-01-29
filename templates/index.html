@@ -9,37 +9,19 @@
         href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <style>
+        /* CSS Reset & Variables */
         :root {
-            /* M3 Color System - Dark Theme Defaults */
             --primary: #D0BCFF;
             --on-primary: #381E72;
-            --primary-container: #4F378B;
-            --on-primary-container: #EADDFF;
-            --secondary: #CCC2DC;
-            --on-secondary: #332D41;
-            --secondary-container: #4A4458;
-            --on-secondary-container: #E8DEF8;
-            --surface: #121212;
+            --surface: #1E1B1E;
             --on-surface: #E6E0E9;
-            --surface-variant: #49454F;
-            --on-surface-variant: #CAC4D0;
-            --outline: #938F99;
-            --outline-variant: #49454F;
-            --surface-container: #1E1B1E;
-            --surface-container-high: #2A292E;
             --background: #121212;
             --on-background: #E6E0E9;
-            --error: #BA1A1A;
-            --on-error: #FFFFFF;
+            --outline: #49454F;
             --success: #146C2E;
+            --error: #BA1A1A;
             --warning: #7D5700;
-
-            /* Consolidated Variables */
             --radius: 12px;
-            --radius-l: 24px;
-            --shadow: 0 1px 3px 1px rgba(0, 0, 0, 0.16);
-            --duration: 200ms;
-            --easing: cubic-bezier(0.2, 0.0, 0.0, 1.0);
         }
 
         * {
@@ -52,183 +34,72 @@
             font-family: 'Roboto', sans-serif;
             background: var(--background);
             color: var(--on-background);
-            overflow: hidden;
             font-size: 14px;
+            line-height: 1.5;
         }
 
-        /* UTILITIES */
-        .flex {
-            display: flex;
-        }
+        /* Layout Utilities */
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .gap-4 { gap: 4px; }
+        .gap-8 { gap: 8px; }
+        .gap-12 { gap: 12px; }
+        .mb-4 { margin-bottom: 16px; }
+        .mt-8 { margin-top: 32px; }
 
-        .flex-col {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .items-center {
-            align-items: center;
-        }
-
-        .justify-between {
-            justify-content: space-between;
-        }
-
-        .gap-4 {
-            gap: 4px;
-        }
-
-        .gap-8 {
-            gap: 8px;
-        }
-
-        .gap-12 {
-            gap: 12px;
-        }
-
-        .m-b-24 {
-            margin-bottom: 24px;
-        }
-
-        .m-t-32 {
-            margin-top: 32px;
-        }
-
-        .container {
-            display: flex;
-            height: 100vh;
-            width: 100%;
-        }
-
-        /* COMPONENTS */
-        .surface {
-            background: var(--surface-container);
-            border: 1px solid var(--outline-variant);
-            border-radius: var(--radius-l);
-            box-shadow: var(--shadow);
-        }
-
-        /* SIDEBAR */
-        .sidebar {
-            width: 260px;
-            background: var(--surface-container);
-            border-right: 1px solid var(--outline-variant);
-            padding: 20px;
-        }
-
-        .logo {
-            font-size: 20px;
-            font-weight: 500;
-            color: var(--primary);
-            margin-bottom: 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .nav-item {
-            padding: 10px 16px;
-            border-radius: var(--radius);
+        /* Layout */
+        .container { display: flex; height: 100vh; }
+        .surface { background: var(--surface); border-radius: var(--radius); }
+        
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--outline); padding: 20px; }
+        .nav-item { 
+            padding: 8px 16px; 
+            border-radius: var(--radius); 
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
             background: transparent;
-            color: var(--on-surface-variant);
-            border: none;
-            text-align: left;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all var(--duration) var(--easing);
+            color: var(--on-surface);
             width: 100%;
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            text-align: left;
         }
+        .nav-item:hover { background: rgba(208, 188, 255, 0.08); }
+        .nav-item.active { background: var(--primary); color: var(--on-primary); }
 
-        .nav-item:hover {
-            background: rgba(208, 188, 255, 0.08);
-            color: var(--on-surface);
-        }
+        /* Main Content */
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .header { background: var(--surface); border-bottom: 1px solid var(--outline); padding: 12px 24px; }
+        .header h1 { font-size: 20px; font-weight: 400; color: var(--on-surface); }
+        .content { flex: 1; padding: 24px; }
+        .section { display: none; }
+        .section.active { display: block; }
+        .section-title { font-size: 18px; font-weight: 500; color: var(--on-surface); margin-bottom: 16px; }
 
-        .nav-item.active {
-            background: var(--primary-container);
-            color: var(--on-primary-container);
-        }
-
-        /* MAIN CONTENT */
-        .main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .header {
-            background: var(--surface-container);
-            border-bottom: 1px solid var(--outline-variant);
-            padding: 12px 24px;
-        }
-
-        .header h1 {
-            font-size: 20px;
-            font-weight: 400;
-            color: var(--on-surface);
-        }
-
-        .content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 24px;
-        }
-
-        .section {
-            display: none;
-        }
-
-        .section.active {
-            display: block;
-        }
-
-        .section-title {
-            font-size: 18px;
-            font-weight: 500;
-            color: var(--on-surface);
-            margin-bottom: 16px;
-        }
-
-        /* BUTTONS */
-        .btn {
-            padding: 8px 16px;
-            border-radius: var(--radius);
+        /* Buttons */
+        .btn { 
+            padding: 8px 16px; 
+            border-radius: var(--radius); 
             border: none;
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
-            transition: all var(--duration) var(--easing);
+            transition: all 0.2s ease;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            font-family: inherit;
         }
-
-        .btn-primary {
-            background: var(--primary);
-            color: var(--on-primary);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            color: var(--primary);
-            border: 1px solid var(--outline);
-        }
-
-        .btn-danger {
-            background: var(--error);
-            color: var(--on-error);
-        }
-
-        .btn-sm {
-            padding: 4px 12px;
-            font-size: 12px;
-        }
+        .btn-primary { background: var(--primary); color: var(--on-primary); }
+        .btn-secondary { background: transparent; color: var(--primary); border: 1px solid var(--outline); }
+        .btn-danger { background: var(--error); color: white; }
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
 
         /* CARDS & TABLES */
         .stats-grid {
@@ -256,7 +127,7 @@
 
         .stat-label {
             font-size: 11px;
-            color: var(--on-surface-variant);
+            color: var(--on-surface);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -273,112 +144,41 @@
         }
 
         th {
-            background: var(--surface-container-high);
+            background: var(--surface);
             padding: 12px 16px;
             text-align: left;
-            font-size: 12px;
-            color: var(--on-surface-variant);
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--outline-variant);
+            font-weight: 500;
+            border-bottom: 1px solid var(--outline);
         }
 
         td {
             padding: 12px 16px;
-            border-bottom: 1px solid var(--outline-variant);
+            border-bottom: 1px solid var(--outline);
             font-size: 14px;
             color: var(--on-surface);
         }
 
         /* PROCESSES & LOGS */
-        .process {
-            padding: 12px 20px;
-            margin-bottom: 8px;
-        }
-
-        .process-name {
-            font-size: 15px;
-            font-weight: 500;
-            color: var(--on-surface);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: var(--warning);
-        }
-
-        .status-dot.running {
-            background: var(--success);
-        }
-
-        .status-dot.stopped {
-            background: var(--error);
-        }
-
-        .logs-container {
-            padding: 16px;
-            height: 300px;
-            overflow-y: auto;
-            font-family: 'Roboto Mono', monospace;
-            font-size: 12px;
-            border-radius: var(--radius);
-        }
-
-        .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid var(--outline-variant);
-            color: var(--on-surface-variant);
-        }
-
-        .log-time {
-            color: var(--primary);
-            margin-right: 8px;
-        }
-
-        .log-success {
-            color: var(--success);
-        }
-
-        .log-error {
-            color: var(--error);
-        }
+        .process { padding: 12px 20px; margin-bottom: 8px; }
+        .process-name { font-size: 15px; font-weight: 500; color: var(--on-surface); display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warning); }
+        .status-dot.running { background: var(--success); }
+        .status-dot.stopped { background: var(--error); }
+        .logs-container { padding: 16px; height: 300px; overflow-y: auto; font-family: 'Roboto Mono', monospace; font-size: 12px; border-radius: var(--radius); }
+        .log-entry { padding: 4px 0; border-bottom: 1px solid var(--outline); color: var(--on-surface); }
+        .log-time { color: var(--primary); margin-right: 8px; }
+        .log-success { color: var(--success); }
+        .log-error { color: var(--error); }
 
         /* MODALS */
-        .modal {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(4px);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { padding: 24px; max-width: 440px; width: 90%; background: var(--surface); border-radius: var(--radius); }
 
-        .modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            padding: 24px;
-            max-width: 440px;
-            width: 90%;
-        }
-
+        /* Responsive */
         @media (max-width: 768px) {
-            .container {
-                flex-direction: column;
-            }
-
-            .sidebar {
-                width: 100%;
-                border-right: none;
-                border-bottom: 1px solid var(--outline-variant);
-            }
+            .container { flex-direction: column; }
+            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--outline); }
         }
     </style>
 </head>
@@ -386,13 +186,6 @@
 <body>
     <div class="container">
         <aside class="sidebar flex-col">
-            <div class="logo">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                    <path
-                        d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z" />
-                </svg>
-                LeadGen Pro
-            </div>
             <nav class="nav-menu flex-col gap-4">
                 <button class="nav-item active" onclick="showSection('dashboard')">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -407,26 +200,12 @@
                     </svg>
                     Campaigns
                 </button>
-                <button class="nav-item" onclick="showSection('processes')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                    </svg>
-                    Processes
-                </button>
                 <button class="nav-item" onclick="showSection('leads')">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path
                             d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
                     </svg>
                     Leads
-                </button>
-                <button class="nav-item" onclick="showSection('analytics')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                            d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z" />
-                    </svg>
-                    Analytics
                 </button>
                 <button class="nav-item" onclick="showSection('review')">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -435,13 +214,6 @@
                     </svg>
                     Review & Send
                 </button>
-                <button class="nav-item" onclick="showSection('settings')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                            d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
-                    </svg>
-                    Settings
-                </button>
             </nav>
         </aside>
 
@@ -449,7 +221,7 @@
             <header class="header flex items-center justify-between">
                 <h1 id="pageTitle">Dashboard</h1>
                 <div class="flex gap-12">
-                    <button class="btn btn-primary" onclick="openModal('runAll')">Start All</button>
+                    <button class="btn btn-primary" onclick="confirmStartAll()">Start</button>
                     <button class="btn btn-secondary" onclick="refreshData()">Refresh</button>
                 </div>
             </header>
@@ -475,86 +247,134 @@
                         </div>
                     </div>
 
-                    <div class="flex gap-24 m-b-24">
-                        <div class="stat-card surface flex-col gap-8" style="flex: 2;">
-                            <div class="stat-label">Monthly Goal Progress</div>
-                            <div class="flex items-center gap-12">
-                                <div class="stat-value" id="monthlyTotal">0 / 0</div>
-                                <div id="monthlyPercent" style="color: var(--primary); font-weight: 500;">0%</div>
+                    <div id="processes">
+                        <h2 class="section-title">Processes</h2>
+                        <div id="processList" class="flex-col gap-8">
+                            <div class="process surface flex items-center justify-between" data-process="stage0">
+                                <div class="process-name">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path
+                                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    Stage 0: Planning & Strategy
+                                </div>
+                                <div class="flex items-center gap-12">
+                                    <div class="status-dot stopped"></div>
+                                    <button class="btn btn-sm btn-primary"
+                                        onclick="startProcess('stage0')">Start</button>
+                                </div>
                             </div>
-                            <div class="progress-container"
-                                style="height: 12px; background: var(--surface-variant); border-radius: 6px; position: relative; overflow: hidden;">
-                                <div id="monthlyProgressBar"
-                                    style="position: absolute; top: 0; left: 0; bottom: 0; background: var(--primary); width: 0%; transition: width 1s var(--easing);">
+                            <div class="process surface flex items-center justify-between" data-process="stage_a">
+                                <div class="process-name">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path
+                                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    Stage A: Execution (Scraper)
+                                </div>
+                                <div class="flex items-center gap-12">
+                                    <div class="status-dot stopped"></div>
+                                    <button class="btn btn-sm btn-primary"
+                                        onclick="startProcess('stage_a')">Start</button>
+                                </div>
+                            </div>
+                            <div class="process surface flex items-center justify-between" data-process="stage_b">
+                                <div class="process-name">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path
+                                            d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                                    </svg>
+                                    Stage B: Needs Auditor
+                                </div>
+                                <div class="flex items-center gap-12">
+                                    <div class="status-dot stopped"></div>
+                                    <button class="btn btn-sm btn-primary"
+                                        onclick="startProcess('stage_b')">Start</button>
+                                </div>
+                            </div>
+                            <div class="process surface flex items-center justify-between" data-process="stage_c">
+                                <div class="process-name">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path
+                                            d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z" />
+                                    </svg>
+                                    Stage C: AI Generator
+                                </div>
+                                <div class="flex items-center gap-12">
+                                    <div class="status-dot stopped"></div>
+                                    <button class="btn btn-sm btn-primary"
+                                        onclick="startProcess('stage_c')">Start</button>
+                                </div>
+                            </div>
+                            <div class="process surface flex items-center justify-between" data-process="email_sender">
+                                <div class="process-name">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                                    </svg>
+                                    Email Outreach
+                                </div>
+                                <div class="flex items-center gap-12">
+                                    <div class="status-dot stopped"></div>
+                                    <button class="btn btn-sm btn-primary"
+                                        onclick="startProcess('email_sender')">Start</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="stat-card surface flex-col gap-4" style="flex: 1;">
-                            <div class="stat-label">System Health</div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot running"></div>
-                                <div style="font-size: 18px; color: var(--on-surface);">Nominal</div>
+                    </div>
+                    <div id="analytics">
+                        <h2 class="section-title">Stage 0 Planning & Marketing Analytics</h2>
+
+                        <div class="flex-col gap-24">
+                            <div class="surface p-24" style="padding: 24px;">
+                                <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Monthly
+                                    Progress by
+                                    Bucket</h3>
+                                <div id="bucketProgressList" class="flex-col gap-12">
+                                    <!-- Bucket progress rows will be injected here -->
+                                </div>
                             </div>
-                            <div style="font-size: 11px; color: var(--on-surface-variant);">All agents responding</div>
+
+                            <div class="grid surface p-24" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 10px;">
+                                <div style="padding: 24px;">
+                                    <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Leads by
+                                        Source
+                                    </h3>
+                                    <div id="sourceDistribution" class="flex-col gap-8">
+                                        <!-- Source bars will be injected here -->
+                                    </div>
+                                </div>
+                                <div  style="padding: 24px;">
+                                    <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Pipeline
+                                        Efficiency</h3>
+                                    <div class="flex-col gap-12">
+                                        <div class="flex justify-between items-center">
+                                            <span style="font-size: 13px;">Qualification Rate</span>
+                                            <span id="qualificationRate" class="stat-value"
+                                                style="font-size: 18px;">0%</span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span style="font-size: 13px;">Email Open Rate</span>
+                                            <span class="stat-value"
+                                                style="font-size: 18px; color: var(--secondary);">24.5%</span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span style="font-size: 13px;">Reply Rate</span>
+                                            <span id="replyRate" class="stat-value"
+                                                style="font-size: 18px; color: var(--success);">0%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <h2 class="section-title">Recent Activity</h2>
-                    <div class="logs-container surface" id="activityLogs">
-                        <div class="log-entry"><span class="log-time">[12:00]</span><span class="log-success">System
-                                initialized</span></div>
-                    </div>
                 </div>
 
-                <div id="analytics" class="section">
-                    <h2 class="section-title">Stage 0 Planning & Marketing Analytics</h2>
-
-                    <div class="flex-col gap-24">
-                        <div class="surface p-24" style="padding: 24px;">
-                            <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Monthly Progress by
-                                Bucket</h3>
-                            <div id="bucketProgressList" class="flex-col gap-12">
-                                <!-- Bucket progress rows will be injected here -->
-                            </div>
-                        </div>
-
-                        <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                            <div class="surface p-24" style="padding: 24px;">
-                                <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Leads by Source
-                                </h3>
-                                <div id="sourceDistribution" class="flex-col gap-8">
-                                    <!-- Source bars will be injected here -->
-                                </div>
-                            </div>
-                            <div class="surface p-24" style="padding: 24px;">
-                                <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--primary);">Pipeline
-                                    Efficiency</h3>
-                                <div class="flex-col gap-12">
-                                    <div class="flex justify-between items-center">
-                                        <span style="font-size: 13px;">Qualification Rate</span>
-                                        <span id="qualificationRate" class="stat-value"
-                                            style="font-size: 18px;">0%</span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span style="font-size: 13px;">Email Open Rate</span>
-                                        <span class="stat-value"
-                                            style="font-size: 18px; color: var(--secondary);">24.5%</span>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <span style="font-size: 13px;">Reply Rate</span>
-                                        <span id="replyRate" class="stat-value"
-                                            style="font-size: 18px; color: var(--success);">0%</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <div id="campaigns" class="section">
                     <h2 class="section-title">Email Campaigns</h2>
                     <button class="btn btn-primary m-b-24" onclick="openModal('newCampaign')">New Campaign</button>
-                    <div class="table-container surface">
+                    <div class="table-container">
                         <table>
                             <thead>
                                 <tr>
@@ -567,90 +387,11 @@
                                 </tr>
                             </thead>
                             <tbody id="campaignsTable">
-                                <tr>
-                                    <td>Interior Designers</td>
-                                    <td><span class="status-badge status-sent">Sent</span></td>
-                                    <td>42</td>
-                                    <td>28%</td>
-                                    <td>4%</td>
-                                    <td><button class="btn btn-sm btn-secondary">View</button></td>
-                                </tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <div id="processes" class="section">
-                    <h2 class="section-title">Processes</h2>
-                    <div id="processList" class="flex-col gap-8">
-                        <div class="process surface flex items-center justify-between" data-process="stage0">
-                            <div class="process-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                    <path
-                                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                                </svg>
-                                Stage 0: Planning & Strategy
-                            </div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot stopped"></div>
-                                <button class="btn btn-sm btn-primary" onclick="startProcess('stage0')">Start</button>
-                            </div>
-                        </div>
-                        <div class="process surface flex items-center justify-between" data-process="stage_a">
-                            <div class="process-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                    <path
-                                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                                </svg>
-                                Stage A: Execution (Scraper)
-                            </div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot stopped"></div>
-                                <button class="btn btn-sm btn-primary" onclick="startProcess('stage_a')">Start</button>
-                            </div>
-                        </div>
-                        <!-- ... rest of processes ... -->
-                        <div class="process surface flex items-center justify-between" data-process="stage_b">
-                            <div class="process-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                    <path
-                                        d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                                </svg>
-                                Stage B: Needs Auditor
-                            </div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot stopped"></div>
-                                <button class="btn btn-sm btn-primary" onclick="startProcess('stage_b')">Start</button>
-                            </div>
-                        </div>
-                        <div class="process surface flex items-center justify-between" data-process="stage_c">
-                            <div class="process-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                    <path
-                                        d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z" />
-                                </svg>
-                                Stage C: AI Generator
-                            </div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot stopped"></div>
-                                <button class="btn btn-sm btn-primary" onclick="startProcess('stage_c')">Start</button>
-                            </div>
-                        </div>
-                        <div class="process surface flex items-center justify-between" data-process="email_sender">
-                            <div class="process-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                                </svg>
-                                Email Outreach
-                            </div>
-                            <div class="flex items-center gap-12">
-                                <div class="status-dot stopped"></div>
-                                <button class="btn btn-sm btn-primary"
-                                    onclick="startProcess('email_sender')">Start</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <div id="leads" class="section">
                     <h2 class="section-title">Lead Database</h2>
@@ -697,44 +438,11 @@
                     </div>
                 </div>
 
-                <div id="settings" class="section">
-                    <h2 class="section-title">Settings</h2>
-                    <div style="max-width: 600px;" class="flex-col gap-12">
-                        <div class="form-group">
-                            <label class="form-label">Gmail Email</label>
-                            <input type="email" class="form-input" value="your_email@gmail.com" id="gmailEmail">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Gmail Password</label>
-                            <input type="password" class="form-input" value="••••••••" id="gmailPassword">
-                        </div>
-                        <div class="flex gap-12">
-                            <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
-                            <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
-                        </div>
-                    </div>
-                </div>
             </div>
         </main>
     </div>
 
     <!-- MODALS -->
-    <div id="runAllModal" class="modal">
-        <div class="modal-content surface">
-            <div class="modal-header flex justify-between"><span>Start All Processes</span><button class="modal-close"
-                    onclick="closeModal('runAll')">×</button></div>
-            <p class="m-b-24" style="color: var(--on-surface-variant); font-size: 14px;">This will start all processes
-                in sequence.</p>
-            <div class="progress">
-                <div class="progress-bar" id="processProgress"></div>
-            </div>
-            <p id="processStatus" style="font-size: 12px; color: var(--on-surface-variant);">Waiting to start...</p>
-            <div class="modal-footer flex gap-12 justify-end m-t-32">
-                <button class="btn btn-secondary" onclick="closeModal('runAll')">Cancel</button>
-                <button class="btn btn-primary" onclick="confirmStartAll()">Start</button>
-            </div>
-        </div>
-    </div>
 
     <div id="newCampaignModal" class="modal">
         <div class="modal-content surface">
@@ -767,7 +475,7 @@
         function showSection(id) {
             document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === id));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.getAttribute('onclick').includes(id)));
-            const titles = { dashboard: 'Dashboard', campaigns: 'Campaigns', processes: 'Processes', leads: 'Leads', settings: 'Settings', analytics: 'Analytics', review: 'Review & Send' };
+            const titles = { dashboard: 'Dashboard', campaigns: 'Campaigns', leads: 'Leads', review: 'Review & Send' };
             document.getElementById('pageTitle').textContent = titles[id] || 'Dashboard';
             if (id === 'leads') fetchLeads();
             if (id === 'analytics') refreshData();
@@ -845,6 +553,9 @@
                                     <span>${mail.website}</span>
                                     <span style="color: var(--secondary);">Score: ${mail.overall_score.toFixed(2)}</span>
                                     <span class="status-badge" style="background: var(--primary-container); color: var(--on-primary-container); padding: 2px 8px; border-radius: 4px;">${mail.bucket}</span>
+                                </div>
+                                <div style="font-size: 12px; color: var(--on-surface-variant);">
+                                    <span>To: ${mail.lead_email || 'contact@' + mail.business_name.toLowerCase().replace(/\s/g, '') + '.com'}</span>
                                 </div>
                             </div>
                         </div>
@@ -945,16 +656,6 @@
                 document.getElementById('qualifiedLeads').textContent = data.qualifiedLeads || 0;
                 document.getElementById('emailsSent').textContent = data.emailsSent || 0;
                 document.getElementById('replies').textContent = data.replies || 0;
-
-                // Monthly Progress
-                const prog = data.monthlyProgress || {};
-                const total = prog.monthly_total || 0;
-                const target = prog.monthly_target || 1;
-                const percent = (total / target * 100).toFixed(1);
-
-                document.getElementById('monthlyTotal').textContent = `${total} / ${target}`;
-                document.getElementById('monthlyPercent').textContent = `${percent}%`;
-                document.getElementById('monthlyProgressBar').style.width = `${percent}%`;
 
                 // Detailed Analytics (if in analytics view)
                 renderDetailedAnalytics(data);
@@ -1099,35 +800,6 @@
             }
         }
 
-        // Settings
-        async function saveSettings() {
-            const settings = {
-                gmailEmail: document.getElementById('gmailEmail').value,
-                gmailPassword: document.getElementById('gmailPassword').value,
-                ollamaUrl: document.getElementById('ollamaUrl').value,
-                googleMapsApiKey: document.getElementById('googleMapsApiKey').value,
-                facebookToken: document.getElementById('facebookToken').value
-            };
-            localStorage.setItem('leadgen_settings', JSON.stringify(settings));
-            addLog('Settings saved', 'success');
-        }
-
-        function loadSettings() {
-            const saved = localStorage.getItem('leadgen_settings');
-            if (saved) {
-                const settings = JSON.parse(saved);
-                Object.keys(settings).forEach(key => {
-                    const element = document.getElementById(key);
-                    if (element) element.value = settings[key];
-                });
-            }
-        }
-
-        function testConnection() {
-            addLog('Testing connections...', 'info');
-            setTimeout(() => addLog('Connection test completed', 'success'), 2000);
-        }
-
         function addLog(msg, type = 'info') {
             const container = document.getElementById('activityLogs');
             const entry = document.createElement('div');
@@ -1138,12 +810,10 @@
         }
 
         function confirmStartAll() {
-            closeModal('runAll');
             const processes = ['stage0', 'stage_a', 'stage_b', 'stage_c', 'email_sender'];
             processes.forEach((p, i) => setTimeout(() => startProcess(p), i * 2000));
         }
 
-        loadSettings();
         showSection('dashboard');
     </script>
 </body>

@@ -288,18 +288,6 @@ RATE_LIMIT_CONFIGS = {
         requests_per_hour=2000,
         burst_allowance=5
     ),
-    'linkedin': RateLimitConfig(
-        requests_per_second=0.5,
-        requests_per_minute=30,
-        requests_per_hour=500,
-        burst_allowance=2
-    ),
-    'facebook': RateLimitConfig(
-        requests_per_second=3,
-        requests_per_minute=200,
-        requests_per_hour=5000,
-        burst_allowance=10
-    ),
     'general': RateLimitConfig(
         requests_per_second=1,
         requests_per_minute=60,
