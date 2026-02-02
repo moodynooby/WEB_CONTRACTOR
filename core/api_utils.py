@@ -104,7 +104,7 @@ def handle_general_error(error: Exception) -> Tuple[Dict, int]:
 class ProcessStartSchema(Schema):
     process = fields.Str(required=True, validate=lambda x: x in [
         'full_pipeline', 'stage0', 'stage_a', 'stage_b', 'stage_c', 
-        'quality_control', 'email_sender'
+        'email_sender'
     ])
 
 class ProcessStopSchema(Schema):
@@ -118,7 +118,7 @@ class LeadsQuerySchema(Schema):
 
 class ReviewActionSchema(Schema):
     campaignId = fields.Int(required=True)
-    action = fields.Str(required=True, validate=lambda x: x in ['send', 'ignore'])
+    action = fields.Str(required=True, validate=lambda x: x in ['send', 'ignore', 'approve'])
     body = fields.Str(load_default=None)
 
 # Decorators

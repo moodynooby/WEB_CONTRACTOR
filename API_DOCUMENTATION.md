@@ -19,7 +19,6 @@ http://localhost:5000
   - `/api/process/start`: 10 requests/minute
   - `/api/process/stop`: 10 requests/minute
   - `/api/analytics`: 20 requests/minute
-  - `/api/quality/check`: 5 requests/minute
   - `/api/review/action`: 10 requests/minute
 
 ### Input Validation
@@ -80,7 +79,7 @@ POST /api/process/start
 Content-Type: application/json
 
 {
-  "process": "stage0|stage_a|stage_b|stage_c|full_pipeline|quality_control|email_sender"
+  "process": "stage0|stage_a|stage_b|stage_c|full_pipeline|email_sender"
 }
 ```
 
@@ -124,12 +123,6 @@ GET /api/stages
 ```
 Returns available pipeline stages.
 
-### Quality Control
-```
-POST /api/quality/check
-```
-Runs quality control check.
-
 ### Email Review
 ```
 GET /api/review/list
@@ -142,7 +135,7 @@ Content-Type: application/json
 
 {
   "campaignId": 123,
-  "action": "send|ignore",
+  "action": "send|ignore|approve",
   "body": "Optional revised email body"
 }
 ```

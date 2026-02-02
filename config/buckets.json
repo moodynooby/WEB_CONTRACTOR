@@ -1,0 +1,147 @@
+{
+    "geographic_focus": {
+        "tier_1_metros": {
+            "tier": "Tier-1",
+            "cities": [
+                "Mumbai",
+                "Delhi",
+                "Bangalore",
+                "Chennai",
+                "Kolkata",
+                "Hyderabad",
+                "Pune"
+            ],
+            "priority": 1
+        },
+        "tier_2_cities": {
+            "tier": "Tier-2",
+            "cities": [
+                "Ahmedabad",
+                "Jaipur",
+                "Lucknow",
+                "Indore",
+                "Surat",
+                "Nagpur",
+                "Bhopal"
+            ],
+            "priority": 2
+        },
+        "gujarat_state": {
+            "tier": "State-wide",
+            "cities": [
+                "Ahmedabad",
+                "Surat",
+                "Vadodara",
+                "Rajkot",
+                "Gandhinagar"
+            ],
+            "priority": 3
+        },
+        "business_districts": {
+            "tier": "Business Districts",
+            "cities": [
+                "Bandra-Mumbai",
+                "Connaught Place-Delhi",
+                "MG Road-Bangalore",
+                "Banjara Hills-Hyderabad"
+            ],
+            "priority": 1
+        }
+    },
+    "buckets": [
+        {
+            "name": "Interior Designers & Architects",
+            "categories": [
+                "Interior Designer",
+                "Architect",
+                "Interior Design Studio",
+                "Architecture Firm"
+            ],
+            "search_patterns": [
+                "Interior Designers {city}",
+                "Interior Design Studio {city}",
+                "Architects {city}",
+                "Architecture firms {city}",
+                "Home interior designers {city}"
+            ],
+            "geographic_segments": [
+                "tier_1_metros",
+                "tier_2_cities"
+            ],
+            "intent_profile": "Many rely on offline portfolio; weak online presence typical; high-value projects",
+            "conversion_probability": 0.75,
+            "monthly_target": 500
+        },
+        {
+            "name": "Local Service Providers",
+            "categories": [
+                "Plumber",
+                "Electrician",
+                "HVAC Service",
+                "Pest Control",
+                "Cleaning Service"
+            ],
+            "search_patterns": [
+                "Plumbers in {city}",
+                "Electricians {city}",
+                "HVAC services {city}",
+                "Pest control {city}",
+                "Cleaning services {city}",
+                "Home repair services {city}"
+            ],
+            "geographic_segments": [
+                "gujarat_state",
+                "tier_2_cities"
+            ],
+            "intent_profile": "Budget-conscious; don't prioritize web; high pain from poor online visibility",
+            "conversion_probability": 0.65,
+            "monthly_target": 2000
+        },
+        {
+            "name": "Small B2B Agencies",
+            "categories": [
+                "Event Management",
+                "Photography Studio",
+                "Marketing Consultant",
+                "Graphics Designer"
+            ],
+            "search_patterns": [
+                "Event management companies {city}",
+                "Photography studios {city}",
+                "Marketing consultants {city}",
+                "Graphic designers {city}",
+                "Digital marketing agencies {city}"
+            ],
+            "geographic_segments": [
+                "tier_1_metros",
+                "business_districts"
+            ],
+            "intent_profile": "Technical skills vary; often have outdated/poorly maintained sites; need professional image",
+            "conversion_probability": 0.70,
+            "monthly_target": 800
+        },
+        {
+            "name": "Niche Professional Services",
+            "categories": [
+                "Accountant",
+                "Tax Consultant",
+                "Notary",
+                "Legal Services"
+            ],
+            "search_patterns": [
+                "Chartered accountants {city}",
+                "Tax consultants {city}",
+                "Law firms {city}",
+                "Legal services {city}",
+                "Notary services {city}"
+            ],
+            "geographic_segments": [
+                "tier_1_metros",
+                "business_districts"
+            ],
+            "intent_profile": "Conservative but aware of credibility gaps; trust and reputation critical",
+            "conversion_probability": 0.60,
+            "monthly_target": 300
+        }
+    ]
+}

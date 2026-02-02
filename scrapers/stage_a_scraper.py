@@ -4,13 +4,8 @@ Executes the discovery plan across multiple sources with rate limiting
 """
 
 import time
-import random
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-import sqlite3
-import json
-
-# Import existing scrapers
 from scrapers.google_maps_scraper import GoogleMapsScraper
 from scrapers.yellow_pages_scraper import YellowPagesScraper
 from core.rate_limiter import get_scraper
@@ -127,7 +122,4 @@ class StageAScraper:
         for source, result in results['source_results'].items():
             print(f"{source.replace('_', ' ').title()}: Found {result['leads_found']}, Saved {result['leads_saved']}")
 
-if __name__ == '__main__':
-    scraper = StageAScraper()
-    print("Stage A: Intelligent Scraper Orchestrator")
-    results = scraper.run_all_sources(max_queries_per_source=5)
+

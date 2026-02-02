@@ -32,116 +32,53 @@ class LeadBucketManager:
     """Manages lead bucket definitions and targeting strategies"""
     
     def __init__(self, config_file: Optional[str] = None):
-        self.config_file = config_file or os.getenv('LEAD_BUCKETS_CONFIG', 'lead_buckets_config.json')
-        self.geographic_focus = self._define_geographic_focus()
-        self.buckets = self._define_buckets()
+        self.config_dir = os.path.join(os.getcwd(), 'config')
+        self.bucket_config_file = os.path.join(self.config_dir, 'buckets.json')
+        
+        # Load config
+        try:
+            with open(self.bucket_config_file, 'r') as f:
+                self.config_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Warning: Config file not found at {self.bucket_config_file}. Using empty defaults.")
+            self.config_data = {"geographic_focus": {}, "buckets": []}
+            
+        self.config_file = config_file or os.path.join(self.config_dir, 'dynamic_terms.json')
+        self.geographic_focus = self._load_geographic_focus()
+        self.buckets = self._load_buckets()
         self.dynamic_search_terms = self._load_dynamic_terms()
     
-    def _define_geographic_focus(self) -> Dict[str, GeographicSegment]:
-        """Define Indian geographic segments by priority"""
-        return {
-            "tier_1_metros": GeographicSegment(
-                tier="Tier-1",
-                cities=["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"],
-                priority=1
-            ),
-            "tier_2_cities": GeographicSegment(
-                tier="Tier-2", 
-                cities=["Ahmedabad", "Jaipur", "Lucknow", "Indore", "Surat", "Nagpur", "Bhopal"],
-                priority=2
-            ),
-            "gujarat_state": GeographicSegment(
-                tier="State-wide",
-                cities=["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Gandhinagar"],
-                priority=3
-            ),
-            "business_districts": GeographicSegment(
-                tier="Business Districts",
-                cities=["Bandra-Mumbai", "Connaught Place-Delhi", "MG Road-Bangalore", "Banjara Hills-Hyderabad"],
-                priority=1
+    def _load_geographic_focus(self) -> Dict[str, GeographicSegment]:
+        """Load geographic segments from config"""
+        focus = {}
+        for key, data in self.config_data.get('geographic_focus', {}).items():
+            focus[key] = GeographicSegment(
+                tier=data['tier'],
+                cities=data['cities'],
+                priority=data['priority']
             )
-        }
+        return focus
     
-    def _define_buckets(self) -> List[LeadBucket]:
-        """Define primary lead buckets with targeting parameters"""
-        return [
-            LeadBucket(
-                name="Interior Designers & Architects",
-                categories=["Interior Designer", "Architect", "Interior Design Studio", "Architecture Firm"],
-                search_patterns=[
-                    "Interior Designers {city}",
-                    "Interior Design Studio {city}", 
-                    "Architects {city}",
-                    "Architecture firms {city}",
-                    "Home interior designers {city}"
-                ],
-                geographic_segments=[
-                    self.geographic_focus["tier_1_metros"],
-                    self.geographic_focus["tier_2_cities"]
-                ],
-                intent_profile="Many rely on offline portfolio; weak online presence typical; high-value projects",
-                conversion_probability=0.75,
-                monthly_target=500
-            ),
+    def _load_buckets(self) -> List[LeadBucket]:
+        """Load lead buckets from config"""
+        buckets = []
+        for data in self.config_data.get('buckets', []):
+            # Map geographic segment names to actual objects
+            geo_segments = []
+            for seg_name in data.get('geographic_segments', []):
+                if seg_name in self.geographic_focus:
+                    geo_segments.append(self.geographic_focus[seg_name])
             
-            LeadBucket(
-                name="Local Service Providers",
-                categories=["Plumber", "Electrician", "HVAC Service", "Pest Control", "Cleaning Service"],
-                search_patterns=[
-                    "Plumbers in {city}",
-                    "Electricians {city}",
-                    "HVAC services {city}",
-                    "Pest control {city}",
-                    "Cleaning services {city}",
-                    "Home repair services {city}"
-                ],
-                geographic_segments=[
-                    self.geographic_focus["gujarat_state"],
-                    self.geographic_focus["tier_2_cities"]
-                ],
-                intent_profile="Budget-conscious; don't prioritize web; high pain from poor online visibility",
-                conversion_probability=0.65,
-                monthly_target=2000
-            ),
-            
-            LeadBucket(
-                name="Small B2B Agencies", 
-                categories=["Event Management", "Photography Studio", "Marketing Consultant", "Graphics Designer"],
-                search_patterns=[
-                    "Event management companies {city}",
-                    "Photography studios {city}",
-                    "Marketing consultants {city}",
-                    "Graphic designers {city}",
-                    "Digital marketing agencies {city}"
-                ],
-                geographic_segments=[
-                    self.geographic_focus["tier_1_metros"],
-                    self.geographic_focus["business_districts"]
-                ],
-                intent_profile="Technical skills vary; often have outdated/poorly maintained sites; need professional image",
-                conversion_probability=0.70,
-                monthly_target=800
-            ),
-            
-            LeadBucket(
-                name="Niche Professional Services",
-                categories=["Accountant", "Tax Consultant", "Notary", "Legal Services"],
-                search_patterns=[
-                    "Chartered accountants {city}",
-                    "Tax consultants {city}",
-                    "Law firms {city}",
-                    "Legal services {city}",
-                    "Notary services {city}"
-                ],
-                geographic_segments=[
-                    self.geographic_focus["tier_1_metros"],
-                    self.geographic_focus["business_districts"]
-                ],
-                intent_profile="Conservative but aware of credibility gaps; trust and reputation critical",
-                conversion_probability=0.60,
-                monthly_target=300
-            )
-        ]
+            buckets.append(LeadBucket(
+                name=data['name'],
+                categories=data['categories'],
+                search_patterns=data['search_patterns'],
+                geographic_segments=geo_segments,
+                intent_profile=data['intent_profile'],
+                conversion_probability=data['conversion_probability'],
+                monthly_target=data['monthly_target']
+            ))
+        return buckets
     
     def get_search_queries(self, bucket_name: str = None) -> List[Dict]:
         """Generate all search queries for targeted scraping"""

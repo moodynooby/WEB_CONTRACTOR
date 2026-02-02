@@ -3,19 +3,14 @@ Main Pipeline Orchestrator
 Coordinates all stages and provides unified interface
 """
 
-import time
-import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import sqlite3
 
 # Import all stages
 from core.stage0_orchestrator import Stage0Orchestrator
 from scrapers.stage_a_scraper import StageAScraper
 from agents.stage_b_auditor import StageBAuditor
 from agents.stage_c_messaging import StageCEmailGenerator
-from agents.quality_control_agent import QualityControlAgent
-
 # Import utilities
 from core.db import get_database_stats, log_scraping_session, record_analytic
 from core.lead_buckets import LeadBucketManager
@@ -30,9 +25,7 @@ class PipelineOrchestrator:
         self.stage0 = Stage0Orchestrator()
         self.stage_a = StageAScraper()
         self.stage_b = StageBAuditor()
-        self.stage_c = StageCEmailGenerator()
-        self.quality_control = QualityControlAgent()
-        
+        self.stage_c = StageCEmailGenerator()        
         # Pipeline state
         self.pipeline_state = {
             'running': False,
@@ -67,12 +60,6 @@ class PipelineOrchestrator:
                 'schedule': 'daily',
                 'priority': 4,
                 'max_runtime_minutes': 60
-            },
-            'quality_control': {
-                'enabled': True,
-                'schedule': 'hourly',
-                'priority': 5,
-                'max_runtime_minutes': 15
             }
         }
         
@@ -166,21 +153,6 @@ class PipelineOrchestrator:
                     results['errors'].append(error_msg)
                     print(f"❌ {error_msg}")
             
-            # Quality Control
-            if self.stage_configs['quality_control']['enabled']:
-                self.pipeline_state['current_stage'] = 'Quality Control'
-                print(f"\n🛡️  QUALITY CONTROL")
-                
-                try:
-                    qc_results = self.quality_control.run_quality_check(comprehensive=True)
-                    results['stages_completed'].append('Quality Control')
-                    results['quality_issues'] = qc_results.get('total_alerts', 0)
-                    print(f"✅ Quality Control completed: {results['quality_issues']} issues found")
-                except Exception as e:
-                    error_msg = f"Quality Control failed: {str(e)}"
-                    results['stages_failed'].append('Quality Control')
-                    results['errors'].append(error_msg)
-                    print(f"❌ {error_msg}")
             
             # Calculate total duration
             results['duration'] = (datetime.now() - datetime.fromisoformat(results['pipeline_start'])).total_seconds()
@@ -212,8 +184,7 @@ class PipelineOrchestrator:
             'stage0': self.stage0,
             'stage_a': self.stage_a,
             'stage_b': self.stage_b,
-            'stage_c': self.stage_c,
-            'quality_control': self.quality_control
+            'stage_c': self.stage_c
         }
         
         if stage_name not in stage_map:
@@ -234,8 +205,6 @@ class PipelineOrchestrator:
                 results = self.stage_b.audit_pending_leads(**kwargs)
             elif stage_name == 'stage_c':
                 results = self.stage_c.generate_emails_for_qualified_leads(**kwargs)
-            elif stage_name == 'quality_control':
-                results = self.quality_control.run_quality_check(**kwargs)
             
             print(f"✅ {stage_name.upper()} completed successfully")
             return {'status': 'success', 'results': results}
@@ -249,9 +218,6 @@ class PipelineOrchestrator:
         """Get current pipeline status"""
         # Get database stats
         db_stats = get_database_stats()
-        
-        # Get quality dashboard
-        quality_dashboard = self.quality_control.get_quality_dashboard()
         
         # Get stage-specific stats
         stage_stats = {}
@@ -268,10 +234,9 @@ class PipelineOrchestrator:
         return {
             'pipeline_state': self.pipeline_state,
             'database_stats': db_stats,
-            'quality_dashboard': quality_dashboard,
             'stage_stats': stage_stats,
             'stage_configs': self.stage_configs,
-            'last_quality_check': datetime.now().isoformat()
+            'last_run_check': datetime.now().isoformat()
         }
     
     def _print_pipeline_summary(self, results: Dict):
@@ -297,7 +262,6 @@ class PipelineOrchestrator:
         print(f"  Total Leads Generated: {results['total_leads_generated']}")
         print(f"  Total Leads Audited: {results['total_leads_audited']}")
         print(f"  Total Emails Generated: {results['total_emails_generated']}")
-        print(f"  Quality Issues Found: {results['quality_issues']}")
         
         if results['errors']:
             print(f"\n⚠️  ERRORS:")
@@ -356,12 +320,6 @@ class PipelineOrchestrator:
                 notes="Total emails generated in Stage C"
             )
         
-        if results['quality_issues'] > 0:
-            record_analytic(
-                metric_name='quality_issues_per_run',
-                metric_value=results['quality_issues'],
-                notes="Issues found by Quality Control"
-            )
     
     def schedule_pipeline_run(self, schedule_type: str = 'daily') -> Dict:
         """Schedule pipeline runs (placeholder for future implementation)"""
@@ -389,10 +347,7 @@ class PipelineOrchestrator:
         if qualified_leads > total_emails + 20:
             recommendations.append("📧 Run Stage C email generator - qualified leads waiting for emails")
         
-        # Check quality issues
-        quality_issues = status['quality_dashboard']['recent_alerts']
-        if quality_issues > 5:
-            recommendations.append("🛡️  Run Quality Control - multiple recent issues detected")
+
         
         # Check pipeline health
         if status['pipeline_state']['errors']:
@@ -411,59 +366,4 @@ class PipelineOrchestrator:
         
         return recommendations
 
-if __name__ == '__main__':
-    # Demo usage
-    orchestrator = PipelineOrchestrator()
-    
-    print("🚀 Web Contractor Pipeline Orchestrator")
-    print("Choose an option:")
-    print("1. Run full pipeline")
-    print("2. Run individual stage")
-    print("3. Get pipeline status")
-    print("4. Get recommendations")
-    print("5. Run quality check only")
-    
-    choice = input("Enter choice (1-5): ").strip()
-    
-    if choice == '1':
-        print("Running full pipeline...")
-        results = orchestrator.run_full_pipeline(manual_mode=True)
-        print(f"\n🎉 Pipeline completed!")
-    elif choice == '2':
-        print("Available stages: stage0, stage_a, stage_b, stage_c, quality_control")
-        stage = input("Enter stage name: ").strip()
-        results = orchestrator.run_individual_stage(stage)
-        if results['status'] == 'success':
-            print(f"✅ {stage} completed successfully")
-        else:
-            print(f"❌ {stage} failed: {results.get('error', 'Unknown error')}")
-    elif choice == '3':
-        status = orchestrator.get_pipeline_status()
-        print(f"\n=== PIPELINE STATUS ===")
-        print(f"Running: {status['pipeline_state']['running']}")
-        print(f"Total Runs: {status['pipeline_state']['total_runs']}")
-        print(f"Last Run: {status['pipeline_state']['last_run']}")
-        
-        print(f"\n--- Database Stats ---")
-        db_stats = status['database_stats']
-        if 'leads_by_status' in db_stats:
-            print(f"Leads by Status: {db_stats['leads_by_status']}")
-        if 'leads_by_source' in db_stats:
-            print(f"Leads by Source: {db_stats['leads_by_source']}")
-        
-        print(f"\n--- Quality Dashboard ---")
-        quality = status['quality_dashboard']
-        print(f"Total Leads: {quality['total_leads']}")
-        print(f"Qualified: {quality['qualified_leads']}")
-        print(f"Emails: {quality['total_emails']}")
-        print(f"Qualification Rate: {quality['qualification_rate']:.1%}")
-    elif choice == '4':
-        recommendations = orchestrator.get_pipeline_recommendations()
-        print(f"\n=== RECOMMENDATIONS ===")
-        for rec in recommendations:
-            print(rec)
-    elif choice == '5':
-        results = orchestrator.quality_control.run_quality_check(comprehensive=True)
-        print(f"\n🛡️  Quality check completed: {results['total_alerts']} issues found")
-    else:
-        print("Invalid choice")
+

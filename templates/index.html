@@ -764,6 +764,7 @@
             const body = document.getElementById(`body-${campaignId}`).value;
             const btn = event.target;
             const originalText = btn.textContent;
+            const card = btn.closest('.surface');
 
             btn.disabled = true;
             btn.textContent = action === 'send' ? 'Sending...' : 'Ignoring...';
@@ -776,10 +777,19 @@
                 });
 
                 const result = await response.json();
-                if (result.status) {
-                    fetchReviewList();
+                if (result.success || result.status) {
+                    // Success animation/feedback
+                    card.style.transition = 'all 0.4s ease';
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateY(-20px)';
+                    setTimeout(() => {
+                        card.remove();
+                        if (document.querySelectorAll('#reviewContainer .surface:not(#noReviewLeads)').length === 0) {
+                            fetchReviewList();
+                        }
+                    }, 400);
                 } else {
-                    alert(`Action failed: ${result.error}`);
+                    alert(`Action failed: ${result.error || result.message}`);
                     btn.disabled = false;
                     btn.textContent = originalText;
                 }

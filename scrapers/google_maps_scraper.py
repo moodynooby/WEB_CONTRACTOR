@@ -11,6 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from scrapers.base_scraper import BaseScraper
+from core.selenium_utils import SeleniumDriverFactory
 
 class GoogleMapsScraper(BaseScraper):
     """Google Maps scraper using Selenium for web scraping"""
@@ -25,29 +26,14 @@ class GoogleMapsScraper(BaseScraper):
         if self.driver:
             return
             
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Run in headless mode
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1920,1080")
-        
-        # Add random user agent to options to look more human
-        user_agent = random.choice([
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-        ])
-        chrome_options.add_argument(f"user-agent={user_agent}")
-        
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 15)
+        self.driver = SeleniumDriverFactory.create_driver(headless=True)
+        if self.driver:
+            self.wait = WebDriverWait(self.driver, 15)
 
     def close(self):
         """Close the WebDriver"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
+        SeleniumDriverFactory.safe_close(self.driver)
+        self.driver = None
 
     def search_places_selenium(self, query: str, location_hint: str = None) -> List[Dict]:
         """Search for places using Google Maps website via Selenium"""
@@ -295,5 +281,4 @@ class GoogleMapsScraper(BaseScraper):
         
         return all_leads
 
-if __name__ == '__main__':
-    scraper = GoogleMapsScraper()
+

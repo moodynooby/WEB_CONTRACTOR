@@ -1,4 +1,5 @@
 he system targets businesses with web presence gaps (particularly Interior Designers, Web Agencies, Local Services) and converts them through value-first messaging.
+DO NOT ACCESS DATABASE OR SELENIUM FROM A FILE WE AHVE CENTRALISED SUPPORT FOR IT
 
 Layer,Tool,Purpose,Cost
 Scraping,Selenium + BeautifulSoup,Extracting data from websites,$0

@@ -15,6 +15,7 @@ import re
 from typing import List, Dict, Optional
 from urllib.parse import quote
 from scrapers.base_scraper import BaseScraper
+from core.selenium_utils import SeleniumDriverFactory
 
 class YellowPagesScraper(BaseScraper):
     """Enhanced Yellow Pages scraper using Selenium automation"""
@@ -26,22 +27,7 @@ class YellowPagesScraper(BaseScraper):
         
     def _setup_driver(self) -> webdriver.Chrome:
         """Setup Chrome WebDriver with options"""
-        chrome_options = Options()
-        if self.headless:
-            chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        
-        try:
-            driver = webdriver.Chrome(options=chrome_options)
-            driver.set_page_load_timeout(30)
-            return driver
-        except Exception as e:
-            print(f"Failed to setup WebDriver: {e}")
-            return None
+        return SeleniumDriverFactory.create_driver(headless=self.headless)
 
     def scrape_yellow_directory(self, max_queries: int = 20) -> List[Dict]:
         """Main scraping function for Yellow Pages using discovery plan"""
@@ -154,12 +140,4 @@ class YellowPagesScraper(BaseScraper):
         except Exception:
             return None
 
-if __name__ == '__main__':
-    scraper = YellowPagesScraper(headless=True)
-    print("=== YELLOW PAGES LEAD SCRAPER ===")
-    leads = scraper.scrape_yellow_directory(max_queries=2)
-    if leads:
-        print(f"\nFound {len(leads)} total leads")
-        scraper.save_to_database(leads)
-    else:
-        print("No leads found.")
+

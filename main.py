@@ -4,7 +4,6 @@ from flask_mail import Mail, Message
 import json
 import threading
 import subprocess
-import sqlite3
 import os
 import time
 from datetime import datetime, timedelta
@@ -22,10 +21,7 @@ from loguru import logger
 
 # Import new pipeline orchestrator
 from core.pipeline_orchestrator import PipelineOrchestrator
-from agents.quality_control_agent import QualityControlAgent
-
 # Import legacy components for backward compatibility
-from core.db import get_database_stats, log_scraping_session, record_analytic
 from agents.email_sender import send_pending_emails, fetch_reviewable_emails, update_campaign_status, send_email
 
 app = Flask(__name__)
@@ -56,8 +52,6 @@ mail = Mail(app)
 
 # Initialize pipeline orchestrator
 pipeline = PipelineOrchestrator()
-quality_control = QualityControlAgent()
-
 # Store process states and threads
 processes = {
     'full_pipeline': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
@@ -65,18 +59,10 @@ processes = {
     'stage_a': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
     'stage_b': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
     'stage_c': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
-    'quality_control': {'running': False, 'thread': None, 'start_time': None, 'progress': 0},
     'email_sender': {'running': False, 'thread': None, 'start_time': None, 'progress': 0}
 }
 
-def get_db_connection():
-    try:
-        conn = sqlite3.connect('leads.db')
-        conn.row_factory = sqlite3.Row
-        return conn
-    except sqlite3.Error as e:
-        print(f"Database connection error: {e}")
-        return None
+
 
 @app.route('/')
 def index():
@@ -89,11 +75,10 @@ def get_stats():
     try:
         pipeline_status = pipeline.get_pipeline_status()
         db_stats = pipeline_status['database_stats']
-        quality_dashboard = pipeline_status['quality_dashboard']
         
         # Extract key metrics for frontend
         total_leads = db_stats.get('total_leads', 0)
-        qualified_leads = quality_dashboard.get('qualified_leads', 0)
+        qualified_leads = db_stats.get('leads_by_status', {}).get('qualified', 0)
         emails_sent = db_stats.get('emails_by_status', {}).get('sent', 0)
         replies = db_stats.get('emails_by_status', {}).get('replied', 0)
         
@@ -106,8 +91,7 @@ def get_stats():
             'emailsSent': emails_sent,
             'replies': replies,
             'monthlyProgress': monthly_progress,
-            'pipelineState': pipeline_status['pipeline_state'],
-            'qualityIssues': quality_dashboard.get('recent_alerts', 0)
+            'pipelineState': pipeline_status['pipeline_state']
         }
         
         return success_response(data, 'Statistics retrieved successfully')
@@ -118,61 +102,21 @@ def get_stats():
 @rate_limit('60 per minute')
 @validate_query(LeadsQuerySchema)
 def get_leads():
-    conn = get_db_connection()
-    if not conn:
-        raise APIError('Database connection failed', 500)
-    
     try:
-        cursor = conn.cursor()
-        
         # Get validated query parameters
         page = request.validated_query['page']
         per_page = request.validated_query['per_page']
         status = request.validated_query['status']
         bucket = request.validated_query['bucket']
         
-        # Build query
-        where_clause = "WHERE 1=1"
-        params = []
+        from core.db import LeadRepository
+        repo = LeadRepository()
         
-        if status:
-            where_clause += " AND l.status = ?"
-            params.append(status)
+        result = repo.get_leads(page, per_page, status, bucket)
         
-        if bucket:
-            where_clause += " AND l.bucket = ?"
-            params.append(bucket)
-        
-        # Get total count
-        count_query = f"SELECT COUNT(*) FROM leads l {where_clause}"
-        total = cursor.execute(count_query, params).fetchone()[0]
-        
-        # Get paginated results
-        offset = (page - 1) * per_page
-        query = f'''
-            SELECT l.business_name, l.category, l.location, l.website, l.status, l.quality_score, l.bucket, l.source
-            FROM leads l
-            {where_clause}
-            ORDER BY l.created_at DESC
-            LIMIT ? OFFSET ?
-        '''
-        leads = cursor.execute(query, params + [per_page, offset]).fetchall()
-        
-        data = {
-            'leads': [dict(ix) for ix in leads],
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': total,
-                'pages': (total + per_page - 1) // per_page
-            }
-        }
-        
-        return success_response(data, f'Retrieved {len(leads)} leads')
-    except sqlite3.Error as e:
+        return success_response(result, f"Retrieved {len(result['leads'])} leads")
+    except Exception as e:
         raise APIError(f'Database query failed: {e}', 500)
-    finally:
-        conn.close()
 
 @app.route('/api/process/start', methods=['POST'])
 @rate_limit('10 per minute')
@@ -216,11 +160,6 @@ def start_process():
             elif process_key == 'stage_c':
                 # Run Stage C only
                 results = pipeline.run_individual_stage('stage_c', batch_size=50)
-                processes[process_key]['progress'] = 100
-                
-            elif process_key == 'quality_control':
-                # Run quality control only
-                results = pipeline.run_individual_stage('quality_control', comprehensive=True)
                 processes[process_key]['progress'] = 100
                 
             elif process_key == 'email_sender':
@@ -280,39 +219,16 @@ def get_analytics():
     try:
         pipeline_status = pipeline.get_pipeline_status()
         
-        # Get scraping logs for last 7 days
-        conn = get_db_connection()
-        if not conn:
-            raise APIError('Database connection failed', 500)
+        from core.db import LeadRepository
+        repo = LeadRepository()
         
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT source, DATE(scrape_date) as date, 
-                   SUM(leads_found) as found, 
-                   SUM(leads_saved) as saved
-            FROM scraping_logs 
-            WHERE scrape_date >= date('now', '-7 days')
-            GROUP BY source, DATE(scrape_date)
-            ORDER BY date DESC
-        ''')
-        scraping_data = cursor.fetchall()
-        
-        # Get analytics metrics
-        cursor.execute('''
-            SELECT metric_name, metric_value, source, date_recorded
-            FROM analytics 
-            WHERE date_recorded >= date('now', '-30 days')
-            ORDER BY date_recorded DESC
-        ''')
-        analytics_data = cursor.fetchall()
-        
-        conn.close()
+        scraping_data = repo.get_scraping_logs(days=7)
+        analytics_data = repo.get_recent_analytics(days=30)
         
         data = {
-            'scraping_logs': [dict(ix) for ix in scraping_data],
-            'analytics': [dict(ix) for ix in analytics_data],
-            'pipeline_status': pipeline_status,
-            'quality_dashboard': pipeline_status['quality_dashboard']
+            'scraping_logs': scraping_data,
+            'analytics': analytics_data,
+            'pipeline_status': pipeline_status
         }
         
         return success_response(data, 'Analytics data retrieved successfully')
@@ -360,35 +276,6 @@ def get_pipeline_recommendations():
     except Exception as e:
         raise APIError(f'Recommendations retrieval failed: {e}', 500)
 
-@app.route('/api/quality/check', methods=['POST'])
-@rate_limit('5 per minute')
-def run_quality_check():
-    """Run quality control check"""
-    if processes['quality_control']['running']:
-        raise APIError('Quality control already running', 400)
-    
-    def run_qc():
-        try:
-            processes['quality_control']['running'] = True
-            processes['quality_control']['start_time'] = datetime.now()
-            processes['quality_control']['progress'] = 0
-            
-            results = quality_control.run_quality_check(comprehensive=True)
-            processes['quality_control']['progress'] = 100
-            
-        except Exception as e:
-            logger.error(f"Quality control failed: {e}")
-        finally:
-            processes['quality_control']['running'] = False
-            processes['quality_control']['thread'] = None
-    
-    thread = threading.Thread(target=run_qc)
-    thread.daemon = True
-    thread.start()
-    
-    processes['quality_control']['thread'] = thread
-    
-    return success_response(None, 'Quality control check started')
 
 @app.route('/api/stages', methods=['GET'])
 @rate_limit('30 per minute')
@@ -434,24 +321,17 @@ def review_action():
             
         elif action == 'send':
             # Get email details first
-            conn = get_db_connection()
-            if not conn:
-                raise APIError('Database connection failed', 500)
-                
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT l.email, l.business_name, l.id as lead_id, ec.subject, ec.body 
-                FROM email_campaigns ec 
-                JOIN leads l ON ec.lead_id = l.id 
-                WHERE ec.id = ?
-            ''', (campaign_id,))
-            row = cursor.fetchone()
-            conn.close()
+            from core.db import LeadRepository
+            repo = LeadRepository()
+            
+            row = repo.get_email_campaign(campaign_id)
             
             if not row:
                 raise APIError('Campaign not found', 404)
                 
-            lead_email = row['email'] or f"contact@{row['business_name'].lower().replace(' ', '')}.com"
+            lead_email = row['email']
+            if not lead_email:
+                raise APIError(f"Cannot send: No email address for {row['business_name']}. Please edit the lead or run discovery to find an email.", 400)
             subject = row['subject']
             final_body = body if body else row['body']
             
@@ -460,6 +340,10 @@ def review_action():
                 return success_response({'campaignId': campaign_id}, 'Email sent successfully')
             else:
                 raise APIError('SMTP failure', 500)
+        
+        if action == 'approve':
+            update_campaign_status(campaign_id, 'approved', body)
+            return success_response({'campaignId': campaign_id}, 'Email approved for batch sending')
                 
         raise APIError('Invalid action', 400)
     except APIError:

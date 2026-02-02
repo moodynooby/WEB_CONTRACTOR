@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 import os
-import sqlite3
 import time
 from typing import Dict, List, Optional
 
@@ -49,290 +48,107 @@ class OllamaEmailGenerator:
         self.ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
         self.model_name = os.getenv('OLLAMA_MODEL', 'llama3.2')
         
-        # Test Ollama connection
-        self._test_connection()
-        
         # Email templates by bucket and issue type
-        self.templates = self._initialize_templates()
+        self.templates = self._load_templates()
     
-    def _test_connection(self):
-        """Test connection to Ollama"""
+    def _load_templates(self) -> Dict[str, Dict[str, EmailTemplate]]:
+        """Load email templates from JSON config"""
+        config_path = os.path.join(os.getcwd(), 'config', 'email_templates.json')
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
-            if response.status_code == 200:
-                print(f"✅ Connected to Ollama at {self.ollama_url}")
-            else:
-                print(f"⚠️  Ollama responded with status {response.status_code}")
+            with open(config_path, 'r') as f:
+                data = json.load(f)
+                
+            templates = {}
+            for bucket, bucket_templates in data.get('templates', {}).items():
+                templates[bucket] = {}
+                for issue, tpl_data in bucket_templates.items():
+                    templates[bucket][issue] = EmailTemplate(
+                        template_id=tpl_data['template_id'],
+                        bucket_name=tpl_data['bucket_name'],
+                        issue_type=tpl_data['issue_type'],
+                        subject_pattern=tpl_data['subject_pattern'],
+                        body_template=tpl_data['body_template'],
+                        tone=tpl_data['tone'],
+                        word_count_range=tuple(tpl_data['word_count_range']),
+                        conversion_focus=tpl_data['conversion_focus']
+                    )
+            return templates
+        except FileNotFoundError:
+            print(f"Warning: Email template config not found at {config_path}. Using empty defaults.")
+            return {}
         except Exception as e:
-            print(f"❌ Cannot connect to Ollama: {e}")
-            print("Make sure Ollama is running: ollama serve")
+            print(f"Error loading email templates: {e}")
+            return {}
     
-    def _initialize_templates(self) -> Dict[str, Dict[str, EmailTemplate]]:
-        """Initialize email templates by bucket and issue type"""
-        templates = {
-            'Interior Designers & Architects': {
-                'missing_ssl': EmailTemplate(
-                    template_id='int_missing_ssl',
-                    bucket_name='Interior Designers & Architects',
-                    issue_type='missing_ssl',
-                    subject_pattern='Security notice for {business_name}',
-                    body_template='''Hi {business_name},
-
-I noticed your beautiful portfolio website isn't using HTTPS encryption. In today's digital landscape, potential clients expect secure browsing, especially when viewing design portfolios.
-
-A simple SSL certificate would:
-- Build trust with high-value clients
-- Improve your Google ranking
-- Protect your portfolio images from theft
-- Show professionalism to architecture firms
-
-I can help you get this set up in under 24 hours. Your work deserves a secure showcase.
-
-Would you be open to a quick chat about securing your site?
-
-Best regards,
-[Your Name]
-Web Security Specialist''',
-                    tone='professional',
-                    word_count_range=(110, 130),
-                    conversion_focus='trust_and_security'
-                ),
-                'mobile_unfriendly': EmailTemplate(
-                    template_id='int_mobile',
-                    bucket_name='Interior Designers & Architects',
-                    issue_type='mobile_unfriendly',
-                    subject_pattern='Mobile experience for {business_name}',
-                    body_template='''Hi {business_name},
-
-I was admiring your design work on my phone and noticed your site doesn't display properly on mobile. With 70% of clients browsing on phones, you might be missing opportunities.
-
-Your stunning designs deserve to shine on every device. A responsive update would:
-- Impress mobile-first clients
-- Showcase your portfolio beautifully on phones
-- Help you stand out from competitors
-- Increase inquiry rates
-
-I specialize in making design portfolios mobile-perfect. Quick turnaround, beautiful results.
-
-Interested in seeing how your site could look on mobile?
-
-Best regards,
-[Your Name]
-Mobile Design Specialist''',
-                    tone='friendly',
-                    word_count_range=(115, 135),
-                    conversion_focus='visual_appeal'
-                ),
-                'slow_loading': EmailTemplate(
-                    template_id='int_slow',
-                    bucket_name='Interior Designers & Architects',
-                    issue_type='slow_loading',
-                    subject_pattern='Portfolio speed for {business_name}',
-                    body_template='''Hi {business_name},
-
-Your design portfolio is impressive, but it's taking over 5 seconds to load. Potential clients likely leave before seeing your best work.
-
-Fast loading matters because:
-- 53% of visitors abandon sites after 3 seconds
-- Google ranks faster sites higher
-- Slow sites appear unprofessional
-- You lose high-value client inquiries
-
-I can optimize your portfolio to load in under 2 seconds while maintaining image quality. Your work deserves instant impact.
-
-Want me to show you the speed improvement potential?
-
-Best regards,
-[Your Name]
-Performance Specialist''',
-                    tone='professional',
-                    word_count_range=(110, 130),
-                    conversion_focus='performance'
-                )
-            },
-            'Local Service Providers': {
-                'missing_ssl': EmailTemplate(
-                    template_id='svc_missing_ssl',
-                    bucket_name='Local Service Providers',
-                    issue_type='missing_ssl',
-                    subject_pattern='Customer trust for {business_name}',
-                    body_template='''Hi {business_name},
-
-I found your business while searching for local services, but noticed your site isn't secure (no HTTPS). Many customers won't trust non-secure sites with their information.
-
-Security matters for service businesses because:
-- Customers feel safer sharing contact details
-- Google favors secure sites in local search
-- Builds credibility for your services
-- Helps you stand out from competitors
-
-I can add SSL security quickly and affordably. More trust = more customers.
-
-Would you like to discuss securing your site?
-
-Best regards,
-[Your Name]
-Local Business Specialist''',
-                    tone='friendly',
-                    word_count_range=(110, 130),
-                    conversion_focus='trust_and_leads'
-                ),
-                'no_contact_info': EmailTemplate(
-                    template_id='svc_no_contact',
-                    bucket_name='Local Service Providers',
-                    issue_type='no_contact_info',
-                    subject_pattern='Missing calls for {business_name}',
-                    body_template='''Hi {business_name},
-
-I was interested in your services but couldn't find your phone number easily. You might be missing customer calls every day.
-
-Clear contact information helps:
-- Customers reach you immediately
-- Emergency service inquiries
-- Local search rankings
-- Build trust with visitors
-
-A simple contact section could double your customer inquiries. Small change, big impact.
-
-Want me to show you how to make your contact info impossible to miss?
-
-Best regards,
-[Your Name]
-Customer Acquisition Specialist''',
-                    tone='urgent',
-                    word_count_range=(105, 125),
-                    conversion_focus='lead_generation'
-                ),
-                'poor_navigation': EmailTemplate(
-                    template_id='svc_navigation',
-                    bucket_name='Local Service Providers',
-                    issue_type='poor_navigation',
-                    subject_pattern='Website navigation for {business_name}',
-                    body_template='''Hi {business_name},
-
-I was exploring your services but had trouble finding what I needed. Poor navigation confuses customers and costs you business.
-
-Good navigation helps customers:
-- Find your services quickly
-- Understand what you offer
-- Contact you faster
-- Choose you over competitors
-
-I can redesign your navigation to guide customers straight to your services. More clarity = more customers.
-
-Interested in seeing how better navigation could help?
-
-Best regards,
-[Your Name]
-User Experience Specialist''',
-                    tone='casual',
-                    word_count_range=(110, 130),
-                    conversion_focus='user_experience'
-                )
-            },
-            'Small B2B Agencies': {
-                'missing_meta': EmailTemplate(
-                    template_id='b2b_meta',
-                    bucket_name='Small B2B Agencies',
-                    issue_type='missing_meta',
-                    subject_pattern='Google visibility for {business_name}',
-                    body_template='''Hi {business_name},
-
-Your agency does great work, but you're invisible to Google searches because you're missing meta descriptions. Potential clients can't find you online.
-
-Meta descriptions help by:
-- Appearing in Google search results
-- Explaining your services to searchers
-- Increasing click-through rates
-- Attracting your ideal clients
-
-I can write compelling meta descriptions that get you found by the right clients. Better visibility = better clients.
-
-Want help getting discovered by your target market?
-
-Best regards,
-[Your Name]
-SEO Specialist''',
-                    tone='professional',
-                    word_count_range=(110, 130),
-                    conversion_focus='visibility_and_leads'
-                ),
-                'old_technology': EmailTemplate(
-                    template_id='b2b_old_tech',
-                    bucket_name='Small B2B Agencies',
-                    issue_type='old_technology',
-                    subject_pattern='Website update for {business_name}',
-                    body_template='''Hi {business_name},
-
-I noticed your site is running on outdated technology. This can make your agency appear behind the times to potential B2B clients.
-
-Modern technology shows clients you're:
-- Current with industry standards
-- Serious about your online presence
-- Technologically capable
-- Worth premium rates
-
-I can modernize your site while keeping your brand intact. Look current, charge more.
-
-Ready to update your digital image?
-
-Best regards,
-[Your Name]
-Technology Specialist''',
-                    tone='professional',
-                    word_count_range=(105, 125),
-                    conversion_focus='professional_image'
-                )
-            }
-        }
+    def generate_email_with_ollama(self, business_name: str, issues: List[Dict], bucket_name: str, llm_analysis: Optional[Dict] = None) -> Dict[str, str]:
+        """Generate personalized email and subject line using Ollama LLM"""
         
-        return templates
-    
-    def generate_email_with_ollama(self, business_name: str, issues: List[Dict], bucket_name: str, llm_analysis: Optional[Dict] = None) -> str:
-        """Generate personalized email using Ollama LLM"""
-        
-        # Select best template
-        template = self._select_best_template(issues, bucket_name)
+        # Select an example template for style
+        example_template = self._select_best_template(issues, bucket_name)
         
         # Create prompt for Ollama
-        prompt = self._create_prompt(business_name, issues, template, llm_analysis)
+        prompt = self._create_prompt(business_name, issues, example_template, llm_analysis)
         
         try:
             response = requests.post(f"{self.ollama_url}/api/generate", json={
                 "model": self.model_name,
                 "prompt": prompt,
                 "stream": False,
+                "format": "json",
+                "system": "You are a professional outreach specialist. You output ONLY valid JSON. No conversational filler, no 'Sure', no 'Here is the email'.",
                 "options": {
-                    "temperature": 0.7,
+                    "temperature": 0.8,
                     "top_p": 0.9,
-                    "max_tokens": 300
+                    "max_tokens": 500
                 }
-            }, timeout=30)
+            }, timeout=300)
             
             if response.status_code == 200:
-                data = response.json()
-                generated_text = data.get('response', '').strip()
+                raw_response = response.json().get('response', '{}')
                 
+                # Robust JSON extraction
+                try:
+                    data = json.loads(raw_response)
+                except json.JSONDecodeError:
+                    start = raw_response.find('{')
+                    end = raw_response.rfind('}') + 1
+                    if start != -1 and end != 0:
+                        try:
+                            data = json.loads(raw_response[start:end])
+                        except:
+                            print(f"❌ Failed to parse JSON from Ollama for {business_name}")
+                            return {"subject": f"Question about {business_name}", "body": self._fallback_email(business_name, issues, example_template)}
+                    else:
+                        print(f"❌ No JSON found in Ollama response for {business_name}")
+                        return {"subject": f"Question about {business_name}", "body": self._fallback_email(business_name, issues, example_template)}
+
+                subject = data.get('subject', f"Quick question about {business_name}'s website")
+                body = data.get('body', '').strip()
+                
+                if not body:
+                     print(f"⚠️  Ollama returned empty body for {business_name}, using fallback.")
+                     return {"subject": f"Question about {business_name}", "body": self._fallback_email(business_name, issues, example_template)}
+
                 # Post-process and validate
-                return self._post_process_email(generated_text, business_name, template)
+                processed_body = self._post_process_email(body, business_name, example_template)
+                return {"subject": subject, "body": processed_body}
             else:
-                print(f"Ollama error: {response.status_code}")
-                return self._fallback_email(business_name, issues, template)
+                print(f"❌ Ollama API error ({response.status_code}) for {business_name}")
+                return {"subject": f"Question about {business_name}", "body": self._fallback_email(business_name, issues, example_template)}
                 
         except Exception as e:
-            print(f"Error generating email with Ollama: {e}")
-            return self._fallback_email(business_name, issues, template)
+            print(f"❌ Ollama Exception during email generation: {e}")
+            return {"subject": f"Question about {business_name}", "body": self._fallback_email(business_name, issues, example_template)}
     
     def _select_best_template(self, issues: List[Dict], bucket_name: str) -> EmailTemplate:
         """Select the best template based on issues and bucket"""
         if bucket_name not in self.templates:
             # Use generic template
-            return self.templates['Interior Designers & Architects']['missing_ssl']
-        
+            return self.templates['Interior Designers & Architects']
         bucket_templates = self.templates[bucket_name]
         
         # Find template for highest priority issue
-        priority_issues = ['missing_ssl', 'mobile_unfriendly', 'no_contact_info', 'slow_loading', 'missing_meta']
+        priority_issues = [ 'mobile_unfriendly', 'no_contact_info', 'slow_loading', 'missing_meta']
         
         for issue in issues:
             issue_type = issue.get('issue_type', '')
@@ -343,8 +159,8 @@ Technology Specialist''',
         return list(bucket_templates.values())[0]
     
     def _create_prompt(self, business_name: str, issues: List[Dict], template: EmailTemplate, llm_analysis: Optional[Dict] = None) -> str:
-        """Create prompt for Ollama"""
-        issues_text = '\n'.join([f"- {issue['description']}" for issue in issues[:3]])
+        """Create a highly dynamic prompt for Ollama"""
+        issues_text = '\n'.join([f"- {issue['description']} (Severity: {issue.get('severity', 'medium')})" for issue in issues[:4]])
         
         llm_context = ""
         if llm_analysis:
@@ -352,35 +168,37 @@ Technology Specialist''',
             impact = llm_analysis.get('business_impact', '')
             hooks = ", ".join(llm_analysis.get('hooks', []))
             llm_context = f"""
-TECHNICAL CRITIQUE FROM AUDITOR: {critique}
-BUSINESS IMPACT: {impact}
-PERSONALIZED HOOKS TO USE: {hooks}
+AUDITOR OBSERVATIONS: {critique}
+BUSINESS IMPACT IDENTIFIED: {impact}
+POTENTIAL HOOKS TO USE: {hooks}
 """
 
-        prompt = f"""Write a short cold email (110-130 words exactly) to {business_name}.
+        prompt = f"""Write a personalized cold email for {business_name} and return ONLY a JSON object. No preamble, no explanation.
 
-BUSINESS TYPE: {template.bucket_name}
-{llm_context}
-ISSUES ON THEIR SITE:
+CONTEXT:
+Business Type: {template.bucket_name}
+Found Issues:
 {issues_text}
+{llm_context}
 
-TONE: {template.tone}
-FOCUS: {template.conversion_focus}
+STYLE (Reference only):
+Tone: {template.tone}
+Focus: {template.conversion_focus}
+Ref Example: "{template.body_template}"
 
-TEMPLATE GUIDELINES:
-{template.body_template}
+TASK:
+1. "subject": Catchy subject line (< 50 chars).
+2. "body": Personalized email body (100-140 words). 
+   - Acknowledge their specific site content.
+   - Mention the 'BUSINESS IMPACT'.
+   - Offer a solution.
+   - End with a low-friction CTA.
 
-REQUIREMENTS:
-1. Acknowledge their business briefly.
-2. USE ONE OF THE PERSONALIZED HOOKS provided above.
-3. Mention the specific 'BUSINESS IMPACT' identified by the auditor.
-4. Offer a clear solution (no hard selling).
-5. End with a simple, specific call-to-action.
-6. conversational but {template.tone}.
-7. Exactly 110-130 words.
-
-Write the email now:"""
-
+OUTPUT FORMAT:
+{{
+  "subject": "...",
+  "body": "..."
+}}"""
         return prompt
     
     def _post_process_email(self, generated_text: str, business_name: str, template: EmailTemplate) -> str:
@@ -389,9 +207,14 @@ Write the email now:"""
         email = generated_text.strip()
         
         # Ensure proper business name
-        if business_name not in email:
-            email = email.replace('[Business Name]', business_name)
-            email = email.replace('Hi there,', f'Hi {business_name},')
+        # Ensure proper business name
+        placeholders = ['[Business Name]', '{business_name}', '[Company Name]', '{company_name}']
+        for placeholder in placeholders:
+            if placeholder in email:
+                email = email.replace(placeholder, business_name)
+        
+        if 'Hi there,' in email or 'Hello there,' in email:
+             email = email.replace('Hi there,', f'Hi {business_name},').replace('Hello there,', f'Hi {business_name},')
         
         # Check word count
         word_count = len(email.split())
@@ -421,8 +244,8 @@ I specialize in fixing these issues quickly and affordably. A simple update coul
 Would you be interested in a quick consultation about improving your website?
 
 Best regards,
-[Your Name]
-Web Services Specialist"""
+Manas Doshi
+Future Forwards"""
         
         return fallback
 
@@ -433,185 +256,100 @@ class StageCEmailGenerator:
         self.ollama_generator = OllamaEmailGenerator()
         self.generation_queue = []
     
-    def generate_emails_for_qualified_leads(self, batch_size: int = 50) -> Dict:
-        """Generate emails for all qualified leads without existing emails"""
-        print("=== STAGE C: AI-POWERED MESSAGING ===")
+    def generate_email_campaigns(self, batch_size: int = 20) -> Dict:
+        """Generate email campaigns for qualified leads"""
+        print("=== STAGE C: AI EMAIL GENERATOR ===")
         
-        # Get qualified leads from database
-        conn = sqlite3.connect('leads.db')
-        cursor = conn.cursor()
+        from core.db import LeadRepository
+        repo = LeadRepository()
         
-        cursor.execute('''
-        SELECT l.id, l.business_name, l.bucket, a.issues_json, a.overall_score, a.llm_analysis
-        FROM leads l
-        JOIN audits a ON l.id = a.lead_id
-        WHERE a.qualified = 1 
-        AND l.id NOT IN (
-            SELECT DISTINCT lead_id FROM email_campaigns
-        )
-        ORDER BY a.overall_score DESC
-        LIMIT ?
-        ''', (batch_size,))
+        # Fetch qualified leads that don't have campaigns
+        print(f"Fetching qualified leads (limit {batch_size})...")
+        candidates = repo.get_qualified_leads_for_email(batch_size)
         
-        qualified_leads = cursor.fetchall()
-        conn.close()
+        if not candidates:
+            print("No qualified leads found for email generation")
+            return {'generated_count': 0, 'emails': []}
+            
+        print(f"Found {len(candidates)} candidates for email generation")
         
-        if not qualified_leads:
-            print("No qualified leads without emails")
-            return {'generated_count': 0, 'results': []}
+        generated_emails = []
         
-        print(f"Found {len(qualified_leads)} qualified leads for email generation")
-        
-        results = []
-        generated_count = 0
-        
-        for i, (lead_id, business_name, bucket, issues_json, overall_score, llm_analysis_json) in enumerate(qualified_leads):
-            print(f"\n[{i+1}/{len(qualified_leads)}] Generating email for: {business_name}")
+        for i, lead in enumerate(candidates):
+            business_name = lead.get('business_name')
+            print(f"\n[{i+1}/{len(candidates)}] Generating email for: {business_name}")
             
             try:
-                # Parse issues and llm_analysis
-                issues = json.loads(issues_json) if issues_json else []
-                llm_analysis = json.loads(llm_analysis_json) if llm_analysis_json else None
+                # Parse audits
+                issues = []
+                if lead.get('issues_json'):
+                    issues = json.loads(lead.get('issues_json'))
+                
+                llm_analysis = None
+                if lead.get('llm_analysis'):
+                    llm_analysis = json.loads(lead.get('llm_analysis'))
                 
                 # Generate email
-                email_body = self.ollama_generator.generate_email_with_ollama(
-                    business_name, issues, bucket or 'Interior Designers & Architects', llm_analysis
+                bucket_name = lead.get('bucket', 'default')
+                email_content = self.generate_email_with_ollama(
+                    business_name, 
+                    issues, 
+                    bucket_name,
+                    llm_analysis
                 )
                 
-                # Create subject line
-                subject = f"Quick question about {business_name}'s website"
+                if not email_content:
+                    print(f"Failed to generate email for {business_name}")
+                    continue
                 
                 # Create email object
-                generated_email = GeneratedEmail(
-                    lead_id=lead_id,
+                email = GeneratedEmail(
+                    lead_id=lead['id'],
                     business_name=business_name,
-                    subject=subject,
-                    body=email_body,
-                    tone=self._detect_tone(email_body),
-                    word_count=len(email_body.split()),
-                    personalization_score=self._calculate_personalization_score(email_body, business_name, issues),
-                    urgency_level=self._detect_urgency(email_body, issues),
-                    call_to_action=self._extract_call_to_action(email_body),
+                    subject=email_content.get('subject', 'Partnership Opportunity'),
+                    body=email_content.get('body', ''),
+                    tone=email_content.get('tone', 'professional'),
+                    word_count=len(email_content.get('body', '').split()),
+                    personalization_score=0.8, # Estimated
+                    urgency_level=email_content.get('urgency_level', 'low'),
+                    call_to_action=email_content.get('call_to_action', 'Reply for more info'),
                     generation_timestamp=datetime.now()
                 )
                 
-                results.append(generated_email)
-                
                 # Save to database
-                self._save_generated_email(generated_email)
+                self._save_generated_email(email)
+                generated_emails.append(email)
                 
-                generated_count += 1
-                print(f"✅ Generated email ({generated_email.word_count} words)")
-                
-                # Add delay between generations
+                # Delay to avoid rate limits
                 time.sleep(1)
                 
             except Exception as e:
-                print(f"❌ Error generating email for {business_name}: {e}")
+                print(f"Error generating email for {business_name}: {e}")
                 continue
-        
-        # Print summary
-        self._print_generation_summary(results)
-        
+                
         return {
-            'generated_count': generated_count,
-            'results': results
+            'generated_count': len(generated_emails),
+            'emails': generated_emails
         }
     
-    def _detect_tone(self, email_body: str) -> str:
-        """Detect email tone"""
-        friendly_words = ['hi', 'hello', 'great', 'wonderful', 'love', 'excited']
-        professional_words = ['regards', 'professional', 'specialist', 'expert', 'quality']
-        urgent_words = ['urgent', 'immediately', 'quickly', 'now', 'today']
-        
-        body_lower = email_body.lower()
-        
-        if any(word in body_lower for word in urgent_words):
-            return 'urgent'
-        elif any(word in body_lower for word in professional_words):
-            return 'professional'
-        elif any(word in body_lower for word in friendly_words):
-            return 'friendly'
-        else:
-            return 'casual'
-    
-    def _calculate_personalization_score(self, email_body: str, business_name: str, issues: List[Dict]) -> float:
-        """Calculate personalization score (0.0 to 1.0)"""
-        score = 0.0
-        
-        # Business name mention
-        if business_name.lower() in email_body.lower():
-            score += 0.3
-        
-        # Issue-specific content
-        for issue in issues[:2]:
-            issue_desc = issue.get('description', '').lower()
-            if any(word in email_body.lower() for word in issue_desc.split()[:3]):
-                score += 0.2
-        
-        # Industry-specific language
-        industry_keywords = ['portfolio', 'clients', 'customers', 'services', 'business']
-        if any(keyword in email_body.lower() for keyword in industry_keywords):
-            score += 0.2
-        
-        # Call to action
-        if 'interested' in email_body.lower() or 'would you like' in email_body.lower():
-            score += 0.1
-        
-        # Proper length
-        word_count = len(email_body.split())
-        if 110 <= word_count <= 130:
-            score += 0.2
-        
-        return min(score, 1.0)
-    
-    def _detect_urgency(self, email_body: str, issues: List[Dict]) -> str:
-        """Detect urgency level"""
-        high_urgency_issues = ['missing_ssl', 'no_contact_info', 'audit_error']
-        medium_urgency_issues = ['slow_loading', 'mobile_unfriendly']
-        
-        for issue in issues:
-            issue_type = issue.get('issue_type', '')
-            if issue_type in high_urgency_issues:
-                return 'high'
-            elif issue_type in medium_urgency_issues:
-                return 'medium'
-        
-        return 'low'
-    
-    def _extract_call_to_action(self, email_body: str) -> str:
-        """Extract call to action from email"""
-        sentences = email_body.split('.')
-        
-        for sentence in sentences:
-            if any(keyword in sentence.lower() for keyword in ['interested', 'would you', 'let me', 'contact']):
-                return sentence.strip()
-        
-        return 'Standard inquiry'
-    
     def _save_generated_email(self, email: GeneratedEmail):
-        """Save generated email to database"""
-        conn = sqlite3.connect('leads.db')
-        cursor = conn.cursor()
+        """Save generated email to database via repository"""
+        from core.db import LeadRepository
+        repo = LeadRepository()
         
-        cursor.execute('''
-        INSERT INTO email_campaigns 
-        (lead_id, subject, body, status, tone, word_count, personalization_score, urgency_level, call_to_action)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            email.lead_id,
-            email.subject,
-            email.body,
-            'pending',
-            email.tone,
-            email.word_count,
-            email.personalization_score,
-            email.urgency_level,
-            email.call_to_action
-        ))
+        campaign_data = {
+            'lead_id': email.lead_id,
+            'subject': email.subject,
+            'body': email.body,
+            'status': 'pending',
+            'tone': email.tone,
+            'word_count': email.word_count,
+            'personalization_score': email.personalization_score,
+            'urgency_level': email.urgency_level,
+            'call_to_action': email.call_to_action
+        }
         
-        conn.commit()
-        conn.close()
+        repo.save_email_campaign(campaign_data)
     
     def _print_generation_summary(self, results: List[GeneratedEmail]):
         """Print email generation summary"""
@@ -655,70 +393,7 @@ class StageCEmailGenerator:
     
     def get_email_statistics(self) -> Dict:
         """Get email generation statistics"""
-        conn = sqlite3.connect('leads.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT 
-            COUNT(*) as total_emails,
-            COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent,
-            COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
-            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-            AVG(personalization_score) as avg_personalization,
-            AVG(word_count) as avg_word_count
-        FROM email_campaigns
-        ''')
-        
-        stats = cursor.fetchone()
-        conn.close()
-        
-        return {
-            'total_generated': stats[0] or 0,
-            'sent': stats[1] or 0,
-            'pending': stats[2] or 0,
-            'failed': stats[3] or 0,
-            'personalization_avg': stats[4] or 0,
-            'word_count_avg': stats[5] or 0
-        }
+        from core.db import LeadRepository
+        repo = LeadRepository()
+        return repo.get_email_statistics()
 
-if __name__ == '__main__':
-    # Demo usage
-    generator = StageCEmailGenerator()
-    
-    print("Stage C: AI-Powered Messaging")
-    print("Choose an option:")
-    print("1. Generate emails for qualified leads")
-    print("2. Get email statistics")
-    print("3. Test single email generation")
-    
-    choice = input("Enter choice (1-3): ").strip()
-    
-    if choice == '1':
-        results = generator.generate_emails_for_qualified_leads(batch_size=20)
-        print(f"\n✅ Generated {results['generated_count']} emails")
-    elif choice == '2':
-        stats = generator.get_email_statistics()
-        print(f"\n=== EMAIL STATISTICS ===")
-        print(f"Total Generated: {stats['total_generated']}")
-        print(f"Sent: {stats['sent']}")
-        print(f"Pending: {stats['pending']}")
-        print(f"Failed: {stats['failed']}")
-        print(f"Avg Personalization: {stats['personalization_avg']:.2f}")
-        print(f"Avg Word Count: {stats['word_count_avg']:.0f}")
-    elif choice == '3':
-        business_name = input("Enter business name: ").strip()
-        bucket_name = input("Enter bucket name: ").strip()
-        
-        # Sample issues for testing
-        sample_issues = [
-            {'issue_type': 'missing_ssl', 'description': 'Website not using HTTPS encryption'},
-            {'issue_type': 'mobile_unfriendly', 'description': 'Not optimized for mobile devices'}
-        ]
-        
-        email = generator.ollama_generator.generate_email_with_ollama(business_name, sample_issues, bucket_name)
-        
-        print(f"\n=== GENERATED EMAIL ===")
-        print(f"Word Count: {len(email.split())}")
-        print(f"\n{email}")
-    else:
-        print("Invalid choice")

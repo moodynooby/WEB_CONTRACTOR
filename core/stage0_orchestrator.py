@@ -1,8 +1,5 @@
-import time
-import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-import sqlite3
 import os
 
 from core.lead_buckets import LeadBucketManager
@@ -20,7 +17,7 @@ class Stage0Orchestrator:
             init_database()
             populate_buckets()
 
-    def get_daily_plan(self, bucket_name: Optional[str] = None) -> List[Dict]:
+    def get_daily_plan(self, bucket_name: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Generate a search plan for the day based on targets and current progress"""
         progress = self.get_monthly_progress()
         targets = progress['targets_by_bucket']
@@ -41,14 +38,16 @@ class Stage0Orchestrator:
         for bname in needed_buckets:
             bucket_queries = [q for q in all_queries if q['bucket'] == bname]
             # Take a sample for today
-            plan.extend(bucket_queries[:10])
+            plan.extend(bucket_queries[:limit])
             
         return plan
 
     def get_discovery_plan(self, daily_mode: bool = True) -> List[Dict]:
         """Generate a lead discovery plan without performing any scraping"""
         print("=== STAGE 0: PLANNING & TARGET GENERATION ===")
-        plan = self.get_daily_plan()
+        # Double the default limit for daily mode if requested
+        limit = 30 if daily_mode else 15
+        plan = self.get_daily_plan(limit=limit)
         
         # Record planning analytics
         record_analytic(
@@ -62,24 +61,15 @@ class Stage0Orchestrator:
     
     def get_monthly_progress(self) -> Dict:
         """Get monthly lead discovery progress"""
-        conn = sqlite3.connect('leads.db')
-        cursor = conn.cursor()
+        from core.db import LeadRepository
+        repo = LeadRepository()
         
         current_month = datetime.now().strftime('%Y-%m')
+        stats = repo.get_monthly_stats(current_month)
         
-        # Monthly total
-        cursor.execute("SELECT COUNT(*) FROM leads WHERE created_at LIKE ?", (f"{current_month}%",))
-        monthly_total = cursor.fetchone()[0]
-        
-        # By source
-        cursor.execute("SELECT source, COUNT(*) FROM leads WHERE created_at LIKE ? GROUP BY source", (f"{current_month}%",))
-        by_source = dict(cursor.fetchall())
-        
-        # By bucket
-        cursor.execute("SELECT bucket, COUNT(*) FROM leads WHERE created_at LIKE ? GROUP BY bucket", (f"{current_month}%",))
-        by_bucket = dict(cursor.fetchall())
-        
-        conn.close()
+        monthly_total = stats['monthly_total']
+        by_source = stats['by_source']
+        by_bucket = stats['by_bucket']
         
         targets = self.bucket_manager.get_monthly_targets()
         total_target = sum(targets.values())
@@ -94,15 +84,9 @@ class Stage0Orchestrator:
             'targets_by_bucket': targets
         }
     
-    def run_targeted_plan(self, bucket_name: str, max_queries: int = 20) -> List[Dict]:
+    def run_targeted_plan(self, bucket_name: str, max_queries: int = 50) -> List[Dict]:
         """Generate a targeted discovery plan for a specific bucket"""
         print(f"=== STAGE 0: TARGETED PLANNING - {bucket_name} ===")
-        return self.get_daily_plan(bucket_name=bucket_name)
+        return self.get_daily_plan(bucket_name=bucket_name, limit=max_queries)
 
-if __name__ == '__main__':
-    orchestrator = Stage0Orchestrator()
-    print("Stage 0 Orchestrator - Independent Mode")
-    print("Use stage0.py for a better CLI experience.")
-    
-    progress = orchestrator.get_monthly_progress()
-    print(f"\nMonthly Progress: {progress['monthly_total']}/{progress['monthly_target']} ({progress['progress_percentage']:.1%})")
+
