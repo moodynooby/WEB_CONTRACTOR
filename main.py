@@ -21,8 +21,8 @@ from loguru import logger
 
 # Import new pipeline orchestrator
 from core.pipeline_orchestrator import PipelineOrchestrator
-# Import legacy components for backward compatibility
-from agents.email_sender import send_pending_emails, fetch_reviewable_emails, update_campaign_status, send_email
+# Import email utilities
+from core.email_utils import send_email
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}})
@@ -164,7 +164,45 @@ def start_process():
                 
             elif process_key == 'email_sender':
                 # Send pending emails
-                sent_count = send_pending_emails(mail)
+                # Re-implementing logic here to avoid circular dependencies and legacy code
+                from core.db import LeadRepository
+                repo = LeadRepository()
+                
+                pending_emails = repo.get_pending_emails_to_send(limit=50)
+                sent_count = 0
+                
+                for email in pending_emails:
+                    email_id = email['id']
+                    lead_id = email['lead_id']
+                    subject = email['subject']
+                    body = email['body']
+                    business_name = email['business_name']
+                    
+                    try:
+                        # Fetch actual email from leads table
+                        to_email = repo.get_lead_email(lead_id)
+                        
+                        if not to_email:
+                            logger.error(f"Skipping {business_name} - No email found")
+                            repo.update_campaign_status(email_id, 'failed', error_message="Verified email address not found; guessing is disabled.")
+                            continue
+                        
+                        success = send_email(to_email, subject, body, mail)
+                        
+                        if success:
+                            repo.update_campaign_status(email_id, 'sent', body)
+                            sent_count += 1
+                        else:
+                            repo.update_campaign_status(email_id, 'failed', error_message="SMTP send failure")
+                        
+                        # Add delay between emails
+                        time.sleep(30) # Fixed 30s delay between emails
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing pending email {email_id}: {e}")
+                        repo.update_campaign_status(email_id, 'failed', error_message=str(e))
+                
+                logger.info(f"Process email_sender finished: {sent_count} sent")
                 processes[process_key]['progress'] = 100
                 
         except Exception as e:
@@ -300,7 +338,18 @@ def get_stages():
 def list_reviewable_emails():
     """List pending emails for leads that passed Stage B quality filter"""
     try:
-        emails = fetch_reviewable_emails()
+        from core.db import LeadRepository
+        repo = LeadRepository()
+        
+        emails = repo.get_reviewable_emails(0.7)
+        # Parse analysis if needed (repo returns dicts which might have stringified json)
+        for email in emails:
+            if email.get('llm_analysis') and isinstance(email['llm_analysis'], str):
+                try:
+                    email['llm_analysis'] = json.loads(email['llm_analysis'])
+                except:
+                    pass
+                    
         return success_response({'emails': emails}, f'Retrieved {len(emails)} reviewable emails')
     except Exception as e:
         raise APIError(f'Database query failed: {e}', 500)
@@ -316,7 +365,7 @@ def review_action():
     
     try:
         if action == 'ignore':
-            update_campaign_status(campaign_id, 'ignored')
+            repo.update_campaign_status(campaign_id, 'ignored')
             return success_response({'campaignId': campaign_id}, 'Email ignored')
             
         elif action == 'send':
@@ -336,13 +385,14 @@ def review_action():
             final_body = body if body else row['body']
             
             if send_email(lead_email, subject, final_body, mail):
-                update_campaign_status(campaign_id, 'sent', final_body)
+                repo.update_campaign_status(campaign_id, 'sent', final_body)
                 return success_response({'campaignId': campaign_id}, 'Email sent successfully')
             else:
                 raise APIError('SMTP failure', 500)
         
         if action == 'approve':
-            update_campaign_status(campaign_id, 'approved', body)
+            repo = LeadRepository() # Re-init locally just to be safe or reuse if desired
+            repo.update_campaign_status(campaign_id, 'approved', body)
             return success_response({'campaignId': campaign_id}, 'Email approved for batch sending')
                 
         raise APIError('Invalid action', 400)

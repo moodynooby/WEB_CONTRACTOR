@@ -178,8 +178,9 @@ class PipelineOrchestrator:
         
         return results
     
+    
     def run_individual_stage(self, stage_name: str, **kwargs) -> Dict:
-        """Run individual stage"""
+        """Run individual stage with global concurrency check"""
         stage_map = {
             'stage0': self.stage0,
             'stage_a': self.stage_a,
@@ -192,8 +193,23 @@ class PipelineOrchestrator:
         
         if not self.stage_configs[stage_name]['enabled']:
             return {'error': f'Stage {stage_name} is disabled'}
-        
+            
+        # Global Concurrency Lock Check
+        if self.pipeline_state['running']:
+             error_msg = f"Cannot start {stage_name}: Pipeline is already running (Current stage: {self.pipeline_state['current_stage']})"
+             print(f"⚠️  {error_msg}")
+             # Throwing an exception is cleaner for the API to catch, 
+             # but maintaining dict return signature for compatibility with existing calls if any.
+             # Ideally, we should unify this. For now, let's return error dict.
+             # Raising generic exception to be caught by main.py wrapper to ensure it's treated as 400
+             raise Exception("Pipeline already running")
+
         print(f"\n🔄 Running {stage_name.upper()}...")
+        
+        # Set Lock
+        self.pipeline_state['running'] = True
+        self.pipeline_state['current_stage'] = stage_name
+        self.pipeline_state['last_run'] = datetime.now()
         
         try:
             if stage_name == 'stage0':
@@ -213,6 +229,10 @@ class PipelineOrchestrator:
             error_msg = f"{stage_name.upper()} failed: {str(e)}"
             print(f"❌ {error_msg}")
             return {'status': 'error', 'error': error_msg}
+        finally:
+            # Release Lock
+            self.pipeline_state['running'] = False
+            self.pipeline_state['current_stage'] = None
     
     def get_pipeline_status(self) -> Dict:
         """Get current pipeline status"""

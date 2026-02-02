@@ -234,45 +234,61 @@ class GoogleMapsScraper(BaseScraper):
             print(f"Error processing place data: {e}")
             return None
 
-    def scrape_by_buckets(self, max_queries_per_bucket: int = 10) -> List[Dict]:
+    def scrape_by_buckets(self, max_queries_per_bucket: int = 10, plan: List[Dict] = None) -> List[Dict]:
         """Scrape leads based on bucket definitions using Selenium"""
         all_leads = []
         
-        queries = self.bucket_manager.get_search_queries()
+        # Use provided plan or fall back to generating one locally
+        queries = plan if plan else self.bucket_manager.get_search_queries()
         
-        # Limit queries per bucket for testing
-        bucket_query_counts = {}
+        # Filter logic is only needed if we are generating our own queries
+        # If plan is provided, we assume it's already filtered/ prioritized by Stage 0
         filtered_queries = []
         
-        for query in queries:
-            bucket = query['bucket']
-            if bucket not in bucket_query_counts:
-                bucket_query_counts[bucket] = 0
+        if plan:
+            filtered_queries = plan
+            print(f"Executing {len(filtered_queries)} search queries from provided plan...")
+        else:
+            # Limit queries per bucket for testing
+            bucket_query_counts = {}
+            filtered_queries = []
             
-            if bucket_query_counts[bucket] < max_queries_per_bucket:
-                filtered_queries.append(query)
-                bucket_query_counts[bucket] += 1
-        
-        print(f"Executing {len(filtered_queries)} search queries using Selenium...")
+            for query in queries:
+                bucket = query['bucket']
+                if bucket not in bucket_query_counts:
+                    bucket_query_counts[bucket] = 0
+                
+                if bucket_query_counts[bucket] < max_queries_per_bucket:
+                    filtered_queries.append(query)
+                    bucket_query_counts[bucket] += 1
+            print(f"Executing {len(filtered_queries)} search queries using Selenium (Local Plan)...")
         
         try:
             for i, query in enumerate(filtered_queries):
-                print(f"\n[{i+1}/{len(filtered_queries)}] Searching: {query['query']} in {query['city']}")
+                # Handle both 'city' and 'location' keys if present
+                city = query.get('city') or query.get('location', 'Unknown')
+                print(f"\n[{i+1}/{len(filtered_queries)}] Searching: {query['query']} in {city}")
                 
                 places = self.search_places_selenium(
                     query=query['query'],
-                    location_hint=query['city']
+                    location_hint=city
                 )
                 
+                new_leads_from_query = []
                 for place in places:
                     # Add bucket information
                     place['bucket'] = query.get('bucket', '')
                     place['tier'] = query.get('tier', '')
                     place['priority'] = query.get('priority', '')
+                    new_leads_from_query.append(place)
                     all_leads.append(place)
                 
                 print(f"  Found {len(places)} places")
                 
+                # Save batch to database immediately to prevent data loss on crash
+                if new_leads_from_query:
+                    self.save_to_database(new_leads_from_query, source='google_maps')
+
                 # Delay between queries
                 if i < len(filtered_queries) - 1:
                     time.sleep(random.uniform(5, 10))

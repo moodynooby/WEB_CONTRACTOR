@@ -44,7 +44,7 @@ class StageAScraper:
         
         try:
             if source == 'google_maps':
-                leads = self.google_scraper.scrape_by_buckets(max_queries_per_bucket=5)
+                leads = self.google_scraper.scrape_by_buckets(max_queries_per_bucket=5, plan=plan)
             elif source == 'yellow_pages':
                 leads = self.yellow_pages_scraper.scrape_by_buckets(max_queries_per_bucket=5)
             else:
