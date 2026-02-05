@@ -1,0 +1,243 @@
+"""Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)"""
+import json
+import time
+import requests
+from typing import List, Dict
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from lead_repository import LeadRepository
+
+
+class Discovery:
+    """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
+
+    def __init__(self):
+        self.repo = LeadRepository()
+        self.buckets = self._load_buckets()
+
+    def _load_buckets(self) -> List[Dict]:
+        """Load bucket configuration"""
+        try:
+            with open("config/buckets.json") as f:
+                data = json.load(f)
+                return data.get("buckets", [])
+        except Exception as e:
+            print(f"Error loading buckets: {e}")
+            return []
+
+    def generate_queries(self, bucket_name: str = None, limit: int = 20) -> List[Dict]:
+        """Generate search queries from bucket patterns"""
+        queries = []
+        buckets = [b for b in self.buckets if not bucket_name or b["name"] == bucket_name]
+
+        for bucket in buckets:
+            for pattern in bucket["search_patterns"][:3]:
+                # Get cities from geographic segments
+                cities = []
+                try:
+                    with open("config/buckets.json") as f:
+                        data = json.load(f)
+                        geo_focus = data.get("geographic_focus", {})
+                        for seg_name in bucket.get("geographic_segments", []):
+                            if seg_name in geo_focus:
+                                cities.extend(geo_focus[seg_name].get("cities", [])[:2])
+                except:
+                    cities = ["Mumbai", "Delhi", "Bangalore"]
+
+                for city in cities[:2]:
+                    query = pattern.replace("{city}", city)
+                    queries.append({
+                        "query": query,
+                        "bucket": bucket["name"],
+                        "city": city
+                    })
+                    if len(queries) >= limit:
+                        return queries
+
+        return queries[:limit]
+
+    def scrape_google_maps(self, query: str, bucket: str, max_results: int = 5) -> List[Dict]:
+        """Scrape Google Maps for business leads"""
+        leads = []
+        
+        try:
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            
+            search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+            driver.get(search_url)
+            time.sleep(3)
+
+            # Wait for results
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/maps/place/']"))
+                )
+            except:
+                driver.quit()
+                return leads
+
+            # Get business listings
+            business_elements = driver.find_elements(By.CSS_SELECTOR, "a[href*='/maps/place/']")[:max_results]
+
+            for element in business_elements:
+                try:
+                    element.click()
+                    time.sleep(2)
+
+                    # Extract business name
+                    try:
+                        name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text
+                    except:
+                        name = "Unknown Business"
+
+                    # Extract website
+                    website = None
+                    try:
+                        website_element = driver.find_element(By.CSS_SELECTOR, "a[data-item-id*='authority']")
+                        website = website_element.get_attribute("href")
+                    except:
+                        pass
+
+                    # Extract phone
+                    phone = None
+                    try:
+                        phone_element = driver.find_element(By.CSS_SELECTOR, "button[data-item-id*='phone']")
+                        phone = phone_element.get_attribute("aria-label")
+                    except:
+                        pass
+
+                    if name and website:
+                        leads.append({
+                            "business_name": name,
+                            "website": website,
+                            "phone": phone,
+                            "source": "google_maps",
+                            "bucket": bucket,
+                            "category": query.split()[0],
+                            "location": query.split()[-1] if " " in query else "Unknown"
+                        })
+
+                except Exception as e:
+                    continue
+
+            driver.quit()
+
+        except Exception as e:
+            print(f"Error scraping Google Maps: {e}")
+
+        return leads
+
+    def scrape_yellow_pages(self, query: str, bucket: str, max_results: int = 5) -> List[Dict]:
+        """Scrape Yellow Pages for business leads"""
+        leads = []
+        
+        try:
+            # Parse query to extract category and location
+            parts = query.split()
+            category = " ".join(parts[:-1]) if len(parts) > 1 else query
+            location = parts[-1] if len(parts) > 1 else "India"
+            
+            # Yellow Pages India URL structure
+            search_term = category.replace(" ", "-").lower()
+            url = f"https://www.yellowpages.in/search/{search_term}/all-india"
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return leads
+
+            soup = BeautifulSoup(response.content, "html.parser")
+            
+            # Find business listings
+            listings = soup.find_all("div", class_="row srp-list", limit=max_results)
+            
+            for listing in listings:
+                try:
+                    # Business name
+                    name_elem = listing.find("a", class_="title")
+                    name = name_elem.text.strip() if name_elem else None
+                    
+                    # Website
+                    website_elem = listing.find("a", href=True, title="Website")
+                    website = website_elem["href"] if website_elem else None
+                    
+                    # Phone
+                    phone_elem = listing.find("span", class_="mobilenum")
+                    phone = phone_elem.text.strip() if phone_elem else None
+                    
+                    if name and website:
+                        leads.append({
+                            "business_name": name,
+                            "website": website,
+                            "phone": phone,
+                            "source": "yellow_pages",
+                            "bucket": bucket,
+                            "category": category,
+                            "location": location
+                        })
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"Error scraping Yellow Pages: {e}")
+            
+        return leads
+
+    def run(self, bucket_name: str = None, max_queries: int = 5) -> Dict:
+        """Execute full discovery pipeline"""
+        print(f"\n{'='*60}")
+        print("DISCOVERY: Query Generation + Lead Scraping")
+        print(f"{'='*60}")
+        
+        # Stage 0: Generate queries
+        queries = self.generate_queries(bucket_name, max_queries)
+        print(f"Generated {len(queries)} search queries")
+        
+        # Stage A: Scrape leads
+        total_leads = 0
+        total_saved = 0
+        
+        for i, q in enumerate(queries, 1):
+            print(f"\n[{i}/{len(queries)}] {q['query']}")
+            
+            # Try Google Maps first
+            leads = self.scrape_google_maps(q["query"], q["bucket"], max_results=3)
+            
+            # Try Yellow Pages if Google Maps returns nothing
+            if not leads:
+                leads = self.scrape_yellow_pages(q["query"], q["bucket"], max_results=3)
+            
+            # Save leads to database
+            for lead in leads:
+                lead_id = self.repo.save_lead(lead)
+                if lead_id > 0:
+                    total_saved += 1
+                    print(f"  ✓ {lead['business_name']}")
+            
+            total_leads += len(leads)
+            time.sleep(2)  # Rate limiting
+        
+        print(f"\n{'='*60}")
+        print(f"Discovery Complete: {total_leads} found, {total_saved} saved")
+        print(f"{'='*60}\n")
+        
+        return {
+            "queries_executed": len(queries),
+            "leads_found": total_leads,
+            "leads_saved": total_saved
+        }

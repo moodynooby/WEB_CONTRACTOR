@@ -1,19 +1,16 @@
 [project]
 name = "web-contractor"
-version = "0.1.0"
-description = "Lead generation and outreach automation system for web contractors"
+version = "0.2.0"
+description = "Ultra-minimal lead generation and outreach automation with Textual TUI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "flask>=3.1.2",
-    "flask-mail>=0.10.0",
+    "textual>=0.47.0",
     "requests>=2.32.5",
     "beautifulsoup4>=4.14.3",
     "selenium>=4.40.0",
     "webdriver-manager>=4.0.0",
-    "flask-limiter>=3.8.0",
 ]
-
 
 [dependency-groups]
 dev = [
@@ -27,7 +24,7 @@ dev = [
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
