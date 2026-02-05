@@ -10,3 +10,21 @@ wheels/
 .venv
 .env
 .env.local
+
+# Database
+leads.db
+*.db
+
+# Logs
+*.log
+ollama.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
