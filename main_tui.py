@@ -96,10 +96,10 @@ class WebContractorTUI(App):
         
         with Container(id="stats-container"):
             with Horizontal():
-                yield Static("", id="stat-leads", classes="stat-box")
-                yield Static("", id="stat-qualified", classes="stat-box")
-                yield Static("", id="stat-emails", classes="stat-box")
-                yield Static("", id="stat-pending", classes="stat-box")
+                yield Static("", id="stat-leads", classes="stat-box", markup=True)
+                yield Static("", id="stat-qualified", classes="stat-box", markup=True)
+                yield Static("", id="stat-emails", classes="stat-box", markup=True)
+                yield Static("", id="stat-pending", classes="stat-box", markup=True)
         
         with Horizontal(id="controls"):
             yield Button("Discovery [d]", id="btn-discovery", variant="primary")
@@ -115,13 +115,13 @@ class WebContractorTUI(App):
 
     def on_mount(self) -> None:
         """Initialize UI on mount"""
-        self.title = "Web Contractor - Ultra-Minimal TUI"
+        self.title = "Web Contractor"
         self.sub_title = "Lead Discovery & Outreach Automation"
         self.refresh_stats()
-        self.log("✓ Web Contractor TUI initialized", "success")
-        self.log("Press [d] Discovery, [a] Audit, [g] Generate, [s] Send, [q] Quit", "info")
+        self.write_log("✓ Web Contractor initialized", "success")
+        self.write_log("Press [d] Discovery, [a] Audit, [g] Generate, [s] Send, [q] Quit", "info")
 
-    def log(self, message: str, style: str = ""):
+    def write_log(self, message: str, style: str = ""):
         """Write to activity log"""
         log_widget = self.query_one("#activity-log", Log)
         if style == "success":
@@ -153,18 +153,18 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:
         """Run discovery pipeline (Stage 0 + Stage A)"""
-        self.log("Starting Discovery Pipeline...", "info")
+        self.write_log("Starting Discovery Pipeline...", "info")
         self.call_from_thread(self._disable_buttons)
         
         try:
             result = self.discovery.run(max_queries=5)
             self.call_from_thread(
-                self.log,
+                self.write_log,
                 f"Discovery complete: {result['leads_found']} leads found, {result['leads_saved']} saved",
                 "success"
             )
         except Exception as e:
-            self.call_from_thread(self.log, f"Discovery failed: {e}", "error")
+            self.call_from_thread(self.write_log, f"Discovery failed: {e}", "error")
         finally:
             self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
@@ -172,18 +172,18 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_run_audit(self) -> None:
         """Run audit pipeline (Stage B)"""
-        self.log("Starting Audit Pipeline...", "info")
+        self.write_log("Starting Audit Pipeline...", "info")
         self.call_from_thread(self._disable_buttons)
         
         try:
             result = self.outreach.audit_leads(limit=10)
             self.call_from_thread(
-                self.log,
+                self.write_log,
                 f"Audit complete: {result['audited']} audited, {result['qualified']} qualified",
                 "success"
             )
         except Exception as e:
-            self.call_from_thread(self.log, f"Audit failed: {e}", "error")
+            self.call_from_thread(self.write_log, f"Audit failed: {e}", "error")
         finally:
             self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
@@ -191,18 +191,18 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_generate_emails(self) -> None:
         """Generate emails (Stage C)"""
-        self.log("Starting Email Generation...", "info")
+        self.write_log("Starting Email Generation...", "info")
         self.call_from_thread(self._disable_buttons)
         
         try:
             result = self.outreach.generate_emails(limit=10)
             self.call_from_thread(
-                self.log,
+                self.write_log,
                 f"Email generation complete: {result['generated']} emails created",
                 "success"
             )
         except Exception as e:
-            self.call_from_thread(self.log, f"Email generation failed: {e}", "error")
+            self.call_from_thread(self.write_log, f"Email generation failed: {e}", "error")
         finally:
             self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
@@ -210,18 +210,18 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_send_emails(self) -> None:
         """Send pending emails"""
-        self.log("Starting Email Sender...", "info")
+        self.write_log("Starting Email Sender...", "info")
         self.call_from_thread(self._disable_buttons)
         
         try:
             result = self.email_sender.send_pending_emails(limit=5)
             self.call_from_thread(
-                self.log,
+                self.write_log,
                 f"Email sending complete: {result['sent']} sent, {result['failed']} failed",
                 "success"
             )
         except Exception as e:
-            self.call_from_thread(self.log, f"Email sending failed: {e}", "error")
+            self.call_from_thread(self.write_log, f"Email sending failed: {e}", "error")
         finally:
             self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
@@ -229,7 +229,7 @@ class WebContractorTUI(App):
     def action_refresh_stats(self) -> None:
         """Refresh statistics"""
         self.refresh_stats()
-        self.log("Statistics refreshed", "info")
+        self.write_log("Statistics refreshed", "info")
 
     def _disable_buttons(self) -> None:
         """Disable all action buttons"""

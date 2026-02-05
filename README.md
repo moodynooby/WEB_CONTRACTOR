@@ -18,15 +18,6 @@
 - **Direct SMTP** replacing Flask-Mail
 - **Simplified architecture** (2 modules vs 4-stage pipeline)
 
-See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for detailed comparison.
-
-## 📖 Quick Links
-
-- [Quick Start Guide](QUICKSTART.md) - Get started in 5 minutes
-- [TUI Documentation](README_TUI.md) - Full feature documentation
-- [Migration Guide](MIGRATION_GUIDE.md) - Upgrade from Flask version
-- [Architecture Comparison](ARCHITECTURE_COMPARISON.md) - Before vs After
-
 ## 🎯 Overview
 
 Web Contractor automates lead generation and outreach for web contractors, targeting businesses with web presence gaps (Interior Designers, Web Agencies, Local Services) through value-first messaging.
@@ -62,17 +53,6 @@ python cli.py init
 ```bash
 python main_tui.py
 ```
-
-**CLI Commands**:
-```bash
-python cli.py discovery --queries 5   # Find leads
-python cli.py audit --limit 20        # Audit websites
-python cli.py generate --limit 10     # Create emails
-python cli.py send --limit 5          # Send emails
-python cli.py stats                   # View statistics
-```
-
-See [QUICKSTART.md](QUICKSTART.md) for detailed walkthrough.
 
 ## 🏗️ Architecture
 
