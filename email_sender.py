@@ -1,4 +1,5 @@
 """Direct SMTP Email Sender"""
+
 import smtplib
 import os
 from email.mime.text import MIMEText
@@ -10,8 +11,8 @@ from lead_repository import LeadRepository
 class EmailSender:
     """Direct SMTP email sending (no Flask-Mail)"""
 
-    def __init__(self, logger=None):
-        self.repo = LeadRepository()
+    def __init__(self, repo=None, logger=None):
+        self.repo = repo or LeadRepository()
         self.smtp_server = "smtp.gmail.com"
         self.smtp_port = 587
         self.email = os.getenv("GMAIL_EMAIL")
@@ -32,7 +33,7 @@ class EmailSender:
             msg["From"] = self.email
             msg["To"] = to_email
             msg["Subject"] = subject
-            
+
             msg.attach(MIMEText(body, "plain"))
 
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
@@ -48,9 +49,9 @@ class EmailSender:
 
     def send_pending_emails(self, limit: int = 10) -> Dict:
         """Send all pending emails"""
-        self.log(f"\n{'='*60}")
+        self.log(f"\n{'=' * 60}")
         self.log("EMAIL SENDER: Sending Pending Emails")
-        self.log(f"{'='*60}")
+        self.log(f"{'=' * 60}")
 
         if not self.email or not self.password:
             self.log("✗ Gmail credentials not configured", "error")
@@ -64,11 +65,9 @@ class EmailSender:
 
         for i, email_data in enumerate(emails, 1):
             self.log(f"\n[{i}/{len(emails)}] {email_data['business_name']}", "info")
-            
+
             success = self.send_email(
-                email_data["email"],
-                email_data["subject"],
-                email_data["body"]
+                email_data["email"], email_data["subject"], email_data["body"]
             )
 
             self.repo.mark_email_sent(email_data["campaign_id"], success)
@@ -78,10 +77,10 @@ class EmailSender:
                 self.log(f"  ✓ Sent to {email_data['email']}", "success")
             else:
                 failed += 1
-                self.log(f"  ✗ Failed", "error")
+                self.log("  ✗ Failed", "error")
 
-        self.log(f"\n{'='*60}")
+        self.log(f"\n{'=' * 60}")
         self.log(f"Email Sending Complete: {sent} sent, {failed} failed", "success")
-        self.log(f"{'='*60}\n")
+        self.log(f"{'=' * 60}\n")
 
         return {"sent": sent, "failed": failed}

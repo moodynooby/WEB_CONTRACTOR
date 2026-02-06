@@ -1,0 +1,125 @@
+{
+  "technical_checks": [
+    {
+      "id": "missing_title",
+      "name": "Page Title",
+      "type": "html_exists",
+      "selector": "title",
+      "min_length": 10,
+      "score_impact": 15,
+      "severity": "critical",
+      "description": "Page title missing or too short"
+    },
+    {
+      "id": "missing_meta",
+      "name": "Meta Description",
+      "type": "html_exists",
+      "selector": "meta[name='description']",
+      "score_impact": 10,
+      "severity": "warning",
+      "description": "Meta description missing"
+    },
+    {
+      "id": "no_viewport",
+      "name": "Mobile Friendly",
+      "type": "html_exists",
+      "selector": "meta[name='viewport']",
+      "score_impact": 20,
+      "severity": "critical",
+      "description": "Not mobile-friendly"
+    },
+    {
+      "id": "no_h1",
+      "name": "H1 Heading",
+      "type": "html_exists",
+      "selector": "h1",
+      "score_impact": 10,
+      "severity": "warning",
+      "description": "Missing H1 heading"
+    },
+    {
+      "id": "multiple_h1",
+      "name": "Multiple H1s",
+      "type": "html_count",
+      "selector": "h1",
+      "max_count": 1,
+      "score_impact": 5,
+      "severity": "info",
+      "description": "Multiple H1 tags"
+    },
+    {
+      "id": "missing_alt_text",
+      "name": "Image Alt Text",
+      "type": "image_alt_ratio",
+      "threshold": 0.3,
+      "score_impact": 10,
+      "severity": "warning",
+      "description": "Too many images without alt text"
+    },
+    {
+      "id": "no_analytics",
+      "name": "Analytics",
+      "type": "script_match",
+      "patterns": ["google-analytics", "gtag"],
+      "score_impact": 5,
+      "severity": "info",
+      "description": "No Google Analytics detected"
+    },
+    {
+      "id": "no_ssl",
+      "name": "SSL/HTTPS",
+      "type": "protocol_check",
+      "protocol": "https://",
+      "score_impact": 25,
+      "severity": "critical",
+      "description": "Website not using HTTPS"
+    },
+    {
+      "id": "slow_load",
+      "name": "Load Time",
+      "type": "load_time",
+      "threshold": 3.0,
+      "score_impact": 10,
+      "severity": "medium",
+      "description": "Slow page load time"
+    },
+    {
+      "id": "missing_contact_page",
+      "name": "Contact Page",
+      "type": "link_match",
+      "patterns": ["contact", "get-in-touch"],
+      "score_impact": 10,
+      "severity": "warning",
+      "description": "No contact page found"
+    },
+    {
+      "id": "no_social_media",
+      "name": "Social Media",
+      "type": "link_match",
+      "patterns": ["facebook.com", "instagram.com", "linkedin.com", "twitter.com"],
+      "score_impact": 5,
+      "severity": "info",
+      "description": "No social media links found"
+    }
+  ],
+  "llm_audit": {
+    "enabled": true,
+    "model": "qwen2.5:latest",
+    "prompt": "Analyze the following website content for a business named '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Trust signals (testimonials, case studies, etc.)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type', 'severity' (critical/warning/info), and 'description')."
+  },
+  "bucket_overrides": {
+    "Interior Designers": {
+        "technical_checks": [
+            {
+                "id": "missing_portfolio",
+                "name": "Portfolio",
+                "type": "link_match",
+                "patterns": ["portfolio", "projects", "gallery"],
+                "score_impact": 20,
+                "severity": "warning",
+                "description": "No portfolio found"
+            }
+        ]
+    }
+  }
+}
