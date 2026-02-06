@@ -10,8 +10,8 @@ from lead_repository import LeadRepository
 class EmailSender:
     """Direct SMTP email sending (no Flask-Mail)"""
 
-    def __init__(self, logger=None):
-        self.repo = LeadRepository()
+    def __init__(self, repo=None, logger=None):
+        self.repo = repo or LeadRepository()
         self.smtp_server = "smtp.gmail.com"
         self.smtp_port = 587
         self.email = os.getenv("GMAIL_EMAIL")

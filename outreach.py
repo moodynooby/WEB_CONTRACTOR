@@ -10,8 +10,8 @@ from lead_repository import LeadRepository
 class Outreach:
     """Consolidated Stage B (Auditing) + Stage C (Email Generation)"""
 
-    def __init__(self, logger=None):
-        self.repo = LeadRepository()
+    def __init__(self, repo=None, logger=None):
+        self.repo = repo or LeadRepository()
         self.ollama_url = "http://localhost:11434"
         self.ollama_enabled = self._test_ollama()
         self.logger = logger

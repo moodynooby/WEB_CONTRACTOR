@@ -1,5 +1,6 @@
 """Web Contractor - Textual TUI Application"""
 import asyncio
+import json
 import os
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
@@ -126,6 +127,96 @@ class EditEmailModal(ModalScreen):
             self.dismiss(None)
 
 
+class MarketReviewScreen(Screen):
+    """Screen for reviewing market expansion suggestions"""
+
+    def __init__(self, suggestions: List[Dict], repo: LeadRepository):
+        super().__init__()
+        self.suggestions = suggestions
+        self.repo = repo
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Container(id="market-review-container"):
+            yield Label("LLM Market Expansion Suggestions")
+            yield Static("Review and approve new buckets or expansions", id="market-status")
+            yield DataTable(id="market-table")
+            with Horizontal(id="market-actions"):
+                yield Button("Approve Selected", variant="success", id="approve-market")
+                yield Button("Reject Selected", variant="error", id="reject-market")
+                yield Button("Done", id="done-market")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#market-table", DataTable)
+        table.add_columns("Type", "Name", "Details")
+        table.cursor_type = "row"
+        self.refresh_table()
+
+    def refresh_table(self):
+        table = self.query_one("#market-table", DataTable)
+        table.clear()
+        for i, s in enumerate(self.suggestions):
+            # s can be a new bucket or an expansion
+            stype = "New Bucket" if "new_categories" not in s else "Expansion"
+            name = s.get("name") or s.get("bucket_name") or "Expansion"
+            details = str(s.get("categories") or s.get("new_categories", []))
+            table.add_row(stype, name, details, key=str(i))
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "done-market":
+            self.dismiss()
+        elif event.button.id == "approve-market":
+            table = self.query_one("#market-table", DataTable)
+            if table.cursor_row is not None and table.cursor_row < len(self.suggestions):
+                idx = table.cursor_row
+                suggestion = self.suggestions[idx]
+                self.apply_suggestion(suggestion)
+                self.suggestions.pop(idx)
+                self.refresh_table()
+                self.notify("Suggestion applied!")
+        elif event.button.id == "reject-market":
+            table = self.query_one("#market-table", DataTable)
+            if table.cursor_row is not None and table.cursor_row < len(self.suggestions):
+                idx = table.cursor_row
+                self.suggestions.pop(idx)
+                self.refresh_table()
+                self.notify("Suggestion rejected.")
+
+    def apply_suggestion(self, s: Dict):
+        if "new_categories" in s:
+            # Expansion
+            bucket_name = s.get("bucket_name")
+            buckets = self.repo.get_all_buckets()
+            bucket = next((b for b in buckets if b["name"] == bucket_name), None)
+            if bucket:
+                new_cats = list(set(bucket.get("categories", []) + s.get("new_categories", [])))
+                new_pats = list(set(bucket.get("search_patterns", []) + s.get("new_patterns", [])))
+                bucket["categories"] = new_cats
+                bucket["search_patterns"] = new_pats
+
+                # Geography
+                geo_focus = self.repo.get_config("geographic_focus") or {}
+                if "expanded" not in geo_focus:
+                    geo_focus["expanded"] = {"cities": []}
+                geo_focus["expanded"]["cities"] = list(set(geo_focus["expanded"].get("cities", []) + s.get("new_cities", [])))
+                self.repo.save_config("geographic_focus", geo_focus)
+
+                segments = bucket.get("geographic_segments", [])
+                if isinstance(segments, str): segments = json.loads(segments)
+                if "expanded" not in segments:
+                    segments.append("expanded")
+                    bucket["geographic_segments"] = segments
+
+                self.repo.save_bucket(bucket)
+        else:
+            # New Bucket
+            s["geographic_segments"] = ["tier_1_metros"]
+            s["conversion_probability"] = 0.5
+            s["monthly_target"] = 100
+            self.repo.save_bucket(s)
+
+
 class WebContractorTUI(App):
     """Web Contractor Terminal User Interface"""
 
@@ -230,10 +321,28 @@ class WebContractorTUI(App):
     #edit-body {
         height: 100%;
     }
+
+    /* Market Review CSS */
+    #market-review-container {
+        padding: 1 2;
+        border: thick $primary;
+        margin: 1;
+    }
+
+    #market-table {
+        height: 1fr;
+        margin: 1 0;
+    }
+
+    #market-actions {
+        height: 3;
+        align: center middle;
+    }
     """
 
     BINDINGS = [
         Binding("d", "run_discovery", "Discovery"),
+        Binding("x", "expand_markets", "Expand Markets"),
         Binding("a", "run_audit", "Audit"),
         Binding("g", "generate_emails", "Generate Emails"),
         Binding("v", "review_emails", "Review"),
@@ -253,11 +362,11 @@ class WebContractorTUI(App):
                 # Fallback if app is not running or other issues
                 print(message)
 
-        self.discovery = Discovery(logger=thread_safe_log)
-        self.outreach = Outreach(logger=thread_safe_log)
-        self.email_sender = EmailSender(logger=thread_safe_log)
         self.repo = LeadRepository()
         self.repo.setup_database()
+        self.discovery = Discovery(repo=self.repo, logger=thread_safe_log)
+        self.outreach = Outreach(repo=self.repo, logger=thread_safe_log)
+        self.email_sender = EmailSender(repo=self.repo, logger=thread_safe_log)
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -315,6 +424,36 @@ class WebContractorTUI(App):
         self.query_one("#stat-emails").update(
             f"[b]Sent[/b]\n[cyan]{stats['emails_sent']}[/cyan]"
         )
+
+    @work(exclusive=True, thread=True)
+    def action_expand_markets(self) -> None:
+        """Discover new market buckets and expansions"""
+        try:
+            suggestions = []
+            # 1. New buckets
+            new_buckets = self.discovery.discover_new_buckets()
+            if isinstance(new_buckets, list):
+                suggestions.extend(new_buckets)
+
+            # 2. Expansion for current buckets
+            for bucket in self.discovery.buckets:
+                exp = self.discovery.expand_bucket(bucket["name"])
+                if isinstance(exp, dict):
+                    exp["bucket_name"] = bucket["name"]
+                    suggestions.append(exp)
+
+            if suggestions:
+                self.call_from_thread(self.show_market_review, suggestions)
+            else:
+                self.call_from_thread(self.write_log, "No new market suggestions found.", "info")
+
+        except Exception as e:
+            self.call_from_thread(self.write_log, f"Market expansion failed: {e}", "error")
+        finally:
+            self.call_from_thread(self.refresh_stats)
+
+    def show_market_review(self, suggestions: List[Dict]):
+        self.push_screen(MarketReviewScreen(suggestions, self.repo), lambda _: self.refresh_stats())
 
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:

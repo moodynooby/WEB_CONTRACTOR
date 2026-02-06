@@ -15,10 +15,20 @@ from lead_repository import LeadRepository
 class Discovery:
     """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
 
-    def __init__(self, logger=None):
-        self.repo = LeadRepository()
+    def __init__(self, repo=None, logger=None):
+        self.repo = repo or LeadRepository()
         self.buckets = self._load_buckets()
         self.logger = logger
+        self.ollama_url = "http://localhost:11434"
+        self.ollama_enabled = self._test_ollama()
+
+    def _test_ollama(self) -> bool:
+        """Test Ollama connection"""
+        try:
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
 
     def log(self, message: str, style: str = ""):
         """Log message to provided logger or print"""
@@ -31,8 +41,108 @@ class Discovery:
         """Load bucket configuration from DB"""
         return self.repo.get_all_buckets()
 
+    def expand_bucket(self, bucket_name: str) -> Optional[Dict]:
+        """Use LLM to expand bucket categories and search patterns"""
+        if not self.ollama_enabled:
+            return None
+
+        bucket = next((b for b in self.buckets if b["name"] == bucket_name), None)
+        if not bucket:
+            return None
+
+        self.log(f"Expanding bucket: {bucket_name} using LLM...", "info")
+
+        prompt = f"""
+        Current Lead Bucket: {bucket_name}
+        Categories: {bucket.get('categories', [])}
+        Search Patterns: {bucket.get('search_patterns', [])}
+
+        This bucket is running low on leads. Suggest:
+        1. 3 new related business categories
+        2. 3 new search patterns using '{{city}}'
+        3. 2 new target cities in India
+
+        Return ONLY JSON:
+        {{
+            "new_categories": ["cat1", "cat2", "cat3"],
+            "new_patterns": ["pattern1 {{city}}", "pattern2 {{city}}"],
+            "new_cities": ["City1", "City2"]
+        }}
+        """
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": "qwen2.5:latest",
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "system": "You are a market research assistant. Output ONLY valid JSON."
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                raw = response.json().get("response", "{}")
+                return json.loads(raw)
+        except Exception as e:
+            self.log(f"Expansion failed: {e}", "error")
+
+        return None
+
+    def discover_new_buckets(self) -> Optional[List[Dict]]:
+        """Use LLM to suggest new market buckets based on current ones"""
+        if not self.ollama_enabled:
+            return None
+
+        self.log("Discovering new market opportunities using LLM...", "info")
+
+        current_buckets = [b["name"] for b in self.buckets]
+
+        prompt = f"""
+        Current Target Markets (Buckets): {current_buckets}
+
+        Identify 2 new industries or business niches that would benefit from web development or SEO services.
+        For each, provide:
+        - A bucket name
+        - 3 initial business categories
+        - 2 search patterns using '{{city}}'
+
+        Return ONLY JSON list of objects:
+        [
+            {{
+                "name": "Market Name",
+                "categories": ["cat1", "cat2"],
+                "search_patterns": ["pattern1 {{city}}"]
+            }}
+        ]
+        """
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": "qwen2.5:latest",
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "system": "You are a business strategist. Output ONLY valid JSON."
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                raw = response.json().get("response", "[]")
+                return json.loads(raw)
+        except Exception as e:
+            self.log(f"Market discovery failed: {e}", "error")
+
+        return None
+
     def generate_queries(self, bucket_name: str = None, limit: int = 20) -> List[Dict]:
         """Generate search queries from bucket patterns"""
+        self.buckets = self._load_buckets()
         queries = []
         buckets = [b for b in self.buckets if not bucket_name or b["name"] == bucket_name]
         
@@ -212,7 +322,8 @@ class Discovery:
         return leads
 
     def run(self, bucket_name: str = None, max_queries: int = 5) -> Dict:
-        """Execute full discovery pipeline"""
+        """Execute full discovery pipeline with automatic expansion"""
+        self.buckets = self._load_buckets()
         self.log(f"\n{'='*60}")
         self.log("DISCOVERY: Query Generation + Lead Scraping")
         self.log(f"{'='*60}")
@@ -236,12 +347,18 @@ class Discovery:
                 leads = self.scrape_yellow_pages(q["query"], q["bucket"], max_results=3)
             
             # Save leads to database
+            query_saved = 0
             for lead in leads:
                 lead_id = self.repo.save_lead(lead)
                 if lead_id > 0:
-                    total_saved += 1
+                    query_saved += 1
                     self.log(f"  ✓ {lead['business_name']}", "success")
             
+            # Automatic expansion trigger: If we found no NEW leads for this query
+            if query_saved == 0 and self.ollama_enabled:
+                self.log(f"  ℹ No new leads found for '{q['query']}'. Recommendation: Press [x] to expand markets.", "info")
+
+            total_saved += query_saved
             total_leads += len(leads)
             time.sleep(2)  # Rate limiting
         
