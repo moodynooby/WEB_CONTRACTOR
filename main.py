@@ -1,14 +1,19 @@
 """Web Contractor - Textual TUI Application"""
 import asyncio
+import os
+from dotenv import load_dotenv
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Button, Static, Log, DataTable
+from textual.widgets import Header, Footer, Button, Static, RichLog, DataTable
 from textual.binding import Binding
 from textual import work
 from discovery import Discovery
 from outreach import Outreach
 from email_sender import EmailSender
 from lead_repository import LeadRepository
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class WebContractorTUI(App):
@@ -46,17 +51,13 @@ class WebContractorTUI(App):
         padding: 1;
     }
 
-    Button {
-        margin: 0 1;
-    }
-
     #log-container {
         height: 1fr;
         border: solid $primary;
         margin: 1;
     }
 
-    Log {
+    RichLog {
         height: 100%;
     }
 
@@ -84,9 +85,18 @@ class WebContractorTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.discovery = Discovery()
-        self.outreach = Outreach()
-        self.email_sender = EmailSender()
+        
+        # Thread-safe logging wrapper
+        def thread_safe_log(message: str, style: str = ""):
+            try:
+                self.call_from_thread(self.write_log, message, style)
+            except:
+                # Fallback if app is not running or other issues
+                print(message)
+
+        self.discovery = Discovery(logger=thread_safe_log)
+        self.outreach = Outreach(logger=thread_safe_log)
+        self.email_sender = EmailSender(logger=thread_safe_log)
         self.repo = LeadRepository()
         self.repo.setup_database()
 
@@ -101,15 +111,8 @@ class WebContractorTUI(App):
                 yield Static("", id="stat-emails", classes="stat-box", markup=True)
                 yield Static("", id="stat-pending", classes="stat-box", markup=True)
         
-        with Horizontal(id="controls"):
-            yield Button("Discovery [d]", id="btn-discovery", variant="primary")
-            yield Button("Audit [a]", id="btn-audit", variant="success")
-            yield Button("Generate [g]", id="btn-generate", variant="warning")
-            yield Button("Send [s]", id="btn-send", variant="error")
-            yield Button("Refresh [r]", id="btn-refresh", variant="default")
-        
         with Container(id="log-container"):
-            yield Log(id="activity-log")
+            yield RichLog(id="activity-log", markup=True)
         
         yield Footer()
 
@@ -123,15 +126,15 @@ class WebContractorTUI(App):
 
     def write_log(self, message: str, style: str = ""):
         """Write to activity log"""
-        log_widget = self.query_one("#activity-log", Log)
+        log_widget = self.query_one("#activity-log", RichLog)
         if style == "success":
-            log_widget.write_line(f"[green]✓[/green] {message}")
+            log_widget.write(f"[green]✓[/green] {message}")
         elif style == "error":
-            log_widget.write_line(f"[red]✗[/red] {message}")
+            log_widget.write(f"[red]✗[/red] {message}")
         elif style == "info":
-            log_widget.write_line(f"[cyan]ℹ[/cyan] {message}")
+            log_widget.write(f"[cyan]ℹ[/cyan] {message}")
         else:
-            log_widget.write_line(message)
+            log_widget.write(message)
 
     def refresh_stats(self) -> None:
         """Update statistics display"""
@@ -153,107 +156,51 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:
         """Run discovery pipeline (Stage 0 + Stage A)"""
-        self.write_log("Starting Discovery Pipeline...", "info")
-        self.call_from_thread(self._disable_buttons)
         
         try:
-            result = self.discovery.run(max_queries=5)
-            self.call_from_thread(
-                self.write_log,
-                f"Discovery complete: {result['leads_found']} leads found, {result['leads_saved']} saved",
-                "success"
-            )
+            self.discovery.run(max_queries=5)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Discovery failed: {e}", "error")
         finally:
-            self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_run_audit(self) -> None:
         """Run audit pipeline (Stage B)"""
-        self.write_log("Starting Audit Pipeline...", "info")
-        self.call_from_thread(self._disable_buttons)
         
         try:
-            result = self.outreach.audit_leads(limit=10)
-            self.call_from_thread(
-                self.write_log,
-                f"Audit complete: {result['audited']} audited, {result['qualified']} qualified",
-                "success"
-            )
+            self.outreach.audit_leads(limit=10)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Audit failed: {e}", "error")
         finally:
-            self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_generate_emails(self) -> None:
         """Generate emails (Stage C)"""
-        self.write_log("Starting Email Generation...", "info")
-        self.call_from_thread(self._disable_buttons)
         
         try:
-            result = self.outreach.generate_emails(limit=10)
-            self.call_from_thread(
-                self.write_log,
-                f"Email generation complete: {result['generated']} emails created",
-                "success"
-            )
+            self.outreach.generate_emails(limit=10)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Email generation failed: {e}", "error")
         finally:
-            self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_send_emails(self) -> None:
         """Send pending emails"""
-        self.write_log("Starting Email Sender...", "info")
-        self.call_from_thread(self._disable_buttons)
         
         try:
-            result = self.email_sender.send_pending_emails(limit=5)
-            self.call_from_thread(
-                self.write_log,
-                f"Email sending complete: {result['sent']} sent, {result['failed']} failed",
-                "success"
-            )
+            self.email_sender.send_pending_emails(limit=5)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Email sending failed: {e}", "error")
         finally:
-            self.call_from_thread(self._enable_buttons)
             self.call_from_thread(self.refresh_stats)
 
     def action_refresh_stats(self) -> None:
         """Refresh statistics"""
         self.refresh_stats()
         self.write_log("Statistics refreshed", "info")
-
-    def _disable_buttons(self) -> None:
-        """Disable all action buttons"""
-        for btn_id in ["btn-discovery", "btn-audit", "btn-generate", "btn-send"]:
-            self.query_one(f"#{btn_id}", Button).disabled = True
-
-    def _enable_buttons(self) -> None:
-        """Enable all action buttons"""
-        for btn_id in ["btn-discovery", "btn-audit", "btn-generate", "btn-send"]:
-            self.query_one(f"#{btn_id}", Button).disabled = False
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button clicks"""
-        button_id = event.button.id
-        if button_id == "btn-discovery":
-            self.action_run_discovery()
-        elif button_id == "btn-audit":
-            self.action_run_audit()
-        elif button_id == "btn-generate":
-            self.action_generate_emails()
-        elif button_id == "btn-send":
-            self.action_send_emails()
-        elif button_id == "btn-refresh":
-            self.action_refresh_stats()
 
 
 if __name__ == "__main__":

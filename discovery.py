@@ -15,37 +15,50 @@ from lead_repository import LeadRepository
 class Discovery:
     """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
 
-    def __init__(self):
+    def __init__(self, logger=None):
         self.repo = LeadRepository()
         self.buckets = self._load_buckets()
+        self.logger = logger
+
+    def log(self, message: str, style: str = ""):
+        """Log message to provided logger or print"""
+        if self.logger:
+            self.logger(message, style)
+        else:
+            print(message)
 
     def _load_buckets(self) -> List[Dict]:
-        """Load bucket configuration"""
-        try:
-            with open("config/buckets.json") as f:
-                data = json.load(f)
-                return data.get("buckets", [])
-        except Exception as e:
-            print(f"Error loading buckets: {e}")
-            return []
+        """Load bucket configuration from DB"""
+        return self.repo.get_all_buckets()
 
     def generate_queries(self, bucket_name: str = None, limit: int = 20) -> List[Dict]:
         """Generate search queries from bucket patterns"""
         queries = []
         buckets = [b for b in self.buckets if not bucket_name or b["name"] == bucket_name]
+        
+        # Load geographic focus from DB
+        geo_focus = self.repo.get_config("geographic_focus") or {}
 
         for bucket in buckets:
-            for pattern in bucket["search_patterns"][:3]:
+            search_patterns = bucket.get("search_patterns", [])
+            # Handle if search_patterns is string (should be parsed by repo, but safety check)
+            if isinstance(search_patterns, str):
+                 try: search_patterns = json.loads(search_patterns)
+                 except: search_patterns = []
+
+            for pattern in search_patterns[:3]:
                 # Get cities from geographic segments
                 cities = []
-                try:
-                    with open("config/buckets.json") as f:
-                        data = json.load(f)
-                        geo_focus = data.get("geographic_focus", {})
-                        for seg_name in bucket.get("geographic_segments", []):
-                            if seg_name in geo_focus:
-                                cities.extend(geo_focus[seg_name].get("cities", [])[:2])
-                except:
+                segments = bucket.get("geographic_segments", [])
+                if isinstance(segments, str):
+                    try: segments = json.loads(segments)
+                    except: segments = []
+                    
+                for seg_name in segments:
+                    if seg_name in geo_focus:
+                        cities.extend(geo_focus[seg_name].get("cities", [])[:2])
+                
+                if not cities:
                     cities = ["Mumbai", "Delhi", "Bangalore"]
 
                 for city in cities[:2]:
@@ -134,7 +147,7 @@ class Discovery:
             driver.quit()
 
         except Exception as e:
-            print(f"Error scraping Google Maps: {e}")
+            self.log(f"Error scraping Google Maps: {e}", "error")
 
         return leads
 
@@ -194,26 +207,26 @@ class Discovery:
                     continue
                     
         except Exception as e:
-            print(f"Error scraping Yellow Pages: {e}")
+            self.log(f"Error scraping Yellow Pages: {e}", "error")
             
         return leads
 
     def run(self, bucket_name: str = None, max_queries: int = 5) -> Dict:
         """Execute full discovery pipeline"""
-        print(f"\n{'='*60}")
-        print("DISCOVERY: Query Generation + Lead Scraping")
-        print(f"{'='*60}")
+        self.log(f"\n{'='*60}")
+        self.log("DISCOVERY: Query Generation + Lead Scraping")
+        self.log(f"{'='*60}")
         
         # Stage 0: Generate queries
         queries = self.generate_queries(bucket_name, max_queries)
-        print(f"Generated {len(queries)} search queries")
+        self.log(f"Generated {len(queries)} search queries", "info")
         
         # Stage A: Scrape leads
         total_leads = 0
         total_saved = 0
         
         for i, q in enumerate(queries, 1):
-            print(f"\n[{i}/{len(queries)}] {q['query']}")
+            self.log(f"\n[{i}/{len(queries)}] {q['query']}", "info")
             
             # Try Google Maps first
             leads = self.scrape_google_maps(q["query"], q["bucket"], max_results=3)
@@ -227,14 +240,14 @@ class Discovery:
                 lead_id = self.repo.save_lead(lead)
                 if lead_id > 0:
                     total_saved += 1
-                    print(f"  ✓ {lead['business_name']}")
+                    self.log(f"  ✓ {lead['business_name']}", "success")
             
             total_leads += len(leads)
             time.sleep(2)  # Rate limiting
         
-        print(f"\n{'='*60}")
-        print(f"Discovery Complete: {total_leads} found, {total_saved} saved")
-        print(f"{'='*60}\n")
+        self.log(f"\n{'='*60}")
+        self.log(f"Discovery Complete: {total_leads} found, {total_saved} saved", "success")
+        self.log(f"{'='*60}\n")
         
         return {
             "queries_executed": len(queries),

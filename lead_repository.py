@@ -60,11 +60,189 @@ class LeadRepository:
         )
         """)
 
+        # New tables for configuration
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS buckets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            categories TEXT,  -- JSON list
+            search_patterns TEXT,  -- JSON list
+            geographic_segments TEXT,  -- JSON list
+            intent_profile TEXT,
+            conversion_probability REAL,
+            monthly_target INTEGER
+        )
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS email_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bucket_name TEXT,
+            issue_type TEXT,
+            template_id TEXT,
+            subject_pattern TEXT,
+            body_template TEXT,
+            tone TEXT,
+            word_count_range TEXT, -- JSON list
+            conversion_focus TEXT,
+            UNIQUE(bucket_name, issue_type)
+        )
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY,
+            value TEXT -- JSON value
+        )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_audits_qualified ON audits(qualified)")
         
         conn.commit()
         conn.close()
+
+    def save_bucket(self, bucket_data: Dict):
+        """Save or update a bucket configuration"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        try:
+            cursor.execute("""
+                INSERT INTO buckets (name, categories, search_patterns, geographic_segments, 
+                                   intent_profile, conversion_probability, monthly_target)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    categories=excluded.categories,
+                    search_patterns=excluded.search_patterns,
+                    geographic_segments=excluded.geographic_segments,
+                    intent_profile=excluded.intent_profile,
+                    conversion_probability=excluded.conversion_probability,
+                    monthly_target=excluded.monthly_target
+            """, (
+                bucket_data["name"],
+                json.dumps(bucket_data.get("categories", [])),
+                json.dumps(bucket_data.get("search_patterns", [])),
+                json.dumps(bucket_data.get("geographic_segments", [])),
+                bucket_data.get("intent_profile", ""),
+                bucket_data.get("conversion_probability", 0.0),
+                bucket_data.get("monthly_target", 0)
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_all_buckets(self) -> List[Dict]:
+        """Get all configured buckets"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        cursor.execute("SELECT * FROM buckets")
+        columns = [description[0] for description in cursor.description]
+        buckets = []
+        
+        for row in cursor.fetchall():
+            d = dict(zip(columns, row))
+            # Parse JSON fields
+            for field in ["categories", "search_patterns", "geographic_segments"]:
+                if d.get(field):
+                    try:
+                        d[field] = json.loads(d[field])
+                    except:
+                        d[field] = []
+            buckets.append(d)
+            
+        conn.close()
+        return buckets
+
+    def save_template(self, bucket_name: str, issue_type: str, template_data: Dict):
+        """Save email template"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        try:
+            cursor.execute("""
+                INSERT INTO email_templates (bucket_name, issue_type, template_id, subject_pattern, 
+                                           body_template, tone, word_count_range, conversion_focus)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(bucket_name, issue_type) DO UPDATE SET
+                    template_id=excluded.template_id,
+                    subject_pattern=excluded.subject_pattern,
+                    body_template=excluded.body_template,
+                    tone=excluded.tone,
+                    word_count_range=excluded.word_count_range,
+                    conversion_focus=excluded.conversion_focus
+            """, (
+                bucket_name,
+                issue_type,
+                template_data.get("template_id"),
+                template_data.get("subject_pattern"),
+                template_data.get("body_template"),
+                template_data.get("tone"),
+                json.dumps(template_data.get("word_count_range", [])),
+                template_data.get("conversion_focus")
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_templates_for_bucket(self, bucket_name: str) -> Dict:
+        """Get all templates for a bucket"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        cursor.execute("SELECT * FROM email_templates WHERE bucket_name = ?", (bucket_name,))
+        columns = [description[0] for description in cursor.description]
+        
+        templates = {}
+        for row in cursor.fetchall():
+            d = dict(zip(columns, row))
+            issue_type = d.pop("issue_type")
+            if d.get("word_count_range"):
+                try:
+                    d["word_count_range"] = json.loads(d["word_count_range"])
+                except:
+                    d["word_count_range"] = []
+            templates[issue_type] = d
+            
+        conn.close()
+        return templates
+
+    def save_config(self, key: str, value: Dict):
+        """Save global config"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        try:
+            cursor.execute("""
+                INSERT INTO app_config (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """, (key, json.dumps(value)))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_config(self, key: str) -> Optional[Dict]:
+        """Get global config"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        
+        cursor.execute("SELECT value FROM app_config WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            try:
+                return json.loads(row[0])
+            except:
+                return None
+        return None
 
     def save_lead(self, lead: Dict) -> int:
         """Save a single lead"""
@@ -243,4 +421,29 @@ class LeadRepository:
             "qualified_leads": qualified,
             "emails_sent": emails_sent,
             "emails_pending": emails_pending
+        }
+
+    def consolidate_database(self) -> Dict:
+        """Clean up and optimize database"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # 1. Remove leads with absolutely no contact info
+        cursor.execute("""
+            DELETE FROM leads 
+            WHERE (website IS NULL OR website = '') 
+            AND (phone IS NULL OR phone = '') 
+            AND (email IS NULL OR email = '')
+        """)
+        deleted_count = cursor.rowcount
+        
+        # 2. Optimize database
+        cursor.execute("VACUUM")
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "deleted_empty_leads": deleted_count,
+            "status": "optimized"
         }

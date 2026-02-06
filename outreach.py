@@ -10,11 +10,18 @@ from lead_repository import LeadRepository
 class Outreach:
     """Consolidated Stage B (Auditing) + Stage C (Email Generation)"""
 
-    def __init__(self):
+    def __init__(self, logger=None):
         self.repo = LeadRepository()
         self.ollama_url = "http://localhost:11434"
         self.ollama_enabled = self._test_ollama()
-        self.templates = self._load_templates()
+        self.logger = logger
+
+    def log(self, message: str, style: str = ""):
+        """Log message to provided logger or print"""
+        if self.logger:
+            self.logger(message, style)
+        else:
+            print(message)
 
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
@@ -23,14 +30,6 @@ class Outreach:
             return response.status_code == 200
         except:
             return False
-
-    def _load_templates(self) -> Dict:
-        """Load email templates"""
-        try:
-            with open("config/email_templates.json") as f:
-                return json.load(f).get("templates", {})
-        except:
-            return {}
 
     def audit_website(self, url: str) -> Dict:
         """Audit website for technical issues"""
@@ -160,7 +159,7 @@ class Outreach:
     def generate_email_ollama(self, business_name: str, issues: List[Dict], bucket: str) -> Dict:
         """Generate email using Ollama LLM"""
         if not self.ollama_enabled:
-            return self.generate_email_template(business_name, issues)
+            return self.generate_email_template(business_name, issues, bucket)
 
         # Build prompt
         issue_summary = "\n".join([f"- {i['description']}" for i in issues[:3]])
@@ -209,10 +208,33 @@ Return ONLY JSON:
         except:
             pass
 
-        return self.generate_email_template(business_name, issues)
+        return self.generate_email_template(business_name, issues, bucket)
 
-    def generate_email_template(self, business_name: str, issues: List[Dict]) -> Dict:
-        """Generate email using template fallback"""
+    def generate_email_template(self, business_name: str, issues: List[Dict], bucket: str = None) -> Dict:
+        """Generate email using DB templates"""
+        if bucket:
+            templates = self.repo.get_templates_for_bucket(bucket)
+            # Map audit issues to template issue types
+            # Audit issues types: missing_title, missing_meta, no_viewport, etc.
+            # Template issue types (from file): mobile_unfriendly, etc.
+            
+            # Simple mapping for now
+            issue_map = {
+                "no_viewport": "mobile_unfriendly",
+                "missing_title": "seo_issue",
+                "missing_meta": "seo_issue"
+            }
+            
+            for issue in issues:
+                mapped_type = issue_map.get(issue["type"])
+                if mapped_type and mapped_type in templates:
+                    tpl = templates[mapped_type]
+                    subject = tpl.get("subject_pattern", "").replace("{business_name}", business_name)
+                    body = tpl.get("body_template", "").replace("{business_name}", business_name)
+                    if subject and body:
+                        return {"subject": subject, "body": body}
+
+        # Fallback if no template found
         issue_desc = issues[0]["description"] if issues else "website improvements"
         
         subject = f"Quick question about {business_name}'s website"
@@ -243,18 +265,18 @@ Best regards"""
 
     def audit_leads(self, limit: int = 20) -> Dict:
         """Audit pending leads"""
-        print(f"\n{'='*60}")
-        print("OUTREACH: Lead Auditing")
-        print(f"{'='*60}")
+        self.log(f"\n{'='*60}")
+        self.log("OUTREACH: Lead Auditing")
+        self.log(f"{'='*60}")
 
         leads = self.repo.get_pending_audits(limit)
-        print(f"Auditing {len(leads)} leads...")
+        self.log(f"Auditing {len(leads)} leads...", "info")
 
         audited = 0
         qualified = 0
 
         for i, lead in enumerate(leads, 1):
-            print(f"\n[{i}/{len(leads)}] {lead['business_name']}")
+            self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
             
             audit_result = self.audit_website(lead["website"])
             self.repo.save_audit(lead["id"], audit_result)
@@ -262,15 +284,15 @@ Best regards"""
             audited += 1
             if audit_result["qualified"]:
                 qualified += 1
-                print(f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])})")
+                self.log(f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])})", "success")
             else:
-                print(f"  ✗ Not qualified (Score: {audit_result['score']})")
+                self.log(f"  ✗ Not qualified (Score: {audit_result['score']})", "error")
             
             time.sleep(1)
 
-        print(f"\n{'='*60}")
-        print(f"Auditing Complete: {audited} audited, {qualified} qualified")
-        print(f"{'='*60}\n")
+        self.log(f"\n{'='*60}")
+        self.log(f"Auditing Complete: {audited} audited, {qualified} qualified", "success")
+        self.log(f"{'='*60}\n")
 
         return {
             "audited": audited,
@@ -279,17 +301,17 @@ Best regards"""
 
     def generate_emails(self, limit: int = 20) -> Dict:
         """Generate emails for qualified leads"""
-        print(f"\n{'='*60}")
-        print("OUTREACH: Email Generation")
-        print(f"{'='*60}")
+        self.log(f"\n{'='*60}")
+        self.log("OUTREACH: Email Generation")
+        self.log(f"{'='*60}")
 
         leads = self.repo.get_qualified_leads(limit)
-        print(f"Generating emails for {len(leads)} qualified leads...")
+        self.log(f"Generating emails for {len(leads)} qualified leads...", "info")
 
         generated = 0
 
         for i, lead in enumerate(leads, 1):
-            print(f"\n[{i}/{len(leads)}] {lead['business_name']}")
+            self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
             
             try:
                 issues = json.loads(lead.get("issues_json", "[]"))
@@ -301,15 +323,15 @@ Best regards"""
                 
                 self.repo.save_email(lead["id"], email["subject"], email["body"])
                 generated += 1
-                print(f"  ✓ Email generated")
+                self.log(f"  ✓ Email generated", "success")
                 
             except Exception as e:
-                print(f"  ✗ Error: {e}")
+                self.log(f"  ✗ Error: {e}", "error")
                 
             time.sleep(1)
 
-        print(f"\n{'='*60}")
-        print(f"Email Generation Complete: {generated} emails created")
-        print(f"{'='*60}\n")
+        self.log(f"\n{'='*60}")
+        self.log(f"Email Generation Complete: {generated} emails created", "success")
+        self.log(f"{'='*60}\n")
 
         return {"generated": generated}
