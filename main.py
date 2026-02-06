@@ -1,13 +1,22 @@
 """Web Contractor - Textual TUI Application"""
-import asyncio
+
 import json
-import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dotenv import load_dotenv
 from textual.app import App, ComposeResult
 from textual.screen import Screen, ModalScreen
 from textual.containers import Container, Horizontal, Vertical, Grid
-from textual.widgets import Header, Footer, Button, Static, RichLog, DataTable, Label, TextArea, Input
+from textual.widgets import (
+    Header,
+    Footer,
+    Button,
+    Static,
+    RichLog,
+    DataTable,
+    Label,
+    TextArea,
+    Input,
+)
 from textual.binding import Binding
 from textual import work
 from discovery import Discovery
@@ -56,7 +65,9 @@ class ReviewScreen(Screen):
         table.clear()
         self.emails = self.repo.get_emails_needing_review()
         for i, email in enumerate(self.emails):
-            table.add_row(email["business_name"], email["subject"], key=str(email["id"]))
+            table.add_row(
+                email["business_name"], email["subject"], key=str(email["id"])
+            )
 
         if not self.emails:
             self.query_one("#email-details").update("No emails pending review.")
@@ -64,7 +75,9 @@ class ReviewScreen(Screen):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected):
         email_id = int(event.row_key.value)
-        self.selected_email = next((e for e in self.emails if e["id"] == email_id), None)
+        self.selected_email = next(
+            (e for e in self.emails if e["id"] == email_id), None
+        )
         if self.selected_email:
             self.update_detail_view()
 
@@ -76,7 +89,9 @@ class ReviewScreen(Screen):
             # Alternative Communications
             alt_comm = []
             if self.selected_email.get("contact_form_url"):
-                alt_comm.append(f"[cyan]Form:[/cyan] {self.selected_email['contact_form_url']}")
+                alt_comm.append(
+                    f"[cyan]Form:[/cyan] {self.selected_email['contact_form_url']}"
+                )
 
             social = self.selected_email.get("social_links", {})
             for plat, link in social.items():
@@ -98,7 +113,10 @@ class ReviewScreen(Screen):
     def action_delete_selected(self):
         if self.selected_email:
             self.repo.delete_email(self.selected_email["id"])
-            self.notify(f"Deleted email for {self.selected_email['business_name']}", severity="error")
+            self.notify(
+                f"Deleted email for {self.selected_email['business_name']}",
+                severity="error",
+            )
             self.refresh_emails()
 
     async def action_edit_selected(self):
@@ -109,10 +127,13 @@ class ReviewScreen(Screen):
                 self.repo.update_email_content(
                     self.selected_email["id"],
                     updated_email["subject"],
-                    updated_email["body"]
+                    updated_email["body"],
                 )
-                self.notify(f"Updated and approved email for {self.selected_email['business_name']}")
+                self.notify(
+                    f"Updated and approved email for {self.selected_email['business_name']}"
+                )
                 self.refresh_emails()
+
 
 class EditEmailModal(ModalScreen):
     """Modal for editing an email"""
@@ -123,7 +144,9 @@ class EditEmailModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Grid(id="edit-grid"):
-            yield Label(f"Editing Email for {self.email['business_name']}", id="edit-title")
+            yield Label(
+                f"Editing Email for {self.email['business_name']}", id="edit-title"
+            )
             yield Label("Subject:")
             yield Input(self.email["subject"], id="edit-subject")
             yield Label("Body:")
@@ -153,7 +176,9 @@ class MarketReviewScreen(Screen):
         yield Header()
         with Container(id="market-review-container"):
             yield Label("LLM Market Expansion Suggestions")
-            yield Static("Review and approve new buckets or expansions", id="market-status")
+            yield Static(
+                "Review and approve new buckets or expansions", id="market-status"
+            )
             yield DataTable(id="market-table")
             with Horizontal(id="market-actions"):
                 yield Button("Approve Selected", variant="success", id="approve-market")
@@ -182,7 +207,9 @@ class MarketReviewScreen(Screen):
             self.dismiss()
         elif event.button.id == "approve-market":
             table = self.query_one("#market-table", DataTable)
-            if table.cursor_row is not None and table.cursor_row < len(self.suggestions):
+            if table.cursor_row is not None and table.cursor_row < len(
+                self.suggestions
+            ):
                 idx = table.cursor_row
                 suggestion = self.suggestions[idx]
                 self.apply_suggestion(suggestion)
@@ -191,7 +218,9 @@ class MarketReviewScreen(Screen):
                 self.notify("Suggestion applied!")
         elif event.button.id == "reject-market":
             table = self.query_one("#market-table", DataTable)
-            if table.cursor_row is not None and table.cursor_row < len(self.suggestions):
+            if table.cursor_row is not None and table.cursor_row < len(
+                self.suggestions
+            ):
                 idx = table.cursor_row
                 self.suggestions.pop(idx)
                 self.refresh_table()
@@ -204,8 +233,12 @@ class MarketReviewScreen(Screen):
             buckets = self.repo.get_all_buckets()
             bucket = next((b for b in buckets if b["name"] == bucket_name), None)
             if bucket:
-                new_cats = list(set(bucket.get("categories", []) + s.get("new_categories", [])))
-                new_pats = list(set(bucket.get("search_patterns", []) + s.get("new_patterns", [])))
+                new_cats = list(
+                    set(bucket.get("categories", []) + s.get("new_categories", []))
+                )
+                new_pats = list(
+                    set(bucket.get("search_patterns", []) + s.get("new_patterns", []))
+                )
                 bucket["categories"] = new_cats
                 bucket["search_patterns"] = new_pats
 
@@ -213,11 +246,17 @@ class MarketReviewScreen(Screen):
                 geo_focus = self.repo.get_config("geographic_focus") or {}
                 if "expanded" not in geo_focus:
                     geo_focus["expanded"] = {"cities": []}
-                geo_focus["expanded"]["cities"] = list(set(geo_focus["expanded"].get("cities", []) + s.get("new_cities", [])))
+                geo_focus["expanded"]["cities"] = list(
+                    set(
+                        geo_focus["expanded"].get("cities", [])
+                        + s.get("new_cities", [])
+                    )
+                )
                 self.repo.save_config("geographic_focus", geo_focus)
 
                 segments = bucket.get("geographic_segments", [])
-                if isinstance(segments, str): segments = json.loads(segments)
+                if isinstance(segments, str):
+                    segments = json.loads(segments)
                 if "expanded" not in segments:
                     segments.append("expanded")
                     bucket["geographic_segments"] = segments
@@ -367,7 +406,7 @@ class WebContractorTUI(App):
 
     def __init__(self):
         super().__init__()
-        
+
         # Thread-safe logging wrapper
         def thread_safe_log(message: str, style: str = ""):
             try:
@@ -385,7 +424,7 @@ class WebContractorTUI(App):
     def compose(self) -> ComposeResult:
         """Create child widgets"""
         yield Header()
-        
+
         with Container(id="stats-container"):
             with Horizontal():
                 yield Static("", id="stat-leads", classes="stat-box", markup=True)
@@ -393,10 +432,10 @@ class WebContractorTUI(App):
                 yield Static("", id="stat-review", classes="stat-box", markup=True)
                 yield Static("", id="stat-pending", classes="stat-box", markup=True)
                 yield Static("", id="stat-emails", classes="stat-box", markup=True)
-        
+
         with Container(id="log-container"):
             yield RichLog(id="activity-log", markup=True)
-        
+
         yield Footer()
 
     def on_mount(self) -> None:
@@ -405,7 +444,10 @@ class WebContractorTUI(App):
         self.sub_title = "Lead Discovery & Outreach Automation"
         self.refresh_stats()
         self.write_log("✓ Web Contractor initialized", "success")
-        self.write_log("Press [d] Discovery, [a] Audit, [g] Generate, [v] Review, [s] Send, [q] Quit", "info")
+        self.write_log(
+            "Press [d] Discovery, [a] Audit, [g] Generate, [v] Review, [s] Send, [q] Quit",
+            "info",
+        )
 
     def write_log(self, message: str, style: str = ""):
         """Write to activity log"""
@@ -422,7 +464,7 @@ class WebContractorTUI(App):
     def refresh_stats(self) -> None:
         """Update statistics display"""
         stats = self.repo.get_stats()
-        
+
         self.query_one("#stat-leads").update(
             f"[b]Total Leads[/b]\n[green]{stats['total_leads']}[/green]"
         )
@@ -459,20 +501,26 @@ class WebContractorTUI(App):
             if suggestions:
                 self.call_from_thread(self.show_market_review, suggestions)
             else:
-                self.call_from_thread(self.write_log, "No new market suggestions found.", "info")
+                self.call_from_thread(
+                    self.write_log, "No new market suggestions found.", "info"
+                )
 
         except Exception as e:
-            self.call_from_thread(self.write_log, f"Market expansion failed: {e}", "error")
+            self.call_from_thread(
+                self.write_log, f"Market expansion failed: {e}", "error"
+            )
         finally:
             self.call_from_thread(self.refresh_stats)
 
     def show_market_review(self, suggestions: List[Dict]):
-        self.push_screen(MarketReviewScreen(suggestions, self.repo), lambda _: self.refresh_stats())
+        self.push_screen(
+            MarketReviewScreen(suggestions, self.repo), lambda _: self.refresh_stats()
+        )
 
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:
         """Run discovery pipeline (Stage 0 + Stage A)"""
-        
+
         try:
             self.discovery.run(max_queries=5)
         except Exception as e:
@@ -483,7 +531,7 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_run_audit(self) -> None:
         """Run audit pipeline (Stage B)"""
-        
+
         try:
             self.outreach.audit_leads(limit=10)
         except Exception as e:
@@ -494,18 +542,20 @@ class WebContractorTUI(App):
     @work(exclusive=True, thread=True)
     def action_generate_emails(self) -> None:
         """Generate emails (Stage C)"""
-        
+
         try:
             self.outreach.generate_emails(limit=10)
         except Exception as e:
-            self.call_from_thread(self.write_log, f"Email generation failed: {e}", "error")
+            self.call_from_thread(
+                self.write_log, f"Email generation failed: {e}", "error"
+            )
         finally:
             self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_send_emails(self) -> None:
         """Send pending emails"""
-        
+
         try:
             self.email_sender.send_pending_emails(limit=5)
         except Exception as e:

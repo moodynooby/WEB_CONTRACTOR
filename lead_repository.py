@@ -1,4 +1,5 @@
 """Simplified Lead Repository for Web Contractor TUI"""
+
 import sqlite3
 import json
 from typing import List, Dict, Optional
@@ -24,7 +25,7 @@ class LeadRepository:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit"""
-        if hasattr(self, '_conn'):
+        if hasattr(self, "_conn"):
             if exc_type:
                 self._conn.rollback()
             else:
@@ -127,7 +128,7 @@ class LeadRepository:
             )
             """)
 
-                # Simplified email_templates table (keeping for backward compatibility)
+            # Simplified email_templates table (keeping for backward compatibility)
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS email_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,23 +154,42 @@ class LeadRepository:
             """)
 
             # Performance indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_leads_bucket ON leads(bucket_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audits_qualified ON audits(qualified)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audits_lead_id ON audits(lead_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_campaigns_lead_status ON email_campaigns(lead_id, status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_issues_audit_id ON audit_issues(audit_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_issues_type ON audit_issues(issue_type)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leads_bucket ON leads(bucket_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audits_qualified ON audits(qualified)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audits_lead_id ON audits(lead_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_email_campaigns_lead_status ON email_campaigns(lead_id, status)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_issues_audit_id ON audit_issues(audit_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_issues_type ON audit_issues(issue_type)"
+            )
 
     def save_bucket(self, bucket_data: Dict):
         """Save or update a bucket configuration"""
         import json
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO buckets (name, categories, search_patterns, geographic_segments, 
                                    intent_profile, conversion_probability, monthly_target,
                                    daily_email_limit)
@@ -182,27 +202,29 @@ class LeadRepository:
                     conversion_probability=excluded.conversion_probability,
                     monthly_target=excluded.monthly_target,
                     daily_email_limit=excluded.daily_email_limit
-            """, (
-                bucket_data["name"],
-                json.dumps(bucket_data.get("categories", [])),
-                json.dumps(bucket_data.get("search_patterns", [])),
-                json.dumps(bucket_data.get("geographic_segments", [])),
-                bucket_data.get("intent_profile", ""),
-                bucket_data.get("conversion_probability", 0.0),
-                bucket_data.get("monthly_target", 0),
-                bucket_data.get("daily_email_limit", 500)
-            ))
+            """,
+                (
+                    bucket_data["name"],
+                    json.dumps(bucket_data.get("categories", [])),
+                    json.dumps(bucket_data.get("search_patterns", [])),
+                    json.dumps(bucket_data.get("geographic_segments", [])),
+                    bucket_data.get("intent_profile", ""),
+                    bucket_data.get("conversion_probability", 0.0),
+                    bucket_data.get("monthly_target", 0),
+                    bucket_data.get("daily_email_limit", 500),
+                ),
+            )
 
     def get_all_buckets(self) -> List[Dict]:
         """Get all configured buckets"""
         import json
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM buckets")
             columns = [description[0] for description in cursor.description]
             buckets = []
-            
+
             for row in cursor.fetchall():
                 d = dict(zip(columns, row))
                 # Parse JSON fields
@@ -213,7 +235,7 @@ class LeadRepository:
                         except:
                             d[field] = []
                 buckets.append(d)
-            
+
         return buckets
 
     def get_bucket_id_by_name(self, bucket_name: str) -> Optional[int]:
@@ -227,14 +249,15 @@ class LeadRepository:
     def save_template(self, bucket_name: str, issue_type: str, template_data: Dict):
         """Save email template with bucket foreign key"""
         import json
-        
+
         bucket_id = self.get_bucket_id_by_name(bucket_name)
         if not bucket_id:
             raise ValueError(f"Bucket '{bucket_name}' not found")
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO email_templates (bucket_id, issue_type, template_id, subject_pattern, 
                                            body_template, tone, word_count_range, conversion_focus)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -245,30 +268,34 @@ class LeadRepository:
                     tone=excluded.tone,
                     word_count_range=excluded.word_count_range,
                     conversion_focus=excluded.conversion_focus
-            """, (
-                bucket_id,
-                issue_type,
-                template_data.get("template_id"),
-                template_data.get("subject_pattern"),
-                template_data.get("body_template"),
-                template_data.get("tone"),
-                json.dumps(template_data.get("word_count_range", [])),
-                template_data.get("conversion_focus")
-            ))
+            """,
+                (
+                    bucket_id,
+                    issue_type,
+                    template_data.get("template_id"),
+                    template_data.get("subject_pattern"),
+                    template_data.get("body_template"),
+                    template_data.get("tone"),
+                    json.dumps(template_data.get("word_count_range", [])),
+                    template_data.get("conversion_focus"),
+                ),
+            )
 
     def get_templates_for_bucket(self, bucket_name: str) -> Dict:
         """Get all templates for a bucket"""
         import json
-        
+
         bucket_id = self.get_bucket_id_by_name(bucket_name)
         if not bucket_id:
             return {}
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM email_templates WHERE bucket_id = ?", (bucket_id,))
+            cursor.execute(
+                "SELECT * FROM email_templates WHERE bucket_id = ?", (bucket_id,)
+            )
             columns = [description[0] for description in cursor.description]
-            
+
             templates = {}
             for row in cursor.fetchall():
                 d = dict(zip(columns, row))
@@ -279,29 +306,32 @@ class LeadRepository:
                     except:
                         d["word_count_range"] = []
                 templates[issue_type] = d
-            
+
         return templates
 
     def save_config(self, key: str, value: Dict):
         """Save global config"""
         import json
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO app_config (key, value) VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET value=excluded.value
-            """, (key, json.dumps(value)))
+            """,
+                (key, json.dumps(value)),
+            )
 
     def get_config(self, key: str) -> Optional[Dict]:
         """Get global config"""
         import json
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM app_config WHERE key = ?", (key,))
             row = cursor.fetchone()
-            
+
         if row:
             try:
                 return json.loads(row[0])
@@ -314,28 +344,31 @@ class LeadRepository:
         bucket_id = None
         if lead.get("bucket"):
             bucket_id = self.get_bucket_id_by_name(lead["bucket"])
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO leads (business_name, category, location, phone, email, 
                                        website, source, bucket_id, quality_score,
                                        social_links, contact_form_url)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    lead.get("business_name"),
-                    lead.get("category"),
-                    lead.get("location"),
-                    lead.get("phone"),
-                    lead.get("email"),
-                    lead.get("website"),
-                    lead.get("source"),
-                    bucket_id,
-                    lead.get("quality_score", 0.5),
-                    json.dumps(lead.get("social_links", {})),
-                    lead.get("contact_form_url")
-                ))
+                """,
+                    (
+                        lead.get("business_name"),
+                        lead.get("category"),
+                        lead.get("location"),
+                        lead.get("phone"),
+                        lead.get("email"),
+                        lead.get("website"),
+                        lead.get("source"),
+                        bucket_id,
+                        lead.get("quality_score", 0.5),
+                        json.dumps(lead.get("social_links", {})),
+                        lead.get("contact_form_url"),
+                    ),
+                )
                 lead_id = cursor.lastrowid
                 return lead_id
             except sqlite3.IntegrityError:
@@ -374,67 +407,82 @@ class LeadRepository:
         """Get leads pending audit"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT l.id, l.business_name, l.website, b.name as bucket_name
                 FROM leads l
                 LEFT JOIN buckets b ON l.bucket_id = b.id
                 WHERE l.status = 'pending_audit' AND l.website IS NOT NULL
                 LIMIT ?
-            """, (limit,))
-            
+            """,
+                (limit,),
+            )
+
             leads = []
             for row in cursor.fetchall():
-                leads.append({
-                    "id": row[0],
-                    "business_name": row[1],
-                    "website": row[2],
-                    "bucket": row[3]
-                })
-        
+                leads.append(
+                    {
+                        "id": row[0],
+                        "business_name": row[1],
+                        "website": row[2],
+                        "bucket": row[3],
+                    }
+                )
+
         return leads
 
     def save_audit(self, lead_id: int, audit_data: Dict):
         """Save audit results with normalized issues"""
         import json
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO audits (lead_id, url, score, issues_json, qualified)
                 VALUES (?, ?, ?, ?, ?)
-            """, (
-                lead_id,
-                audit_data.get("url"),
-                audit_data.get("score", 0),
-                json.dumps(audit_data.get("issues", [])),
-                audit_data.get("qualified", 0)
-            ))
-            
+            """,
+                (
+                    lead_id,
+                    audit_data.get("url"),
+                    audit_data.get("score", 0),
+                    json.dumps(audit_data.get("issues", [])),
+                    audit_data.get("qualified", 0),
+                ),
+            )
+
             audit_id = cursor.lastrowid
-            
+
             # Save normalized issues
             for issue in audit_data.get("issues", []):
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO audit_issues (audit_id, issue_type, severity, description)
                     VALUES (?, ?, ?, ?)
-                """, (
-                    audit_id,
-                    issue.get("type", "unknown"),
-                    issue.get("severity", "info"),
-                    issue.get("description", "")
-                ))
-            
+                """,
+                    (
+                        audit_id,
+                        issue.get("type", "unknown"),
+                        issue.get("severity", "info"),
+                        issue.get("description", ""),
+                    ),
+                )
+
             # Update lead status
             new_status = "qualified" if audit_data.get("qualified") else "unqualified"
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE leads SET status = ? WHERE id = ?
-            """, (new_status, lead_id))
+            """,
+                (new_status, lead_id),
+            )
 
     def get_qualified_leads(self, limit: int = 50) -> List[Dict]:
         """Get qualified leads without emails - optimized query"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT l.id, l.business_name, l.website, b.name as bucket_name, a.issues_json
                 FROM leads l
                 JOIN audits a ON l.id = a.lead_id
@@ -443,34 +491,43 @@ class LeadRepository:
                 WHERE l.status = 'qualified' 
                 AND ec.id IS NULL
                 LIMIT ?
-            """, (limit,))
-            
+            """,
+                (limit,),
+            )
+
             leads = []
             for row in cursor.fetchall():
-                leads.append({
-                    "id": row[0],
-                    "business_name": row[1],
-                    "website": row[2],
-                    "bucket": row[3],
-                    "issues_json": row[4]
-                })
-        
+                leads.append(
+                    {
+                        "id": row[0],
+                        "business_name": row[1],
+                        "website": row[2],
+                        "bucket": row[3],
+                        "issues_json": row[4],
+                    }
+                )
+
         return leads
 
-    def save_email(self, lead_id: int, subject: str, body: str, status: str = 'needs_review'):
+    def save_email(
+        self, lead_id: int, subject: str, body: str, status: str = "needs_review"
+    ):
         """Save generated email, default to needs_review"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO email_campaigns (lead_id, subject, body, status)
                 VALUES (?, ?, ?, ?)
-            """, (lead_id, subject, body, status))
+            """,
+                (lead_id, subject, body, status),
+            )
 
     def get_pending_emails(self, limit: int = 20) -> List[Dict]:
         """Get pending (approved) emails to send with rate limiting"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Check daily email limits
             cursor.execute("""
                 SELECT id
@@ -479,11 +536,12 @@ class LeadRepository:
                 AND last_reset_date = CURRENT_DATE
             """)
             over_limit_buckets = [row[0] for row in cursor.fetchall()]
-            
+
             # Get pending emails, excluding leads in buckets over limit
             if over_limit_buckets:
-                placeholders = ','.join('?' * len(over_limit_buckets))
-                cursor.execute(f"""
+                placeholders = ",".join("?" * len(over_limit_buckets))
+                cursor.execute(
+                    f"""
                     SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
                     FROM email_campaigns ec
                     JOIN leads l ON ec.lead_id = l.id
@@ -491,71 +549,89 @@ class LeadRepository:
                     AND l.email IS NOT NULL
                     AND (l.bucket_id IS NULL OR l.bucket_id NOT IN ({placeholders}))
                     LIMIT ?
-                """, over_limit_buckets + [limit])
+                """,
+                    over_limit_buckets + [limit],
+                )
             else:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
                     FROM email_campaigns ec
                     JOIN leads l ON ec.lead_id = l.id
                     WHERE ec.status = 'pending' AND l.email IS NOT NULL
                     LIMIT ?
-                """, (limit,))
-            
+                """,
+                    (limit,),
+                )
+
             emails = []
             for row in cursor.fetchall():
-                emails.append({
-                    "campaign_id": row[0],
-                    "business_name": row[1],
-                    "email": row[2],
-                    "subject": row[3],
-                    "body": row[4],
-                    "lead_id": row[5]
-                })
-        
+                emails.append(
+                    {
+                        "campaign_id": row[0],
+                        "business_name": row[1],
+                        "email": row[2],
+                        "subject": row[3],
+                        "body": row[4],
+                        "lead_id": row[5],
+                    }
+                )
+
         return emails
 
     def get_emails_needing_review(self, limit: int = 50) -> List[Dict]:
         """Get emails with needs_review status"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id,
                        l.social_links, l.contact_form_url
                 FROM email_campaigns ec
                 JOIN leads l ON ec.lead_id = l.id
                 WHERE ec.status = 'needs_review'
                 LIMIT ?
-            """, (limit,))
+            """,
+                (limit,),
+            )
 
             emails = []
             for row in cursor.fetchall():
-                emails.append({
-                    "id": row[0],
-                    "business_name": row[1],
-                    "email": row[2],
-                    "subject": row[3],
-                    "body": row[4],
-                    "lead_id": row[5],
-                    "social_links": json.loads(row[6]) if row[6] else {},
-                    "contact_form_url": row[7]
-                })
+                emails.append(
+                    {
+                        "id": row[0],
+                        "business_name": row[1],
+                        "email": row[2],
+                        "subject": row[3],
+                        "body": row[4],
+                        "lead_id": row[5],
+                        "social_links": json.loads(row[6]) if row[6] else {},
+                        "contact_form_url": row[7],
+                    }
+                )
         return emails
 
     def update_email_status(self, campaign_id: int, status: str):
         """Update email campaign status"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE email_campaigns SET status = ? WHERE id = ?", (status, campaign_id))
+            cursor.execute(
+                "UPDATE email_campaigns SET status = ? WHERE id = ?",
+                (status, campaign_id),
+            )
 
     def update_email_content(self, campaign_id: int, subject: str, body: str):
         """Update email campaign content"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE email_campaigns
                 SET subject = ?, body = ?, status = 'pending'
                 WHERE id = ?
-            """, (subject, body, campaign_id))
+            """,
+                (subject, body, campaign_id),
+            )
 
     def delete_email(self, campaign_id: int):
         """Delete an email campaign"""
@@ -567,23 +643,30 @@ class LeadRepository:
         """Mark email as sent or failed with retry logic"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             if success:
                 now = datetime.now().isoformat()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE email_campaigns 
                     SET status = 'sent', sent_at = ?, bounce_reason = NULL
                     WHERE id = ?
-                """, (now, campaign_id))
+                """,
+                    (now, campaign_id),
+                )
 
                 # Update last_email_sent_at for the lead
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE leads SET last_email_sent_at = ?
                     WHERE id = (SELECT lead_id FROM email_campaigns WHERE id = ?)
-                """, (now, campaign_id))
-                
+                """,
+                    (now, campaign_id),
+                )
+
                 # Update bucket daily email count
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE buckets 
                     SET daily_email_count = daily_email_count + 1
                     WHERE id = (
@@ -591,54 +674,72 @@ class LeadRepository:
                         JOIN email_campaigns ec ON l.id = ec.lead_id 
                         WHERE ec.id = ?
                     )
-                """, (campaign_id,))
+                """,
+                    (campaign_id,),
+                )
             else:
                 # Handle failed email with retry logic
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE email_campaigns 
                     SET status = 'failed', bounce_reason = ?, 
                         retry_count = retry_count + 1,
                         next_retry_at = datetime('now', '+' || (retry_count + 1) * 3600 || ' seconds')
                     WHERE id = ? AND retry_count < max_retries
-                """, (error, campaign_id))
-                
+                """,
+                    (error, campaign_id),
+                )
+
                 # Mark as permanently failed if max retries reached
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE email_campaigns 
                     SET status = 'permanently_failed'
                     WHERE id = ? AND retry_count >= max_retries
-                """, (campaign_id,))
+                """,
+                    (campaign_id,),
+                )
 
     def get_stats(self) -> Dict:
         """Get overall statistics"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             cursor.execute("SELECT COUNT(*) FROM leads")
             total_leads = cursor.fetchone()[0]
-            
+
             cursor.execute("SELECT COUNT(*) FROM leads WHERE status = 'qualified'")
             qualified = cursor.fetchone()[0]
-            
+
             cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'sent'")
             emails_sent = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending'")
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending'"
+            )
             emails_pending = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review'")
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review'"
+            )
             emails_review = cursor.fetchone()[0]
 
             # Email engagement stats
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL")
+            cursor.execute(
+                "SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL"
+            )
             emails_opened = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE clicked_at IS NOT NULL")
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM email_campaigns WHERE clicked_at IS NOT NULL"
+            )
             emails_clicked = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE replied_at IS NOT NULL")
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM email_campaigns WHERE replied_at IS NOT NULL"
+            )
             emails_replied = cursor.fetchone()[0]
-            
+
         return {
             "total_leads": total_leads,
             "qualified_leads": qualified,
@@ -647,14 +748,14 @@ class LeadRepository:
             "emails_review": emails_review,
             "emails_opened": emails_opened,
             "emails_clicked": emails_clicked,
-            "emails_replied": emails_replied
+            "emails_replied": emails_replied,
         }
 
     def consolidate_database(self) -> Dict:
         """Clean up and optimize database"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # 1. Remove leads with absolutely no contact info
             cursor.execute("""
                 DELETE FROM leads 
@@ -663,7 +764,7 @@ class LeadRepository:
                 AND (email IS NULL OR email = '')
             """)
             deleted_count = cursor.rowcount
-            
+
             # 2. Reset daily email counters for new day
             cursor.execute("""
                 UPDATE buckets 
@@ -671,7 +772,7 @@ class LeadRepository:
                 WHERE last_reset_date < CURRENT_DATE
             """)
             reset_count = cursor.rowcount
-            
+
             # 3. Retry failed emails that are ready
             cursor.execute("""
                 UPDATE email_campaigns 
@@ -681,15 +782,15 @@ class LeadRepository:
                 AND retry_count < max_retries
             """)
             retry_count = cursor.rowcount
-            
+
             # 4. Optimize database
             cursor.execute("VACUUM")
-            
+
         return {
             "deleted_empty_leads": deleted_count,
             "reset_daily_counters": reset_count,
             "emails_queued_for_retry": retry_count,
-            "status": "optimized"
+            "status": "optimized",
         }
 
     # New methods for email engagement tracking
@@ -697,37 +798,47 @@ class LeadRepository:
         """Track when email is opened"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE email_campaigns 
                 SET opened_at = CURRENT_TIMESTAMP 
                 WHERE id = ? AND opened_at IS NULL
-            """, (campaign_id,))
+            """,
+                (campaign_id,),
+            )
 
     def track_email_clicked(self, campaign_id: int):
         """Track when email link is clicked"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE email_campaigns 
                 SET clicked_at = CURRENT_TIMESTAMP 
                 WHERE id = ? AND clicked_at IS NULL
-            """, (campaign_id,))
+            """,
+                (campaign_id,),
+            )
 
     def track_email_replied(self, campaign_id: int):
         """Track when prospect replies to email"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE email_campaigns 
                 SET replied_at = CURRENT_TIMESTAMP 
                 WHERE id = ? AND replied_at IS NULL
-            """, (campaign_id,))
+            """,
+                (campaign_id,),
+            )
 
     def get_retry_emails(self, limit: int = 10) -> List[Dict]:
         """Get emails ready for retry"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
                 FROM email_campaigns ec
                 JOIN leads l ON ec.lead_id = l.id
@@ -735,42 +846,51 @@ class LeadRepository:
                 AND ec.next_retry_at <= CURRENT_TIMESTAMP
                 AND ec.retry_count < ec.max_retries
                 LIMIT ?
-            """, (limit,))
-            
+            """,
+                (limit,),
+            )
+
             emails = []
             for row in cursor.fetchall():
-                emails.append({
-                    "campaign_id": row[0],
-                    "business_name": row[1],
-                    "email": row[2],
-                    "subject": row[3],
-                    "body": row[4],
-                    "lead_id": row[5]
-                })
-        
+                emails.append(
+                    {
+                        "campaign_id": row[0],
+                        "business_name": row[1],
+                        "email": row[2],
+                        "subject": row[3],
+                        "body": row[4],
+                        "lead_id": row[5],
+                    }
+                )
+
         return emails
 
     def get_issues_by_type(self, issue_type: str) -> List[Dict]:
         """Get all audits with specific issue type"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT l.id, l.business_name, l.website, ai.description, ai.severity
                 FROM audit_issues ai
                 JOIN audits a ON ai.audit_id = a.id
                 JOIN leads l ON a.lead_id = l.id
                 WHERE ai.issue_type = ?
                 ORDER BY ai.severity DESC
-            """, (issue_type,))
-            
+            """,
+                (issue_type,),
+            )
+
             issues = []
             for row in cursor.fetchall():
-                issues.append({
-                    "lead_id": row[0],
-                    "business_name": row[1],
-                    "website": row[2],
-                    "description": row[3],
-                    "severity": row[4]
-                })
-        
+                issues.append(
+                    {
+                        "lead_id": row[0],
+                        "business_name": row[1],
+                        "website": row[2],
+                        "description": row[3],
+                        "severity": row[4],
+                    }
+                )
+
         return issues
