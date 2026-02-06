@@ -411,28 +411,23 @@ class LeadRepository:
         
         return leads
 
-    def save_email(self, lead_id: int, subject: str, body: str):
-        """Save generated email"""
+    def save_email(self, lead_id: int, subject: str, body: str, status: str = 'needs_review'):
+        """Save generated email, default to needs_review"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO email_campaigns (lead_id, subject, body)
-                VALUES (?, ?, ?)
-            """, (lead_id, subject, body))
-            
-            # Update last_email_sent_at for the lead
-            cursor.execute("""
-                UPDATE leads SET last_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?
-            """, (lead_id,))
+                INSERT INTO email_campaigns (lead_id, subject, body, status)
+                VALUES (?, ?, ?, ?)
+            """, (lead_id, subject, body, status))
 
     def get_pending_emails(self, limit: int = 20) -> List[Dict]:
-        """Get pending emails to send with rate limiting"""
+        """Get pending (approved) emails to send with rate limiting"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
             # Check daily email limits
             cursor.execute("""
-                SELECT daily_email_count, daily_email_limit, last_reset_date 
+                SELECT id
                 FROM buckets 
                 WHERE daily_email_count >= daily_email_limit 
                 AND last_reset_date = CURRENT_DATE
@@ -473,17 +468,70 @@ class LeadRepository:
         
         return emails
 
+    def get_emails_needing_review(self, limit: int = 50) -> List[Dict]:
+        """Get emails with needs_review status"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
+                FROM email_campaigns ec
+                JOIN leads l ON ec.lead_id = l.id
+                WHERE ec.status = 'needs_review'
+                LIMIT ?
+            """, (limit,))
+
+            emails = []
+            for row in cursor.fetchall():
+                emails.append({
+                    "id": row[0],
+                    "business_name": row[1],
+                    "email": row[2],
+                    "subject": row[3],
+                    "body": row[4],
+                    "lead_id": row[5]
+                })
+        return emails
+
+    def update_email_status(self, campaign_id: int, status: str):
+        """Update email campaign status"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE email_campaigns SET status = ? WHERE id = ?", (status, campaign_id))
+
+    def update_email_content(self, campaign_id: int, subject: str, body: str):
+        """Update email campaign content"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE email_campaigns
+                SET subject = ?, body = ?, status = 'pending'
+                WHERE id = ?
+            """, (subject, body, campaign_id))
+
+    def delete_email(self, campaign_id: int):
+        """Delete an email campaign"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM email_campaigns WHERE id = ?", (campaign_id,))
+
     def mark_email_sent(self, campaign_id: int, success: bool, error: str = None):
         """Mark email as sent or failed with retry logic"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
             if success:
+                now = datetime.now().isoformat()
                 cursor.execute("""
                     UPDATE email_campaigns 
                     SET status = 'sent', sent_at = ?, bounce_reason = NULL
                     WHERE id = ?
-                """, (datetime.now().isoformat(), campaign_id))
+                """, (now, campaign_id))
+
+                # Update last_email_sent_at for the lead
+                cursor.execute("""
+                    UPDATE leads SET last_email_sent_at = ?
+                    WHERE id = (SELECT lead_id FROM email_campaigns WHERE id = ?)
+                """, (now, campaign_id))
                 
                 # Update bucket daily email count
                 cursor.execute("""
@@ -529,6 +577,9 @@ class LeadRepository:
             cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending'")
             emails_pending = cursor.fetchone()[0]
             
+            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review'")
+            emails_review = cursor.fetchone()[0]
+
             # Email engagement stats
             cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL")
             emails_opened = cursor.fetchone()[0]
@@ -544,6 +595,7 @@ class LeadRepository:
             "qualified_leads": qualified,
             "emails_sent": emails_sent,
             "emails_pending": emails_pending,
+            "emails_review": emails_review,
             "emails_opened": emails_opened,
             "emails_clicked": emails_clicked,
             "emails_replied": emails_replied

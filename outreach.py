@@ -15,6 +15,16 @@ class Outreach:
         self.ollama_url = "http://localhost:11434"
         self.ollama_enabled = self._test_ollama()
         self.logger = logger
+        self.audit_settings = self._load_audit_settings()
+
+    def _load_audit_settings(self) -> Dict:
+        """Load audit settings from config file"""
+        try:
+            with open("config/audit_settings.json", "r") as f:
+                return json.load(f)
+        except Exception as e:
+            self.log(f"Error loading audit settings: {e}", "error")
+            return {"technical_checks": [], "llm_audit": {"enabled": False}}
 
     def log(self, message: str, style: str = ""):
         """Log message to provided logger or print"""
@@ -31,8 +41,8 @@ class Outreach:
         except:
             return False
 
-    def audit_website(self, url: str) -> Dict:
-        """Audit website for technical issues"""
+    def audit_website(self, url: str, business_name: str = "this business", bucket_name: str = None) -> Dict:
+        """Audit website for technical and qualitative issues"""
         issues = []
         score = 100
         
@@ -41,120 +51,159 @@ class Outreach:
             response = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Check page title
-            title = soup.find("title")
-            if not title or len(title.text.strip()) < 10:
-                issues.append({
-                    "type": "missing_title",
-                    "severity": "high",
-                    "description": "Page title missing or too short"
-                })
-                score -= 15
+            # Combine global checks with bucket overrides
+            checks = self.audit_settings.get("technical_checks", []).copy()
+            if bucket_name and bucket_name in self.audit_settings.get("bucket_overrides", {}):
+                overrides = self.audit_settings["bucket_overrides"][bucket_name]
+                checks.extend(overrides.get("technical_checks", []))
 
-            # Check meta description
-            meta_desc = soup.find("meta", attrs={"name": "description"})
-            if not meta_desc:
-                issues.append({
-                    "type": "missing_meta",
-                    "severity": "medium",
-                    "description": "Meta description missing"
-                })
-                score -= 10
+            # Technical checks
+            for check in checks:
+                check_type = check.get("type")
+                selector = check.get("selector")
 
-            # Check viewport (mobile-friendly)
-            viewport = soup.find("meta", attrs={"name": "viewport"})
-            if not viewport:
-                issues.append({
-                    "type": "no_viewport",
-                    "severity": "high",
-                    "description": "Not mobile-friendly"
-                })
-                score -= 20
+                if check_type == "html_exists":
+                    elem = soup.select_one(selector)
+                    if not elem or (check.get("min_length") and len(elem.text.strip()) < check["min_length"]):
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": check["description"]
+                        })
+                        score -= check["score_impact"]
 
-            # Check heading structure
-            h1_tags = soup.find_all("h1")
-            if len(h1_tags) == 0:
-                issues.append({
-                    "type": "no_h1",
-                    "severity": "medium",
-                    "description": "Missing H1 heading"
-                })
-                score -= 10
-            elif len(h1_tags) > 1:
-                issues.append({
-                    "type": "multiple_h1",
-                    "severity": "low",
-                    "description": "Multiple H1 tags"
-                })
-                score -= 5
+                elif check_type == "html_count":
+                    count = len(soup.select(selector))
+                    if check.get("max_count") is not None and count > check["max_count"]:
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": f"{check['description']} ({count} found)"
+                        })
+                        score -= check["score_impact"]
 
-            # Check images without alt text
-            images = soup.find_all("img")
-            images_without_alt = [img for img in images if not img.get("alt")]
-            if images_without_alt and len(images_without_alt) > len(images) * 0.3:
-                issues.append({
-                    "type": "missing_alt_text",
-                    "severity": "medium",
-                    "description": f"{len(images_without_alt)} images without alt text"
-                })
-                score -= 10
+                elif check_type == "image_alt_ratio":
+                    images = soup.find_all("img")
+                    if images:
+                        without_alt = [img for img in images if not img.get("alt")]
+                        if len(without_alt) > len(images) * check.get("threshold", 0.3):
+                            issues.append({
+                                "type": check["id"],
+                                "severity": check["severity"],
+                                "description": f"{len(without_alt)}/{len(images)} images missing alt text"
+                            })
+                            score -= check["score_impact"]
 
-            # Check for Google Analytics
-            has_analytics = bool(
-                soup.find("script", src=lambda x: x and "google-analytics" in x) or
-                soup.find("script", src=lambda x: x and "gtag" in x)
-            )
-            if not has_analytics:
-                issues.append({
-                    "type": "no_analytics",
-                    "severity": "low",
-                    "description": "No Google Analytics detected"
-                })
-                score -= 5
+                elif check_type == "script_match":
+                    patterns = check.get("patterns", [])
+                    found = False
+                    for script in soup.find_all("script", src=True):
+                        if any(p in script["src"] for p in patterns):
+                            found = True
+                            break
+                    if not found:
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": check["description"]
+                        })
+                        score -= check["score_impact"]
 
-            # Check SSL
-            if not url.startswith("https://"):
-                issues.append({
-                    "type": "no_ssl",
-                    "severity": "critical",
-                    "description": "Website not using HTTPS"
-                })
-                score -= 25
+                elif check_type == "protocol_check":
+                    if not url.startswith(check.get("protocol", "https://")):
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": check["description"]
+                        })
+                        score -= check["score_impact"]
 
-            # Response time check
-            response_time = response.elapsed.total_seconds()
-            if response_time > 3:
-                issues.append({
-                    "type": "slow_load",
-                    "severity": "medium",
-                    "description": f"Slow page load time: {response_time:.2f}s"
-                })
-                score -= 10
+                elif check_type == "load_time":
+                    if response.elapsed.total_seconds() > check.get("threshold", 3.0):
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": f"{check['description']} ({response.elapsed.total_seconds():.2f}s)"
+                        })
+                        score -= check["score_impact"]
+
+                elif check_type == "link_match":
+                    patterns = check.get("patterns", [])
+                    found = False
+                    for link in soup.find_all("a", href=True):
+                        href = link["href"].lower()
+                        if any(p in href for p in patterns):
+                            found = True
+                            break
+                    if not found:
+                        issues.append({
+                            "type": check["id"],
+                            "severity": check["severity"],
+                            "description": check["description"]
+                        })
+                        score -= check["score_impact"]
+
+            # Qualitative LLM Audit
+            llm_config = self.audit_settings.get("llm_audit", {})
+            if self.ollama_enabled and llm_config.get("enabled"):
+                # Extract text for LLM
+                for script in soup(["script", "style"]):
+                    script.decompose()
+                text_content = soup.get_text(separator=' ', strip=True)[:2000]
+
+                llm_result = self._run_llm_audit(business_name, text_content, llm_config)
+                if llm_result:
+                    qual_score = llm_result.get("qualitative_score", 100)
+                    # Adjust main score based on qualitative score (weighted 30%)
+                    score = (score * 0.7) + (qual_score * 0.3)
+
+                    for obs in llm_result.get("observations", []):
+                        issues.append({
+                            "type": f"llm_{obs.get('type', 'observation')}",
+                            "severity": obs.get("severity", "info"),
+                            "description": f"LLM: {obs.get('description')}"
+                        })
 
         except requests.exceptions.Timeout:
-            issues.append({
-                "type": "timeout",
-                "severity": "critical",
-                "description": "Website timeout"
-            })
+            issues.append({"type": "timeout", "severity": "critical", "description": "Website timeout"})
             score = 20
         except Exception as e:
-            issues.append({
-                "type": "error",
-                "severity": "critical",
-                "description": f"Audit error: {str(e)}"
-            })
+            issues.append({"type": "error", "severity": "critical", "description": f"Audit error: {str(e)}"})
             score = 30
 
-        # Qualification logic: score > 40 and has fixable issues
-        qualified = score < 80 and score > 40 and len(issues) >= 2
+        # Qualification logic
+        qualified = score < 85 and score > 40 and len(issues) >= 2
 
         return {
             "url": url,
-            "score": max(0, score),
+            "score": int(max(0, score)),
             "issues": issues,
             "qualified": 1 if qualified else 0
         }
+
+    def _run_llm_audit(self, business_name: str, content: str, config: Dict) -> Optional[Dict]:
+        """Run qualitative audit using Ollama"""
+        prompt = config.get("prompt", "").format(business_name=business_name, content=content)
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": config.get("model", "qwen2.5:latest"),
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "system": "You are a website quality auditor. Output ONLY valid JSON."
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                raw = response.json().get("response", "{}")
+                return json.loads(raw)
+        except:
+            pass
+        return None
 
     def generate_email_ollama(self, business_name: str, issues: List[Dict], bucket: str) -> Dict:
         """Generate email using Ollama LLM"""
@@ -186,7 +235,7 @@ Return ONLY JSON:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:8b",
+                    "model": "qwen2.5:latest",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -278,7 +327,7 @@ Best regards"""
         for i, lead in enumerate(leads, 1):
             self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
             
-            audit_result = self.audit_website(lead["website"])
+            audit_result = self.audit_website(lead["website"], lead["business_name"], lead["bucket"])
             self.repo.save_audit(lead["id"], audit_result)
             
             audited += 1
