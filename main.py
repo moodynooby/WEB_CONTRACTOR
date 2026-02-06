@@ -70,8 +70,22 @@ class ReviewScreen(Screen):
 
     def update_detail_view(self):
         if self.selected_email:
-            content = f"[b]To:[/b] {self.selected_email['email']}\n"
+            content = f"[b]To:[/b] {self.selected_email.get('email', 'N/A')}\n"
             content += f"[b]Subject:[/b] {self.selected_email['subject']}\n\n"
+
+            # Alternative Communications
+            alt_comm = []
+            if self.selected_email.get("contact_form_url"):
+                alt_comm.append(f"[cyan]Form:[/cyan] {self.selected_email['contact_form_url']}")
+
+            social = self.selected_email.get("social_links", {})
+            for plat, link in social.items():
+                alt_comm.append(f"[cyan]{plat.capitalize()}:[/cyan] {link}")
+
+            if alt_comm:
+                content += "[b]Alt Communications:[/b]\n" + "\n".join(alt_comm) + "\n\n"
+
+            content += "[b]Message:[/b]\n"
             content += f"{self.selected_email['body']}"
             self.query_one("#email-details").update(content)
 

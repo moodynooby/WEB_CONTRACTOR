@@ -1,5 +1,6 @@
 """Simplified Lead Repository for Web Contractor TUI"""
 import sqlite3
+import json
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -50,9 +51,22 @@ class LeadRepository:
                 bucket_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_email_sent_at TIMESTAMP,
+                social_links TEXT,  -- JSON object
+                contact_form_url TEXT,
                 FOREIGN KEY(bucket_id) REFERENCES buckets(id) ON DELETE SET NULL
             )
             """)
+
+            # Migrations for existing tables
+            try:
+                cursor.execute("ALTER TABLE leads ADD COLUMN social_links TEXT")
+            except sqlite3.OperationalError:
+                pass  # Already exists
+
+            try:
+                cursor.execute("ALTER TABLE leads ADD COLUMN contact_form_url TEXT")
+            except sqlite3.OperationalError:
+                pass  # Already exists
 
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS audits (
@@ -306,8 +320,9 @@ class LeadRepository:
             try:
                 cursor.execute("""
                     INSERT INTO leads (business_name, category, location, phone, email, 
-                                       website, source, bucket_id, quality_score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       website, source, bucket_id, quality_score,
+                                       social_links, contact_form_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     lead.get("business_name"),
                     lead.get("category"),
@@ -317,12 +332,43 @@ class LeadRepository:
                     lead.get("website"),
                     lead.get("source"),
                     bucket_id,
-                    lead.get("quality_score", 0.5)
+                    lead.get("quality_score", 0.5),
+                    json.dumps(lead.get("social_links", {})),
+                    lead.get("contact_form_url")
                 ))
                 lead_id = cursor.lastrowid
                 return lead_id
             except sqlite3.IntegrityError:
                 return -1
+
+    def update_lead_contact_info(self, lead_id: int, contact_info: Dict):
+        """Update lead contact information discovered during audit"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            updates = []
+            params = []
+
+            if "email" in contact_info and contact_info["email"]:
+                updates.append("email = ?")
+                params.append(contact_info["email"])
+
+            if "phone" in contact_info and contact_info["phone"]:
+                updates.append("phone = ?")
+                params.append(contact_info["phone"])
+
+            if "social_links" in contact_info:
+                updates.append("social_links = ?")
+                params.append(json.dumps(contact_info["social_links"]))
+
+            if "contact_form_url" in contact_info:
+                updates.append("contact_form_url = ?")
+                params.append(contact_info["contact_form_url"])
+
+            if updates:
+                params.append(lead_id)
+                query = f"UPDATE leads SET {', '.join(updates)} WHERE id = ?"
+                cursor.execute(query, params)
 
     def get_pending_audits(self, limit: int = 50) -> List[Dict]:
         """Get leads pending audit"""
@@ -473,7 +519,8 @@ class LeadRepository:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
+                SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id,
+                       l.social_links, l.contact_form_url
                 FROM email_campaigns ec
                 JOIN leads l ON ec.lead_id = l.id
                 WHERE ec.status = 'needs_review'
@@ -488,7 +535,9 @@ class LeadRepository:
                     "email": row[2],
                     "subject": row[3],
                     "body": row[4],
-                    "lead_id": row[5]
+                    "lead_id": row[5],
+                    "social_links": json.loads(row[6]) if row[6] else {},
+                    "contact_form_url": row[7]
                 })
         return emails
 
