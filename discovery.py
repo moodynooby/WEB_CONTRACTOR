@@ -75,7 +75,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen2.5:latest",
+                    "model": "qwen3:8b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -124,7 +124,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen2.5:latest",
+                    "model": "qwen3:8b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",

@@ -308,11 +308,11 @@ class Outreach:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": config.get("model", "qwen2.5:latest"),
+                    "model": config.get("model", "qwen3:8b"),
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
-                    "system": "You are a website quality auditor. Output ONLY valid JSON.",
+                    "system": "You are a website quality auditor and you are a professional web developer and end the mail with the signature Best regards, Manas Doshi, Future Forwards - https://man27.netlify.app/services. Output ONLY valid JSON.",
                 },
                 timeout=30,
             )
@@ -345,6 +345,9 @@ Create a personalized outreach email that:
 3. Offers value, not a sales pitch
 4. Has a soft call-to-action
 5. Keeps it under 150 words
+6. end the mail with Best regards,
+Manas Doshi,
+Future Forwards - https://man27.netlify.app/services
 
 Return ONLY JSON:
 {{
@@ -356,11 +359,11 @@ Return ONLY JSON:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen2.5:latest",
+                    "model": "qwen3:8b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
-                    "system": "You are a professional email writer. Output ONLY valid JSON.",
+                    "system": "You are a professional email writer and end the mail with the signature Best regards, Manas Doshi, Future Forwards - https://man27.netlify.app/services. Output ONLY valid JSON.",
                 },
                 timeout=60,
             )
@@ -426,7 +429,11 @@ I noticed {issue_desc.lower()}, which might be affecting your online visibility.
 
 Would you be open to a quick chat about how to improve your web presence?
 
-Best regards"""
+Best regards,
+Manas Doshi,
+Future Forwards - https://man27.netlify.app/services
+
+"""
 
         return {"subject": subject, "body": body}
 
@@ -441,7 +448,10 @@ I'd love to share some suggestions that could help improve your online presence.
 
 Would you be interested in a brief conversation?
 
-Best regards"""
+Best regards,
+Manas Doshi,
+Future Forwards - https://man27.netlify.app/services
+"""
 
     def audit_leads(self, limit: int = 20) -> Dict:
         """Audit pending leads"""

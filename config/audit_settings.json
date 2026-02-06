@@ -104,8 +104,8 @@
   ],
   "llm_audit": {
     "enabled": true,
-    "model": "qwen2.5:latest",
-    "prompt": "Analyze the following website content for a business named '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Trust signals (testimonials, case studies, etc.)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type', 'severity' (critical/warning/info), and 'description')."
+    "model": "qwen3:8b",
+    "prompt": "Analyze the following website content for a business named '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Trust signals (testimonials, case studies, etc.)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type', 'severity' (critical/warning/info), and 'description'). and end with Best regards,Manas Doshi,Future Forwards - https://man27.netlify.app/services"
   },
   "bucket_overrides": {
     "Interior Designers": {
