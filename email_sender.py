@@ -48,9 +48,9 @@ class EmailSender:
             return False
 
     def send_pending_emails(self, limit: int = 10) -> Dict:
-        """Send all pending emails"""
+        """Send all pending emails using a single SMTP session"""
         self.log(f"\n{'=' * 60}")
-        self.log("EMAIL SENDER: Sending Pending Emails")
+        self.log("EMAIL SENDER: Sending Pending Emails (Session Reuse)")
         self.log(f"{'=' * 60}")
 
         if not self.email or not self.password:
@@ -58,26 +58,41 @@ class EmailSender:
             return {"sent": 0, "failed": 0}
 
         emails = self.repo.get_pending_emails(limit)
+        if not emails:
+            self.log("No pending emails to send.", "info")
+            return {"sent": 0, "failed": 0}
+
         self.log(f"Sending {len(emails)} emails...", "info")
 
         sent = 0
         failed = 0
 
-        for i, email_data in enumerate(emails, 1):
-            self.log(f"\n[{i}/{len(emails)}] {email_data['business_name']}", "info")
+        try:
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.email, self.password)
 
-            success = self.send_email(
-                email_data["email"], email_data["subject"], email_data["body"]
-            )
+                for i, email_data in enumerate(emails, 1):
+                    try:
+                        msg = MIMEMultipart()
+                        msg["From"] = self.email
+                        msg["To"] = email_data["email"]
+                        msg["Subject"] = email_data["subject"]
+                        msg.attach(MIMEText(email_data["body"], "plain"))
 
-            self.repo.mark_email_sent(email_data["campaign_id"], success)
+                        server.send_message(msg)
+                        self.repo.mark_email_sent(email_data["campaign_id"], True)
+                        sent += 1
+                        self.log(f"[{i}/{len(emails)}] Sent to {email_data['email']}", "success")
+                    except Exception as e:
+                        failed += 1
+                        self.repo.mark_email_sent(email_data["campaign_id"], False, error=str(e))
+                        self.log(f"[{i}/{len(emails)}] Failed to {email_data['email']}: {e}", "error")
+                    
+                    time.sleep(1) # Small delay to be polite to SMTP server
 
-            if success:
-                sent += 1
-                self.log(f"  ✓ Sent to {email_data['email']}", "success")
-            else:
-                failed += 1
-                self.log("  ✗ Failed", "error")
+        except Exception as e:
+            self.log(f"SMTP Session failed: {e}", "error")
 
         self.log(f"\n{'=' * 60}")
         self.log(f"Email Sending Complete: {sent} sent, {failed} failed", "success")

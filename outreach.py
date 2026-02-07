@@ -6,6 +6,7 @@ import time
 import re
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from lead_repository import LeadRepository
 
 
@@ -18,6 +19,8 @@ class Outreach:
         self.ollama_enabled = self._test_ollama()
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
+        self.max_workers = 5  # Number of parallel audits/generations
+
 
     def _load_audit_settings(self) -> Dict:
         """Load audit settings from config file"""
@@ -312,7 +315,7 @@ class Outreach:
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
-                    "system": "You are a website quality auditor and you are a professional web developer and end the mail with the signature Best regards, Manas Doshi, Future Forwards - https://man27.netlify.app/services. Output ONLY valid JSON.",
+                    "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
                 },
                 timeout=30,
             )
@@ -324,6 +327,55 @@ class Outreach:
             pass
         return None
 
+    def refine_email_ollama(
+        self, subject: str, body: str, instructions: str
+    ) -> Dict:
+        """Refine an existing email based on user instructions using Ollama"""
+        if not self.ollama_enabled:
+            return {"subject": subject, "body": body}
+
+        prompt = f"""Refine this cold email based on the following instructions.
+
+Instructions: {instructions}
+
+Current Subject: {subject}
+Current Body:
+{body}
+
+Return ONLY JSON:
+{{
+  "subject": "refined subject line",
+  "body": "refined email body with proper line breaks"
+}}"""
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": "qwen3:8b",
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "system": "You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
+                },
+                timeout=60,
+            )
+
+            if response.status_code == 200:
+                raw = response.json().get("response", "{}")
+                try:
+                    data = json.loads(raw)
+                    return {
+                        "subject": data.get("subject", subject),
+                        "body": data.get("body", body),
+                    }
+                except:
+                    pass
+        except Exception as e:
+            self.log(f"Error refining email: {e}", "error")
+
+        return {"subject": subject, "body": body}
+
     def generate_email_ollama(
         self, business_name: str, issues: List[Dict], bucket: str
     ) -> Dict:
@@ -331,23 +383,30 @@ class Outreach:
         if not self.ollama_enabled:
             return self.generate_email_template(business_name, issues, bucket)
 
+        # Prioritize LLM issues and critical issues
+        sorted_issues = sorted(
+            issues,
+            key=lambda x: (
+                0 if x.get("type", "").startswith("llm_") else 1,
+                0 if x.get("severity") == "critical" else 1 if x.get("severity") == "warning" else 2,
+            ),
+        )
+
         # Build prompt
-        issue_summary = "\n".join([f"- {i['description']}" for i in issues[:3]])
+        issue_summary = "\n".join([f"- {i['description']}" for i in sorted_issues[:6]])
 
         prompt = f"""Generate a professional cold email for {business_name}.
 
-Technical issues found:
+Website Issues found:
 {issue_summary}
 
 Create a personalized outreach email that:
 1. Shows you've reviewed their website
-2. Mentions 1-2 specific issues
+2. Mentions 1-2 specific points from the issues listed above (especially qualitative ones if present)
 3. Offers value, not a sales pitch
 4. Has a soft call-to-action
 5. Keeps it under 150 words
-6. end the mail with Best regards,
-Manas Doshi,
-Future Forwards - https://man27.netlify.app/services
+6. DO NOT include a signature or closing like "Best regards" - I will add that myself.
 
 Return ONLY JSON:
 {{
@@ -363,7 +422,7 @@ Return ONLY JSON:
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
-                    "system": "You are a professional email writer and end the mail with the signature Best regards, Manas Doshi, Future Forwards - https://man27.netlify.app/services. Output ONLY valid JSON.",
+                    "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
                 },
                 timeout=60,
             )
@@ -372,13 +431,22 @@ Return ONLY JSON:
                 raw = response.json().get("response", "{}")
                 try:
                     data = json.loads(raw)
+                    body = data.get("body", "")
+                    
+                    # Ensure the body doesn't already have a signature (safety check)
+                    if "Best regards" in body or "Manas Doshi" in body:
+                        # Simple cleanup if LLM ignored instruction
+                        body = body.split("Best regards")[0].split("Sincerely")[0].strip()
+                    
+                    # Append consistent signature
+                    signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
+                    final_body = body.strip() + signature
+                    
                     return {
                         "subject": data.get(
                             "subject", f"Quick note about {business_name}"
                         ),
-                        "body": data.get(
-                            "body", self._fallback_email(business_name, issues)
-                        ),
+                        "body": final_body,
                     }
                 except:
                     pass
@@ -454,7 +522,7 @@ Future Forwards - https://man27.netlify.app/services
 """
 
     def audit_leads(self, limit: int = 20) -> Dict:
-        """Audit pending leads"""
+        """Audit pending leads with duration tracking"""
         self.log(f"\n{'=' * 60}")
         self.log("OUTREACH: Lead Auditing")
         self.log(f"{'=' * 60}")
@@ -468,10 +536,13 @@ Future Forwards - https://man27.netlify.app/services
         for i, lead in enumerate(leads, 1):
             self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
 
+            start_time = time.time()
             audit_result = self.audit_website(
                 lead["website"], lead["business_name"], lead["bucket"]
             )
-            self.repo.save_audit(lead["id"], audit_result)
+            duration = time.time() - start_time
+            
+            self.repo.save_audit(lead["id"], audit_result, duration=duration)
 
             # DEEP DISCOVERY: Update lead with newly found contact info
             if "discovered_info" in audit_result:
@@ -489,11 +560,11 @@ Future Forwards - https://man27.netlify.app/services
             if audit_result["qualified"]:
                 qualified += 1
                 self.log(
-                    f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])})",
+                    f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])}, Time: {duration:.1f}s)",
                     "success",
                 )
             else:
-                self.log(f"  ✗ Not qualified (Score: {audit_result['score']})", "error")
+                self.log(f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)", "error")
 
             time.sleep(1)
 
@@ -506,7 +577,7 @@ Future Forwards - https://man27.netlify.app/services
         return {"audited": audited, "qualified": qualified}
 
     def generate_emails(self, limit: int = 20) -> Dict:
-        """Generate emails for qualified leads"""
+        """Generate emails for qualified leads with duration tracking"""
         self.log(f"\n{'=' * 60}")
         self.log("OUTREACH: Email Generation")
         self.log(f"{'=' * 60}")
@@ -521,13 +592,16 @@ Future Forwards - https://man27.netlify.app/services
 
             try:
                 issues = json.loads(lead.get("issues_json", "[]"))
+                
+                start_time = time.time()
                 email = self.generate_email_ollama(
                     lead["business_name"], issues, lead["bucket"]
                 )
+                duration = time.time() - start_time
 
-                self.repo.save_email(lead["id"], email["subject"], email["body"])
+                self.repo.save_email(lead["id"], email["subject"], email["body"], duration=duration)
                 generated += 1
-                self.log("  ✓ Email generated", "success")
+                self.log(f"  ✓ Email generated (Time: {duration:.1f}s)", "success")
 
             except Exception as e:
                 self.log(f"  ✗ Error: {e}", "error")

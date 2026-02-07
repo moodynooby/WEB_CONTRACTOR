@@ -77,6 +77,7 @@ class LeadRepository:
                 score INTEGER,
                 issues_json TEXT,
                 qualified INTEGER DEFAULT 0,
+                duration REAL,  -- Time taken in seconds
                 audit_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(lead_id) REFERENCES leads(id) ON DELETE CASCADE
             )
@@ -89,6 +90,7 @@ class LeadRepository:
                 subject TEXT,
                 body TEXT,
                 status TEXT DEFAULT 'pending',
+                duration REAL,  -- Time taken for generation
                 sent_at TIMESTAMP,
                 opened_at TIMESTAMP,
                 clicked_at TIMESTAMP,
@@ -152,6 +154,17 @@ class LeadRepository:
                 value TEXT -- JSON value
             )
             """)
+
+            # Migrations for duration columns
+            try:
+                cursor.execute("ALTER TABLE audits ADD COLUMN duration REAL")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE email_campaigns ADD COLUMN duration REAL")
+            except sqlite3.OperationalError:
+                pass
 
             # Performance indexes
             cursor.execute(
@@ -339,6 +352,46 @@ class LeadRepository:
                 return None
         return None
 
+    def save_leads_batch(self, leads: List[Dict]) -> int:
+        """Save multiple leads in a single transaction"""
+        saved_count = 0
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for lead in leads:
+                bucket_id = None
+                if lead.get("bucket"):
+                    # Get bucket ID (could be optimized with a cache if needed)
+                    cursor.execute("SELECT id FROM buckets WHERE name = ?", (lead["bucket"],))
+                    res = cursor.fetchone()
+                    bucket_id = res[0] if res else None
+
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO leads (business_name, category, location, phone, email, 
+                                           website, source, bucket_id, quality_score,
+                                           social_links, contact_form_url)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            lead.get("business_name"),
+                            lead.get("category"),
+                            lead.get("location"),
+                            lead.get("phone"),
+                            lead.get("email"),
+                            lead.get("website"),
+                            lead.get("source"),
+                            bucket_id,
+                            lead.get("quality_score", 0.5),
+                            json.dumps(lead.get("social_links", {})),
+                            lead.get("contact_form_url"),
+                        ),
+                    )
+                    saved_count += 1
+                except sqlite3.IntegrityError:
+                    continue
+        return saved_count
+
     def save_lead(self, lead: Dict) -> int:
         """Save a single lead with bucket foreign key"""
         bucket_id = None
@@ -431,16 +484,16 @@ class LeadRepository:
 
         return leads
 
-    def save_audit(self, lead_id: int, audit_data: Dict):
-        """Save audit results with normalized issues"""
+    def save_audit(self, lead_id: int, audit_data: Dict, duration: float = None):
+        """Save audit results with normalized issues and duration"""
         import json
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO audits (lead_id, url, score, issues_json, qualified)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO audits (lead_id, url, score, issues_json, qualified, duration)
+                VALUES (?, ?, ?, ?, ?, ?)
             """,
                 (
                     lead_id,
@@ -448,6 +501,7 @@ class LeadRepository:
                     audit_data.get("score", 0),
                     json.dumps(audit_data.get("issues", [])),
                     audit_data.get("qualified", 0),
+                    duration,
                 ),
             )
 
@@ -510,17 +564,17 @@ class LeadRepository:
         return leads
 
     def save_email(
-        self, lead_id: int, subject: str, body: str, status: str = "needs_review"
+        self, lead_id: int, subject: str, body: str, status: str = "needs_review", duration: float = None
     ):
-        """Save generated email, default to needs_review"""
+        """Save generated email with generation duration"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO email_campaigns (lead_id, subject, body, status)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO email_campaigns (lead_id, subject, body, status, duration)
+                VALUES (?, ?, ?, ?, ?)
             """,
-                (lead_id, subject, body, status),
+                (lead_id, subject, body, status, duration),
             )
 
     def get_pending_emails(self, limit: int = 20) -> List[Dict]:
@@ -701,55 +755,48 @@ class LeadRepository:
                 )
 
     def get_stats(self) -> Dict:
-        """Get overall statistics"""
+        """Get overall statistics in a single consolidated query"""
+        query = """
+        SELECT 
+            (SELECT COUNT(*) FROM leads) as total_leads,
+            (SELECT COUNT(*) FROM leads WHERE status = 'qualified') as qualified_leads,
+            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'sent') as emails_sent,
+            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending') as emails_pending,
+            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review') as emails_review,
+            (SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL) as emails_opened,
+            (SELECT COUNT(*) FROM email_campaigns WHERE clicked_at IS NOT NULL) as emails_clicked,
+            (SELECT COUNT(*) FROM email_campaigns WHERE replied_at IS NOT NULL) as emails_replied,
+            (SELECT COUNT(*) FROM audits) as total_audited,
+            (SELECT AVG(duration) FROM audits WHERE duration IS NOT NULL) as avg_audit_duration,
+            (SELECT AVG(duration) FROM email_campaigns WHERE duration IS NOT NULL) as avg_gen_duration,
+            (SELECT AVG(score) FROM audits) as avg_audit_score
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-
-            cursor.execute("SELECT COUNT(*) FROM leads")
-            total_leads = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM leads WHERE status = 'qualified'")
-            qualified = cursor.fetchone()[0]
-
-            cursor.execute("SELECT COUNT(*) FROM email_campaigns WHERE status = 'sent'")
-            emails_sent = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending'"
-            )
-            emails_pending = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review'"
-            )
-            emails_review = cursor.fetchone()[0]
-
-            # Email engagement stats
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL"
-            )
-            emails_opened = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_campaigns WHERE clicked_at IS NOT NULL"
-            )
-            emails_clicked = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_campaigns WHERE replied_at IS NOT NULL"
-            )
-            emails_replied = cursor.fetchone()[0]
-
-        return {
-            "total_leads": total_leads,
-            "qualified_leads": qualified,
-            "emails_sent": emails_sent,
-            "emails_pending": emails_pending,
-            "emails_review": emails_review,
-            "emails_opened": emails_opened,
-            "emails_clicked": emails_clicked,
-            "emails_replied": emails_replied,
-        }
+            cursor.execute(query)
+            row = cursor.fetchone()
+            
+            # Map row to dictionary
+            stats = {
+                "total_leads": row[0] or 0,
+                "qualified_leads": row[1] or 0,
+                "emails_sent": row[2] or 0,
+                "emails_pending": row[3] or 0,
+                "emails_review": row[4] or 0,
+                "emails_opened": row[5] or 0,
+                "emails_clicked": row[6] or 0,
+                "emails_replied": row[7] or 0,
+                "total_audited": row[8] or 0,
+                "avg_audit_duration": row[9] or 0.0,
+                "avg_gen_duration": row[10] or 0.0,
+                "avg_audit_score": row[11] or 0.0
+            }
+            
+            # Calculate derived performance metrics
+            stats["qualification_rate"] = (stats["qualified_leads"] / stats["total_audited"] * 100) if stats["total_audited"] > 0 else 0
+            stats["reply_rate"] = (stats["emails_replied"] / stats["emails_sent"] * 100) if stats["emails_sent"] > 0 else 0
+            
+            return stats
 
     def consolidate_database(self) -> Dict:
         """Clean up and optimize database"""

@@ -22,6 +22,34 @@ class Discovery:
         self.logger = logger
         self.ollama_url = "http://localhost:11434"
         self.ollama_enabled = self._test_ollama()
+        self._driver = None
+
+    def _get_driver(self):
+        """Lazy initialization of headless Chrome driver"""
+        if self._driver is None:
+            try:
+                chrome_options = Options()
+                chrome_options.add_argument("--headless")
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument(
+                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
+                self._driver = webdriver.Chrome(options=chrome_options)
+                self._driver.set_page_load_timeout(30)
+            except Exception as e:
+                self.log(f"Failed to initialize Chrome driver: {e}", "error")
+        return self._driver
+
+    def _quit_driver(self):
+        """Properly shut down the driver"""
+        if self._driver:
+            try:
+                self._driver.quit()
+            except:
+                pass
+            self._driver = None
 
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
@@ -191,19 +219,13 @@ class Discovery:
     def scrape_google_maps(
         self, query: str, bucket: str, max_results: int = 5
     ) -> List[Dict]:
-        """Scrape Google Maps for business leads"""
+        """Scrape Google Maps for business leads using pooled driver"""
         leads = []
+        driver = self._get_driver()
+        if not driver:
+            return leads
 
         try:
-            chrome_options = Options()
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-
-            driver = webdriver.Chrome(options=chrome_options)
-            driver.set_page_load_timeout(30)
-
             search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
             driver.get(search_url)
             time.sleep(3)
@@ -216,7 +238,6 @@ class Discovery:
                     )
                 )
             except:
-                driver.quit()
                 return leads
 
             # Get business listings
@@ -255,7 +276,7 @@ class Discovery:
                     except:
                         pass
 
-                    if name and website:
+                    if name:
                         leads.append(
                             {
                                 "business_name": name,
@@ -273,66 +294,161 @@ class Discovery:
                 except Exception:
                     continue
 
-            driver.quit()
-
         except Exception as e:
             self.log(f"Error scraping Google Maps: {e}", "error")
 
         return leads
 
-    def scrape_yellow_pages(
+    def scrape_justdial(
         self, query: str, bucket: str, max_results: int = 5
     ) -> List[Dict]:
-        """Scrape Yellow Pages for business leads"""
+        """Scrape JustDial for Indian business leads using pooled driver"""
         leads = []
+        driver = self._get_driver()
+        if not driver:
+            return leads
 
         try:
-            # Parse query to extract category and location
-            parts = query.split()
-            category = " ".join(parts[:-1]) if len(parts) > 1 else query
-            location = parts[-1] if len(parts) > 1 else "India"
+            # Format query for JustDial URL
+            query_parts = query.split()
+            city = query_parts[-1] if len(query_parts) > 1 else "Mumbai"
+            search_term = " ".join(query_parts[:-1]) if len(query_parts) > 1 else query
+            search_url = (
+                f"https://www.justdial.com/{city}/{search_term.replace(' ', '-')}"
+            )
 
-            # Yellow Pages India URL structure
-            search_term = category.replace(" ", "-").lower()
-            url = f"https://www.yellowpages.in/search/{search_term}/all-india"
+            driver.get(search_url)
+            time.sleep(3)
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code != 200:
+            # Wait for results
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, ".jsx-1e1a185d7f5319c2")
+                    )
+                )
+            except:
                 return leads
 
-            soup = BeautifulSoup(response.content, "html.parser")
+            # Get business listings
+            business_elements = driver.find_elements(
+                By.CSS_SELECTOR, ".jsx-1e1a185d7f5319c2"
+            )[:max_results]
 
-            # Find business listings
-            listings = soup.find_all("div", class_="row srp-list", limit=max_results)
-
-            for listing in listings:
+            for element in business_elements:
                 try:
-                    # Business name
-                    name_elem = listing.find("a", class_="title")
-                    name = name_elem.text.strip() if name_elem else None
+                    # Extract business name
+                    name_elem = element.find_element(
+                        By.CSS_SELECTOR, ".jsx-2c8ae8c8b6b8b1b0"
+                    )
+                    name = name_elem.text.strip() if name_elem else "Unknown Business"
 
-                    # Website
-                    website_elem = listing.find("a", href=True, title="Website")
-                    website = website_elem["href"] if website_elem else None
+                    # Extract phone
+                    phone = None
+                    try:
+                        phone_elem = element.find_element(
+                            By.CSS_SELECTOR, ".jsx-3c8ae8c8b6b8b1b0"
+                        )
+                        phone = phone_elem.text.strip() if phone_elem else None
+                    except:
+                        pass
 
-                    # Phone
-                    phone_elem = listing.find("span", class_="mobilenum")
-                    phone = phone_elem.text.strip() if phone_elem else None
+                    # Extract website (often requires clicking through)
+                    website = None
+                    try:
+                        website_elem = element.find_element(
+                            By.CSS_SELECTOR, "a[href*='http']"
+                        )
+                        website = (
+                            website_elem.get_attribute("href") if website_elem else None
+                        )
+                    except:
+                        pass
 
-                    if name and website:
+                    if name:
                         leads.append(
                             {
                                 "business_name": name,
                                 "website": website,
                                 "phone": phone,
-                                "source": "yellow_pages",
+                                "source": "justdial",
                                 "bucket": bucket,
-                                "category": category,
-                                "location": location,
+                                "category": search_term.split()[0],
+                                "location": city,
+                            }
+                        )
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            self.log(f"Error scraping JustDial: {e}", "error")
+
+        return leads
+
+    def scrape_yellowpages(
+        self, query: str, bucket: str, max_results: int = 5
+    ) -> List[Dict]:
+        """Scrape Yellow Pages for business leads using pooled driver"""
+        leads = []
+        driver = self._get_driver()
+        if not driver:
+            return leads
+
+        try:
+            search_url = f"https://www.yellowpages.com/search?search_terms={query.replace(' ', '+')}"
+            driver.get(search_url)
+            time.sleep(3)
+
+            # Wait for results
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".result"))
+                )
+            except:
+                return leads
+
+            # Get business listings
+            business_elements = driver.find_elements(By.CSS_SELECTOR, ".result")[
+                :max_results
+            ]
+
+            for element in business_elements:
+                try:
+                    # Extract business name
+                    name_elem = element.find_element(By.CSS_SELECTOR, "a.business-name")
+                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+
+                    # Extract website
+                    website = None
+                    try:
+                        website_elem = element.find_element(
+                            By.CSS_SELECTOR, "a.website-link"
+                        )
+                        website = (
+                            website_elem.get_attribute("href") if website_elem else None
+                        )
+                    except:
+                        pass
+
+                    # Extract phone
+                    phone = None
+                    try:
+                        phone_elem = element.find_element(By.CSS_SELECTOR, ".phone")
+                        phone = phone_elem.text.strip() if phone_elem else None
+                    except:
+                        pass
+
+                    if name:
+                        leads.append(
+                            {
+                                "business_name": name,
+                                "website": website,
+                                "phone": phone,
+                                "source": "yellowpages",
+                                "bucket": bucket,
+                                "category": query.split()[0],
+                                "location": "USA",
                             }
                         )
 
@@ -344,8 +460,164 @@ class Discovery:
 
         return leads
 
+    def scrape_indiamart(
+        self, query: str, bucket: str, max_results: int = 5
+    ) -> List[Dict]:
+        """Scrape IndiaMART for B2B business leads using pooled driver"""
+        leads = []
+        driver = self._get_driver()
+        if not driver:
+            return leads
+
+        try:
+            search_url = (
+                f"https://dir.indiamart.com/search.mp?search={query.replace(' ', '+')}"
+            )
+            driver.get(search_url)
+            time.sleep(3)
+
+            # Wait for results
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".pbox"))
+                )
+            except:
+                return leads
+
+            # Get business listings
+            business_elements = driver.find_elements(By.CSS_SELECTOR, ".pbox")[
+                :max_results
+            ]
+
+            for element in business_elements:
+                try:
+                    # Extract business name
+                    name_elem = element.find_element(By.CSS_SELECTOR, ".lst_clg a")
+                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+
+                    # Extract website
+                    website = None
+                    try:
+                        website_elem = element.find_element(
+                            By.CSS_SELECTOR, ".lst_clg a"
+                        )
+                        website = (
+                            website_elem.get_attribute("href") if website_elem else None
+                        )
+                    except:
+                        pass
+
+                    # Extract phone
+                    phone = None
+                    try:
+                        phone_elem = element.find_element(By.CSS_SELECTOR, ".pnum")
+                        phone = phone_elem.text.strip() if phone_elem else None
+                    except:
+                        pass
+
+                    if name:
+                        leads.append(
+                            {
+                                "business_name": name,
+                                "website": website,
+                                "phone": phone,
+                                "source": "indiamart",
+                                "bucket": bucket,
+                                "category": query.split()[0],
+                                "location": "India",
+                            }
+                        )
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            self.log(f"Error scraping IndiaMART: {e}", "error")
+
+        return leads
+
+    def scrape_yelp(self, query: str, bucket: str, max_results: int = 5) -> List[Dict]:
+        """Scrape Yelp for business leads using pooled driver"""
+        leads = []
+        driver = self._get_driver()
+        if not driver:
+            return leads
+
+        try:
+            search_url = (
+                f"https://www.yelp.com/search?find_desc={query.replace(' ', '+')}"
+            )
+            driver.get(search_url)
+            time.sleep(3)
+
+            # Wait for results
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, ".container__09f24__mpRFF")
+                    )
+                )
+            except:
+                return leads
+
+            # Get business listings
+            business_elements = driver.find_elements(
+                By.CSS_SELECTOR, ".container__09f24__mpRFF"
+            )[:max_results]
+
+            for element in business_elements:
+                try:
+                    # Extract business name
+                    name_elem = element.find_element(
+                        By.CSS_SELECTOR, "a[href*='/biz/']"
+                    )
+                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+
+                    # Extract website
+                    website = None
+                    try:
+                        website_elem = element.find_element(
+                            By.CSS_SELECTOR, "a[href*='biz/']"
+                        )
+                        website = (
+                            website_elem.get_attribute("href") if website_elem else None
+                        )
+                    except:
+                        pass
+
+                    # Extract phone
+                    phone = None
+                    try:
+                        phone_elem = element.find_element(
+                            By.CSS_SELECTOR, ".phone__09f24__pARZf"
+                        )
+                        phone = phone_elem.text.strip() if phone_elem else None
+                    except:
+                        pass
+
+                    if name:
+                        leads.append(
+                            {
+                                "business_name": name,
+                                "website": website,
+                                "phone": phone,
+                                "source": "yelp",
+                                "bucket": bucket,
+                                "category": query.split()[0],
+                                "location": "International",
+                            }
+                        )
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            self.log(f"Error scraping Yelp: {e}", "error")
+
+        return leads
+
     def run(self, bucket_name: str = None, max_queries: int = 5) -> Dict:
-        """Execute full discovery pipeline with automatic expansion"""
+        """Execute full discovery pipeline with driver pooling and batch saving"""
         self.buckets = self._load_buckets()
         self.log(f"\n{'=' * 60}")
         self.log("DISCOVERY: Query Generation + Lead Scraping")
@@ -359,34 +631,50 @@ class Discovery:
         total_leads = 0
         total_saved = 0
 
-        for i, q in enumerate(queries, 1):
-            self.log(f"\n[{i}/{len(queries)}] {q['query']}", "info")
+        try:
+            for i, q in enumerate(queries, 1):
+                self.log(f"\n[{i}/{len(queries)}] {q['query']}", "info")
 
-            # Try Google Maps first
-            leads = self.scrape_google_maps(q["query"], q["bucket"], max_results=3)
+                # Try multiple sources with fallback strategy
+                query_leads = []
 
-            # Try Yellow Pages if Google Maps returns nothing
-            if not leads:
-                leads = self.scrape_yellow_pages(q["query"], q["bucket"], max_results=3)
-
-            # Save leads to database
-            query_saved = 0
-            for lead in leads:
-                lead_id = self.repo.save_lead(lead)
-                if lead_id > 0:
-                    query_saved += 1
-                    self.log(f"  ✓ {lead['business_name']}", "success")
-
-            # Automatic expansion trigger: If we found no NEW leads for this query
-            if query_saved == 0 and self.ollama_enabled:
-                self.log(
-                    f"  ℹ No new leads found for '{q['query']}'. Recommendation: Press [x] to expand markets.",
-                    "info",
+                # Source 1: Google Maps
+                query_leads.extend(
+                    self.scrape_google_maps(q["query"], q["bucket"], max_results=2)
                 )
 
-            total_saved += query_saved
-            total_leads += len(leads)
-            time.sleep(2)  # Rate limiting
+                # Source 2: JustDial
+                if len(query_leads) < 3:
+                    query_leads.extend(
+                        self.scrape_justdial(q["query"], q["bucket"], 3 - len(query_leads))
+                    )
+
+                # Source 3: IndiaMART
+                if len(query_leads) < 3:
+                    query_leads.extend(
+                        self.scrape_indiamart(q["query"], q["bucket"], 3 - len(query_leads))
+                    )
+
+                # Source 4: Yelp
+                if len(query_leads) < 3:
+                    query_leads.extend(self.scrape_yelp(q["query"], q["bucket"], 3 - len(query_leads)))
+
+                # Source 5: Yellow Pages
+                if len(query_leads) < 3:
+                    query_leads.extend(
+                        self.scrape_yellowpages(q["query"], q["bucket"], 3 - len(query_leads))
+                    )
+
+                # Batch Save leads to database
+                if query_leads:
+                    saved = self.repo.save_leads_batch(query_leads)
+                    total_saved += saved
+                    total_leads += len(query_leads)
+                    self.log(f"  ✓ Found {len(query_leads)} leads, saved {saved}", "success")
+
+                time.sleep(1)  # Minimal rate limiting since we reuse driver
+        finally:
+            self._quit_driver()
 
         self.log(f"\n{'=' * 60}")
         self.log(
