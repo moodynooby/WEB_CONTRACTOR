@@ -6,7 +6,6 @@ import time
 import re
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from lead_repository import LeadRepository
 
 
@@ -20,7 +19,6 @@ class Outreach:
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
         self.max_workers = 5  # Number of parallel audits/generations
-
 
     def _load_audit_settings(self) -> Dict:
         """Load audit settings from config file"""
@@ -43,7 +41,7 @@ class Outreach:
         try:
             response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
             return response.status_code == 200
-        except:
+        except requests.exceptions.RequestException:
             return False
 
     def deep_discovery(self, soup: BeautifulSoup, base_url: str) -> Dict:
@@ -103,7 +101,12 @@ class Outreach:
         """Audit website for technical and qualitative issues + Deep Discovery"""
         issues = []
         score = 100
-        discovered_info = {}
+        discovered_info = {
+            "email": None,
+            "social_links": {},
+            "contact_form_url": None,
+            "phone": None,
+        }
 
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
@@ -327,9 +330,7 @@ class Outreach:
             pass
         return None
 
-    def refine_email_ollama(
-        self, subject: str, body: str, instructions: str
-    ) -> Dict:
+    def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict:
         """Refine an existing email based on user instructions using Ollama"""
         if not self.ollama_enabled:
             return {"subject": subject, "body": body}
@@ -388,7 +389,11 @@ Return ONLY JSON:
             issues,
             key=lambda x: (
                 0 if x.get("type", "").startswith("llm_") else 1,
-                0 if x.get("severity") == "critical" else 1 if x.get("severity") == "warning" else 2,
+                0
+                if x.get("severity") == "critical"
+                else 1
+                if x.get("severity") == "warning"
+                else 2,
             ),
         )
 
@@ -432,16 +437,18 @@ Return ONLY JSON:
                 try:
                     data = json.loads(raw)
                     body = data.get("body", "")
-                    
+
                     # Ensure the body doesn't already have a signature (safety check)
                     if "Best regards" in body or "Manas Doshi" in body:
                         # Simple cleanup if LLM ignored instruction
-                        body = body.split("Best regards")[0].split("Sincerely")[0].strip()
-                    
+                        body = (
+                            body.split("Best regards")[0].split("Sincerely")[0].strip()
+                        )
+
                     # Append consistent signature
                     signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
                     final_body = body.strip() + signature
-                    
+
                     return {
                         "subject": data.get(
                             "subject", f"Quick note about {business_name}"
@@ -538,19 +545,19 @@ Future Forwards - https://man27.netlify.app/services
 
             start_time = time.time()
             audit_result = self.audit_website(
-                lead["website"], lead["business_name"], lead["bucket"]
+                lead["website"], lead["business_name"], lead.get("bucket") or "default"
             )
             duration = time.time() - start_time
-            
+
             self.repo.save_audit(lead["id"], audit_result, duration=duration)
 
             # DEEP DISCOVERY: Update lead with newly found contact info
             if "discovered_info" in audit_result:
                 info = audit_result["discovered_info"]
                 self.repo.update_lead_contact_info(lead["id"], info)
-                if info["email"]:
+                if info.get("email"):
                     self.log(f"  ✉ Found email: {info['email']}", "success")
-                if info["social_links"]:
+                if info.get("social_links"):
                     self.log(
                         f"  🔗 Found {len(info['social_links'])} social links",
                         "success",
@@ -564,7 +571,10 @@ Future Forwards - https://man27.netlify.app/services
                     "success",
                 )
             else:
-                self.log(f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)", "error")
+                self.log(
+                    f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)",
+                    "error",
+                )
 
             time.sleep(1)
 
@@ -592,14 +602,16 @@ Future Forwards - https://man27.netlify.app/services
 
             try:
                 issues = json.loads(lead.get("issues_json", "[]"))
-                
+
                 start_time = time.time()
                 email = self.generate_email_ollama(
-                    lead["business_name"], issues, lead["bucket"]
+                    lead["business_name"], issues, lead.get("bucket") or "default"
                 )
                 duration = time.time() - start_time
 
-                self.repo.save_email(lead["id"], email["subject"], email["body"], duration=duration)
+                self.repo.save_email(
+                    lead["id"], email["subject"], email["body"], duration=duration
+                )
                 generated += 1
                 self.log(f"  ✓ Email generated (Time: {duration:.1f}s)", "success")
 

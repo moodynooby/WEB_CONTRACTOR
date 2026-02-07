@@ -361,7 +361,9 @@ class LeadRepository:
                 bucket_id = None
                 if lead.get("bucket"):
                     # Get bucket ID (could be optimized with a cache if needed)
-                    cursor.execute("SELECT id FROM buckets WHERE name = ?", (lead["bucket"],))
+                    cursor.execute(
+                        "SELECT id FROM buckets WHERE name = ?", (lead["bucket"],)
+                    )
                     res = cursor.fetchone()
                     bucket_id = res[0] if res else None
 
@@ -551,20 +553,28 @@ class LeadRepository:
 
             leads = []
             for row in cursor.fetchall():
-                leads.append(
-                    {
-                        "id": row[0],
-                        "business_name": row[1],
-                        "website": row[2],
-                        "bucket": row[3],
-                        "issues_json": row[4],
-                    }
-                )
+                try:
+                    leads.append(
+                        {
+                            "id": row[0],
+                            "business_name": row[1],
+                            "website": row[2],
+                            "bucket": row[3],
+                            "issues_json": row[4],
+                        }
+                    )
+                except (IndexError, TypeError):
+                    continue
 
         return leads
 
     def save_email(
-        self, lead_id: int, subject: str, body: str, status: str = "needs_review", duration: float = None
+        self,
+        lead_id: int,
+        subject: str,
+        body: str,
+        status: str = "needs_review",
+        duration: float = None,
     ):
         """Save generated email with generation duration"""
         with self._get_connection() as conn:
@@ -775,7 +785,7 @@ class LeadRepository:
             cursor = conn.cursor()
             cursor.execute(query)
             row = cursor.fetchone()
-            
+
             # Map row to dictionary
             stats = {
                 "total_leads": row[0] or 0,
@@ -789,13 +799,21 @@ class LeadRepository:
                 "total_audited": row[8] or 0,
                 "avg_audit_duration": row[9] or 0.0,
                 "avg_gen_duration": row[10] or 0.0,
-                "avg_audit_score": row[11] or 0.0
+                "avg_audit_score": row[11] or 0.0,
             }
-            
+
             # Calculate derived performance metrics
-            stats["qualification_rate"] = (stats["qualified_leads"] / stats["total_audited"] * 100) if stats["total_audited"] > 0 else 0
-            stats["reply_rate"] = (stats["emails_replied"] / stats["emails_sent"] * 100) if stats["emails_sent"] > 0 else 0
-            
+            stats["qualification_rate"] = (
+                (stats["qualified_leads"] / stats["total_audited"] * 100)
+                if stats["total_audited"] > 0
+                else 0
+            )
+            stats["reply_rate"] = (
+                (stats["emails_replied"] / stats["emails_sent"] * 100)
+                if stats["emails_sent"] > 0
+                else 0
+            )
+
             return stats
 
     def consolidate_database(self) -> Dict:

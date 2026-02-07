@@ -4,8 +4,8 @@ import json
 import time
 import requests
 from typing import List, Dict, Optional
-from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -16,15 +16,15 @@ from lead_repository import LeadRepository
 class Discovery:
     """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
 
-    def __init__(self, repo=None, logger=None):
+    def __init__(self, repo: Optional[LeadRepository] = None, logger=None):
         self.repo = repo or LeadRepository()
         self.buckets = self._load_buckets()
         self.logger = logger
         self.ollama_url = "http://localhost:11434"
         self.ollama_enabled = self._test_ollama()
-        self._driver = None
+        self._driver: Optional[webdriver.Chrome] = None
 
-    def _get_driver(self):
+    def _get_driver(self) -> Optional[webdriver.Chrome]:
         """Lazy initialization of headless Chrome driver"""
         if self._driver is None:
             try:
@@ -47,7 +47,7 @@ class Discovery:
         if self._driver:
             try:
                 self._driver.quit()
-            except:
+            except WebDriverException:
                 pass
             self._driver = None
 
@@ -56,7 +56,7 @@ class Discovery:
         try:
             response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
             return response.status_code == 200
-        except:
+        except requests.exceptions.RequestException:
             return False
 
     def log(self, message: str, style: str = ""):
@@ -646,23 +646,31 @@ class Discovery:
                 # Source 2: JustDial
                 if len(query_leads) < 3:
                     query_leads.extend(
-                        self.scrape_justdial(q["query"], q["bucket"], 3 - len(query_leads))
+                        self.scrape_justdial(
+                            q["query"], q["bucket"], 3 - len(query_leads)
+                        )
                     )
 
                 # Source 3: IndiaMART
                 if len(query_leads) < 3:
                     query_leads.extend(
-                        self.scrape_indiamart(q["query"], q["bucket"], 3 - len(query_leads))
+                        self.scrape_indiamart(
+                            q["query"], q["bucket"], 3 - len(query_leads)
+                        )
                     )
 
                 # Source 4: Yelp
                 if len(query_leads) < 3:
-                    query_leads.extend(self.scrape_yelp(q["query"], q["bucket"], 3 - len(query_leads)))
+                    query_leads.extend(
+                        self.scrape_yelp(q["query"], q["bucket"], 3 - len(query_leads))
+                    )
 
                 # Source 5: Yellow Pages
                 if len(query_leads) < 3:
                     query_leads.extend(
-                        self.scrape_yellowpages(q["query"], q["bucket"], 3 - len(query_leads))
+                        self.scrape_yellowpages(
+                            q["query"], q["bucket"], 3 - len(query_leads)
+                        )
                     )
 
                 # Batch Save leads to database
@@ -670,7 +678,9 @@ class Discovery:
                     saved = self.repo.save_leads_batch(query_leads)
                     total_saved += saved
                     total_leads += len(query_leads)
-                    self.log(f"  ✓ Found {len(query_leads)} leads, saved {saved}", "success")
+                    self.log(
+                        f"  ✓ Found {len(query_leads)} leads, saved {saved}", "success"
+                    )
 
                 time.sleep(1)  # Minimal rate limiting since we reuse driver
         finally:

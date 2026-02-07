@@ -2,6 +2,7 @@
 
 import smtplib
 import os
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict
@@ -83,13 +84,21 @@ class EmailSender:
                         server.send_message(msg)
                         self.repo.mark_email_sent(email_data["campaign_id"], True)
                         sent += 1
-                        self.log(f"[{i}/{len(emails)}] Sent to {email_data['email']}", "success")
+                        self.log(
+                            f"[{i}/{len(emails)}] Sent to {email_data['email']}",
+                            "success",
+                        )
                     except Exception as e:
                         failed += 1
-                        self.repo.mark_email_sent(email_data["campaign_id"], False, error=str(e))
-                        self.log(f"[{i}/{len(emails)}] Failed to {email_data['email']}: {e}", "error")
-                    
-                    time.sleep(1) # Small delay to be polite to SMTP server
+                        self.repo.mark_email_sent(
+                            email_data["campaign_id"], False, error=str(e)
+                        )
+                        self.log(
+                            f"[{i}/{len(emails)}] Failed to {email_data['email']}: {e}",
+                            "error",
+                        )
+
+                    time.sleep(1)  # Small delay to be polite to SMTP server
 
         except Exception as e:
             self.log(f"SMTP Session failed: {e}", "error")

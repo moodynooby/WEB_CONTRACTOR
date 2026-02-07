@@ -1,11 +1,12 @@
 """Web Contractor - Textual TUI Application"""
 
 import json
+import click
 from typing import List, Dict
 from dotenv import load_dotenv
 from textual.app import App, ComposeResult
 from textual.screen import Screen, ModalScreen
-from textual.containers import Container, Horizontal, Vertical, Grid
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
     Header,
     Footer,
@@ -16,7 +17,6 @@ from textual.widgets import (
     Label,
     TextArea,
     Input,
-    ProgressBar,
     TabbedContent,
     TabPane,
 )
@@ -36,8 +36,9 @@ class ReviewScreen(Screen):
 
     BINDINGS = [
         Binding("escape", "app.pop_screen", "Back"),
-        Binding("a", "approve_selected", "Approve"),
+        Binding("a", "approve_selected", "Approve & Send"),
         Binding("e", "edit_selected", "Edit"),
+        Binding("r", "refine_email", "AI Rewrite"),
         Binding("d", "delete_selected", "Delete"),
     ]
 
@@ -76,10 +77,15 @@ class ReviewScreen(Screen):
             self.query_one("#email-details").update("No emails pending review.")
             self.selected_email = None
         else:
-            # If we had a selection, try to maintain it or select first
+            # Update selected_email with new data if it exists in the new list
             if self.selected_email:
-                exists = any(e["id"] == self.selected_email["id"] for e in self.emails)
-                if not exists:
+                new_data = next(
+                    (e for e in self.emails if e["id"] == self.selected_email["id"]),
+                    None,
+                )
+                if new_data:
+                    self.selected_email = new_data
+                else:
                     self.selected_email = self.emails[0]
                     table.move_cursor(row=0)
             else:
@@ -120,11 +126,44 @@ class ReviewScreen(Screen):
             content += f"{self.selected_email['body']}"
             self.query_one("#email-details").update(content)
 
-    def action_approve_selected(self):
-        if self.selected_email:
-            self.repo.update_email_status(self.selected_email["id"], "pending")
-            self.notify(f"Approved email for {self.selected_email['business_name']}")
-            self.refresh_emails()
+    @work
+    async def action_approve_selected(self):
+        """Approve and immediately send the email"""
+        if not self.selected_email:
+            return
+
+        email_id = self.selected_email["id"]
+        to_email = self.selected_email.get("email")
+        subject = self.selected_email["subject"]
+        body = self.selected_email["body"]
+
+        if not to_email:
+            self.notify("No email address found for this lead!", severity="error")
+            return
+
+        self.notify(f"Sending email to {self.selected_email['business_name']}...")
+
+        # 1. Update status to pending in DB first
+        self.repo.update_email_status(email_id, "pending")
+
+        # 2. Try to send
+        success = await self.app.run_in_thread(
+            self.app.email_sender.send_email, to_email, subject, body
+        )
+
+        if success:
+            self.repo.mark_email_sent(email_id, True)
+            self.notify(
+                f"✓ Email sent to {self.selected_email['business_name']}",
+                severity="information",
+            )
+        else:
+            self.notify(
+                f"✗ Failed to send email to {self.selected_email['business_name']}",
+                severity="error",
+            )
+
+        self.refresh_emails()
 
     def action_delete_selected(self):
         if self.selected_email:
@@ -136,46 +175,89 @@ class ReviewScreen(Screen):
             self.refresh_emails()
 
     async def action_edit_selected(self):
-        if self.selected_email:
-            edit_modal = EditEmailModal(self.selected_email)
-            updated_email = await self.app.push_screen_wait(edit_modal)
-            if updated_email:
-                self.repo.update_email_content(
-                    self.selected_email["id"],
-                    updated_email["subject"],
-                    updated_email["body"],
-                )
-                self.notify(
-                    f"Updated and approved email for {self.selected_email['business_name']}"
-                )
-                self.refresh_emails()
+        """Edit email using system default editor (e.g. nano)"""
+        if not self.selected_email:
+            return
+
+        initial_content = (
+            f"Subject: {self.selected_email['subject']}\n\n"
+            f"{self.selected_email['body']}"
+        )
+
+        # Suspend Textual and open the system editor
+        with self.app.suspend():
+            new_content = click.edit(text=initial_content, extension=".txt")
+
+        if new_content:
+            # Parse back subject and body
+            if "\n\n" in new_content:
+                subject_part, body = new_content.split("\n\n", 1)
+                subject = subject_part.replace("Subject: ", "").strip()
+            else:
+                subject = self.selected_email["subject"]
+                body = new_content
+
+            self.repo.update_email_content(self.selected_email["id"], subject, body)
+            self.notify("Email updated via External Editor")
+            self.refresh_emails()
+
+    @work
+    async def action_refine_email(self):
+        """Reintegrate AI refinement with a prompt"""
+        if not self.selected_email:
+            return
+
+        refine_modal = RefineEmailModal()
+        instructions = await self.app.push_screen_wait(refine_modal)
+
+        if instructions:
+            self.notify("AI is refining the email...")
+            self._run_refinement(instructions)
+
+    @work(thread=True)
+    def _run_refinement(self, instructions: str):
+        result = self.app.outreach.refine_email_ollama(
+            self.selected_email["subject"], self.selected_email["body"], instructions
+        )
+
+        if result:
+            self.repo.update_email_content(
+                self.selected_email["id"], result["subject"], result["body"]
+            )
+            self.call_from_thread(self.notify, "AI refinement complete!")
+            self.call_from_thread(self.refresh_emails)
 
 
-class EditEmailModal(ModalScreen):
-    """Modal for editing an email"""
-
-    def __init__(self, email: Dict):
-        super().__init__()
-        self.email = email
+class RefineEmailModal(ModalScreen):
+    """Modal for entering AI refinement instructions"""
 
     def compose(self) -> ComposeResult:
-        with Grid(id="edit-grid"):
+        with Vertical(id="refine-container"):
+            yield Label("AI Refinement Instructions")
             yield Label(
-                f"Editing Email for {self.email['business_name']}", id="edit-title"
+                "e.g. 'Make it shorter', 'Mention my portfolio', 'Be more formal'"
             )
-            yield Label("Subject:")
-            yield Input(self.email["subject"], id="edit-subject")
-            yield Label("Body:")
-            yield TextArea(self.email["body"], id="edit-body")
-            with Horizontal(id="edit-buttons"):
-                yield Button("Save & Approve", variant="success", id="save-btn")
+            yield Input(placeholder="Enter instructions...", id="refine-input")
+            with Horizontal(id="refine-buttons"):
+                yield Button("Refine", variant="success", id="refine-btn")
                 yield Button("Cancel", variant="error", id="cancel-btn")
 
+    def on_mount(self) -> None:
+        self.query_one("#refine-input").focus()
+
     def on_button_pressed(self, event: Button.Pressed):
-        if event.button.id == "save-btn":
-            subject = self.query_one("#edit-subject", Input).value
-            body = self.query_one("#edit-body", TextArea).text
-            self.dismiss({"subject": subject, "body": body})
+        if event.button.id == "refine-btn":
+            instructions = self.query_one("#refine-input", Input).value
+            if instructions:
+                self.dismiss(instructions)
+            else:
+                self.dismiss(None)
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted):
+        if event.value:
+            self.dismiss(event.value)
         else:
             self.dismiss(None)
 
@@ -429,6 +511,22 @@ class WebContractorTUI(App):
         height: 3;
         align: center middle;
     }
+
+    /* Refine Modal CSS */
+    #refine-container {
+        padding: 1 2;
+        background: $surface;
+        border: thick $primary;
+        width: 60;
+        height: auto;
+        align: center middle;
+    }
+
+    #refine-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
@@ -437,7 +535,6 @@ class WebContractorTUI(App):
         Binding("a", "run_audit", "Audit"),
         Binding("g", "generate_emails", "Generate Emails"),
         Binding("v", "review_emails", "Review"),
-        Binding("s", "send_emails", "Send Emails"),
         Binding("r", "refresh_all", "Refresh All"),
         Binding("q", "quit", "Quit"),
     ]
@@ -449,7 +546,7 @@ class WebContractorTUI(App):
         def thread_safe_log(message: str, style: str = ""):
             try:
                 self.call_from_thread(self.write_log, message, style)
-            except:
+            except Exception:
                 # Fallback if app is not running or other issues
                 print(message)
 
@@ -466,34 +563,69 @@ class WebContractorTUI(App):
         with TabbedContent(id="main-tabs"):
             with TabPane("Dashboard", id="tab-dashboard"):
                 yield Label("System Status: Idle", id="status-label")
-                
+
                 with Container(id="log-container"):
                     yield RichLog(id="activity-log", markup=True)
 
             with TabPane("Stats", id="tab-stats"):
                 with Container(id="stats-container"):
                     with Horizontal():
-                        yield Static("", id="stat-leads", classes="stat-box", markup=True)
-                        yield Static("", id="stat-qualified", classes="stat-box", markup=True)
-                        yield Static("", id="stat-review", classes="stat-box", markup=True)
-                        yield Static("", id="stat-pending", classes="stat-box", markup=True)
-                        yield Static("", id="stat-emails", classes="stat-box", markup=True)
-                
+                        yield Static(
+                            "", id="stat-leads", classes="stat-box", markup=True
+                        )
+                        yield Static(
+                            "", id="stat-qualified", classes="stat-box", markup=True
+                        )
+                        yield Static(
+                            "", id="stat-review", classes="stat-box", markup=True
+                        )
+                        yield Static(
+                            "", id="stat-pending", classes="stat-box", markup=True
+                        )
+                        yield Static(
+                            "", id="stat-emails", classes="stat-box", markup=True
+                        )
+
                 with Container(id="perf-container"):
                     with Horizontal():
-                        yield Static("", id="stat-audit-perf", classes="stat-box perf-box", markup=True)
-                        yield Static("", id="stat-gen-perf", classes="stat-box perf-box", markup=True)
-                        yield Static("", id="stat-qual-perf", classes="stat-box perf-box", markup=True)
-                        yield Static("", id="stat-reply-perf", classes="stat-box perf-box", markup=True)
+                        yield Static(
+                            "",
+                            id="stat-audit-perf",
+                            classes="stat-box perf-box",
+                            markup=True,
+                        )
+                        yield Static(
+                            "",
+                            id="stat-gen-perf",
+                            classes="stat-box perf-box",
+                            markup=True,
+                        )
+                        yield Static(
+                            "",
+                            id="stat-qual-perf",
+                            classes="stat-box perf-box",
+                            markup=True,
+                        )
+                        yield Static(
+                            "",
+                            id="stat-reply-perf",
+                            classes="stat-box perf-box",
+                            markup=True,
+                        )
 
-            
             with TabPane("Settings", id="tab-settings"):
                 with Vertical(id="settings-container"):
                     with Vertical(classes="settings-section"):
                         yield Label("[b]Geographic Focus[/b]")
                         yield Label("Current cities (JSON format):")
-                        yield TextArea("", id="setting-geo-focus")
-                        yield Button("Save Geographic Focus", variant="primary", id="save-geo-btn")
+                        geo_text_area = TextArea(id="setting-geo-focus")
+                        geo_text_area.text = ""
+                        yield geo_text_area
+                        yield Button(
+                            "Save Geographic Focus",
+                            variant="primary",
+                            id="save-geo-btn",
+                        )
 
         yield Footer()
 
@@ -673,18 +805,6 @@ class WebContractorTUI(App):
             self.call_from_thread(
                 self.write_log, f"Email generation failed: {e}", "error"
             )
-        finally:
-            self.call_from_thread(self.update_status, "Idle")
-            self.call_from_thread(self.refresh_stats)
-
-    @work(exclusive=True, thread=True)
-    def action_send_emails(self) -> None:
-        """Send pending emails"""
-        self.call_from_thread(self.update_status, "Sending Emails...")
-        try:
-            self.email_sender.send_pending_emails(limit=5)
-        except Exception as e:
-            self.call_from_thread(self.write_log, f"Email sending failed: {e}", "error")
         finally:
             self.call_from_thread(self.update_status, "Idle")
             self.call_from_thread(self.refresh_stats)

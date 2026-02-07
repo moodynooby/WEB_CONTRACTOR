@@ -11,6 +11,7 @@ dependencies = [
     "selenium>=4.40.0",
     "webdriver-manager>=4.0.0",
     "python-dotenv>=1.2.1",
+    "click>=8.1.7",
 ]
 
 [dependency-groups]
