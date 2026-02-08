@@ -216,7 +216,7 @@ class Discovery:
         return self.repo.get_all_buckets()
 
     def expand_bucket(self, bucket_name: str) -> Optional[Dict]:
-        """Use LLM to expand bucket categories and search patterns"""
+        """Use LLM to expand bucket categories and search patterns with retry logic"""
         if not self.ollama_enabled:
             return None
 
@@ -244,36 +244,75 @@ class Discovery:
         }}
         """
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": "qwen3:1.7b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a market research assistant. Output ONLY valid JSON.",
-                },
-                timeout=30,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                if not raw or raw.strip() == "":
-                    self.log("Expansion LLM returned an empty response", "error")
-                    return None
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError as e:
-                    self.log(f"Failed to parse expansion JSON: {e}\nRaw: {raw}", "error")
-                    return None
-        except Exception as e:
-            self.log(f"Expansion failed: {e}", "error")
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": "qwen3:1.7b",
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a market research assistant. Output ONLY valid JSON.",
+                    },
+                    timeout=30,
+                )
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "{}")
+                    if not raw or raw.strip() == "":
+                        self.log("Expansion LLM returned an empty response", "error")
+                        return None
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        self.log(f"Failed to parse expansion JSON: {e}\nRaw: {raw}", "error")
+                        return None
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"Expansion API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"Expansion API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                else:
+                    self.log(
+                        f"Expansion API failed with status {response.status_code}: {response.text}",
+                        "error",
+                    )
+                    break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.log(
+                        f"Expansion API timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
+                        "error",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.log("Expansion API timed out after all retry attempts", "error")
+            except Exception as e:
+                self.log(f"Expansion failed: {e}", "error")
+                break
 
         return None
 
     def discover_new_buckets(self) -> Optional[List[Dict]]:
-        """Use LLM to suggest new market buckets based on current ones"""
+        """Use LLM to suggest new market buckets based on current ones with retry logic"""
         if not self.ollama_enabled:
             return None
 
@@ -300,31 +339,70 @@ class Discovery:
         ]
         """
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": "qwen3:1.7b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a business strategist. Output ONLY valid JSON.",
-                },
-                timeout=30,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "[]")
-                if not raw or raw.strip() == "":
-                    self.log("Market discovery LLM returned an empty response", "error")
-                    return None
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError as e:
-                    self.log(f"Failed to parse market discovery JSON: {e}\nRaw: {raw}", "error")
-                    return None
-        except Exception as e:
-            self.log(f"Market discovery failed: {e}", "error")
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": "qwen3:1.7b",
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a business strategist. Output ONLY valid JSON.",
+                    },
+                    timeout=30,
+                )
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "[]")
+                    if not raw or raw.strip() == "":
+                        self.log("Market discovery LLM returned an empty response", "error")
+                        return None
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        self.log(f"Failed to parse market discovery JSON: {e}\nRaw: {raw}", "error")
+                        return None
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"Market discovery API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"Market discovery API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                else:
+                    self.log(
+                        f"Market discovery API failed with status {response.status_code}: {response.text}",
+                        "error",
+                    )
+                    break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.log(
+                        f"Market discovery API timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
+                        "error",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.log("Market discovery API timed out after all retry attempts", "error")
+            except Exception as e:
+                self.log(f"Market discovery failed: {e}", "error")
+                break
 
         return None
 

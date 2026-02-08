@@ -117,36 +117,71 @@ class Outreach:
     def _run_visual_audit(
         self, business_name: str, base64_image: str, config: Dict
     ) -> Optional[Dict]:
-        """Run visual audit using Ollama Vision model"""
+        """Run visual audit using Ollama Vision model with retry logic for 500 errors"""
         prompt = config.get("prompt", "").format(business_name=business_name)
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
-                    "prompt": prompt,
-                    "images": [base64_image],
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
-                },
-                timeout=60,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                if not raw or raw.strip() == "":
-                    return None
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError as e:
-                    self.log(f"Failed to parse visual audit JSON: {e}", "error")
-                    return None
-            else:
-                self.log(f"Visual audit API failed: {response.status_code}", "error")
-        except Exception as e:
-            self.log(f"Visual audit call failed: {e}", "error")
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
+                        "prompt": prompt,
+                        "images": [base64_image],
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
+                    },
+                    timeout=60,
+                )
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "{}")
+                    if not raw or raw.strip() == "":
+                        return None
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        self.log(f"Failed to parse visual audit JSON: {e}", "error")
+                        return None
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"Visual audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"Visual audit API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                else:
+                    self.log(f"Visual audit API failed: {response.status_code}", "error")
+                    # Don't retry on non-500 errors
+                    break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.log(
+                        f"Visual audit timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
+                        "error",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.log("Visual audit timed out after all retry attempts", "error")
+            except Exception as e:
+                self.log(f"Visual audit call failed: {e}", "error")
+                break
         return None
 
     def _normalize_severity(self, severity: str) -> str:
@@ -467,45 +502,80 @@ class Outreach:
     def _run_llm_audit(
         self, business_name: str, content: str, config: Dict
     ) -> Optional[Dict]:
-        """Run qualitative audit using Ollama"""
+        """Run qualitative audit using Ollama with retry logic for 500 errors"""
         prompt = config.get("prompt", "").format(
             business_name=business_name, content=content
         )
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": config.get("model", "qwen3:1.7b"),
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
-                },
-                timeout=30,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                if not raw or raw.strip() == "":
-                    self.log("LLM audit returned an empty response", "error")
-                    return None
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError as e:
-                    self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
-                    return None
-            else:
-                self.log(
-                    f"LLM audit API failed with status {response.status_code}: {response.text}",
-                    "error",
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": config.get("model", "qwen3:1.7b"),
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
+                    },
+                    timeout=30,
                 )
-        except Exception as e:
-            self.log(f"LLM audit call failed: {e}", "error")
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "{}")
+                    if not raw or raw.strip() == "":
+                        self.log("LLM audit returned an empty response", "error")
+                        return None
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
+                        return None
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"LLM audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"LLM audit API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                else:
+                    self.log(
+                        f"LLM audit API failed with status {response.status_code}: {response.text}",
+                        "error",
+                    )
+                    # Don't retry on non-500 errors
+                    break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.log(
+                        f"LLM audit timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
+                        "error",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.log("LLM audit timed out after all retry attempts", "error")
+            except Exception as e:
+                self.log(f"LLM audit call failed: {e}", "error")
+                break
         return None
 
     def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict:
-        """Refine an existing email based on user instructions using Ollama"""
+        """Refine an existing email based on user instructions using Ollama with retry logic"""
         if not self.ollama_enabled:
             return {"subject": subject, "body": body}
 
@@ -523,40 +593,74 @@ class Outreach:
     "body": "refined email body with proper line breaks"
     }}"""
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": "qwen3:1.7b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
-                },
-                timeout=60,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                try:
-                    data = json.loads(raw)
-                    return {
-                        "subject": data.get("subject", subject),
-                        "body": data.get("body", body),
-                    }
-                except json.JSONDecodeError as e:
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": "qwen3:1.7b",
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
+                    },
+                    timeout=60,
+                )
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "{}")
+                    try:
+                        data = json.loads(raw)
+                        return {
+                            "subject": data.get("subject", subject),
+                            "body": data.get("body", body),
+                        }
+                    except json.JSONDecodeError as e:
+                        self.log(
+                            f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}",
+                            "error",
+                        )
+                        return {"subject": subject, "body": body}  # Return original, unchanged
+                    except Exception as e:
+                        self.log(f"Error in email refinement parsing: {e}", "error")
+                        return {"subject": subject, "body": body}
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"Email refinement API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"Email refinement API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                else:
+                    self.log(f"Email refinement failed: {response.status_code}", "error")
+                    break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
                     self.log(
-                        f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}",
+                        f"Email refinement timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
                         "error",
                     )
-                    return {"subject": subject, "body": body}  # Return original, unchanged
-                except Exception as e:
-                    self.log(f"Error in email refinement parsing: {e}", "error")
-                    return {"subject": subject, "body": body}
-            else:
-                self.log(f"Email refinement failed: {response.status_code}", "error")
-        except Exception as e:
-            self.log(f"Error refining email: {e}", "error")
+                    time.sleep(delay)
+                else:
+                    self.log("Email refinement timed out after all retry attempts", "error")
+            except Exception as e:
+                self.log(f"Error refining email: {e}", "error")
+                break
 
         return {"subject": subject, "body": body}
 
@@ -564,7 +668,7 @@ class Outreach:
     def _generate_email_cached(
         self, business_name: str, issues_key: str, bucket: str
     ) -> Dict:
-        """Cached email generation - internal method"""
+        """Cached email generation - internal method with retry logic for 500 errors"""
         if not self.ollama_enabled:
             raise Exception("Ollama is not enabled. Cannot generate email.")
 
@@ -606,59 +710,93 @@ class Outreach:
         "body": "email body with proper line breaks"
         }}"""
 
-        try:
-            response = self._get_session().post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": "qwen3:1.7b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
-                },
-                timeout=60,
-            )
+        max_retries = 3
+        base_delay = 2.0
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                if not raw or raw.strip() == "":
-                    raise Exception("Empty response from LLM")
-
-                try:
-                    data = json.loads(raw)
-                    body = data.get("body", "")
-                    if not body:
-                        raise Exception("Missing body in LLM response")
-
-                    # Ensure the body doesn't already have a signature (safety check)
-                    if "Best regards" in body or "Manas Doshi" in body:
-                        # Simple cleanup if LLM ignored instruction
-                        body = (
-                            body.split("Best regards")[0].split("Sincerely")[0].strip()
-                        )
-
-                    # Append consistent signature
-                    signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
-                    final_body = body.strip() + signature
-
-                    return {
-                        "subject": data.get(
-                            "subject", f"Quick note about {business_name}"
-                        ),
-                        "body": final_body,
-                    }
-                except json.JSONDecodeError as e:
-                    self.log(f"Failed to parse email JSON: {e}\nRaw: {raw}", "error")
-                    raise
-            else:
-                self.log(
-                    f"Email generation API failed with status {response.status_code}: {response.text}",
-                    "error",
+        for attempt in range(max_retries):
+            try:
+                response = self._get_session().post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": "qwen3:1.7b",
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                        "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
+                    },
+                    timeout=60,
                 )
-                raise Exception(f"API failed with status {response.status_code}")
-        except Exception as e:
-            self.log(f"Error generating email: {e}", "error")
-            raise
+
+                if response.status_code == 200:
+                    raw = response.json().get("response", "{}")
+                    if not raw or raw.strip() == "":
+                        raise Exception("Empty response from LLM")
+
+                    try:
+                        data = json.loads(raw)
+                        body = data.get("body", "")
+                        if not body:
+                            raise Exception("Missing body in LLM response")
+
+                        # Ensure the body doesn't already have a signature (safety check)
+                        if "Best regards" in body or "Manas Doshi" in body:
+                            # Simple cleanup if LLM ignored instruction
+                            body = (
+                                body.split("Best regards")[0].split("Sincerely")[0].strip()
+                            )
+
+                        # Append consistent signature
+                        signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
+                        final_body = body.strip() + signature
+
+                        return {
+                            "subject": data.get(
+                                "subject", f"Quick note about {business_name}"
+                            ),
+                            "body": final_body,
+                        }
+                    except json.JSONDecodeError as e:
+                        self.log(f"Failed to parse email JSON: {e}\nRaw: {raw}", "error")
+                        raise
+                elif response.status_code == 500:
+                    # Server error - might be resource limit or temporary issue
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        self.log(
+                            f"Email generation API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s...",
+                            "error",
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.log(
+                            f"Email generation API failed with 500 after {max_retries} attempts. "
+                            "This may be due to resource limits or server overload.",
+                            "error",
+                        )
+                        raise Exception("API failed with status 500 after retries")
+                else:
+                    self.log(
+                        f"Email generation API failed with status {response.status_code}: {response.text}",
+                        "error",
+                    )
+                    raise Exception(f"API failed with status {response.status_code}")
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.log(
+                        f"Email generation timeout (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s...",
+                        "error",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.log("Email generation timed out after all retry attempts", "error")
+                    raise Exception("API timeout after retries")
+            except Exception as e:
+                self.log(f"Error generating email: {e}", "error")
+                raise
 
     def generate_email_ollama(
         self, business_name: str, issues: List[Dict], bucket: str
