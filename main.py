@@ -1,32 +1,34 @@
-"""Web Contractor - Textual TUI Application"""
+"""Web Contractor - Textual TUI Application with Performance Optimizations"""
 
 import json
+from typing import Dict, List
+
 import click
-from typing import List, Dict
 from dotenv import load_dotenv
 from textual.app import App, ComposeResult
-from textual.screen import Screen, ModalScreen
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.css.query import NoMatches
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
-    Header,
-    Footer,
     Button,
-    Static,
-    RichLog,
     DataTable,
-    Label,
-    TextArea,
+    Footer,
+    Header,
     Input,
+    Label,
+    RichLog,
+    Static,
     TabbedContent,
     TabPane,
+    TextArea,
 )
-from textual.binding import Binding
 from textual import work, on
-from textual.css.query import NoMatches
+
 from discovery import Discovery
-from outreach import Outreach
 from email_sender import EmailSender
 from lead_repository import LeadRepository
+from outreach import Outreach
 
 # Load environment variables from .env file
 load_dotenv()
@@ -148,19 +150,17 @@ class ReviewScreen(Screen):
         self.repo.update_email_status(email_id, "pending")
 
         # 2. Try to send
-        success = await self.app.run_in_thread(
-            self.app.email_sender.send_email, to_email, subject, body
-        )
+        success = self.app.email_sender.send_email(to_email, subject, body)
 
         if success:
             self.repo.mark_email_sent(email_id, True)
             self.notify(
-                f"✓ Email sent to {self.selected_email['business_name']}",
+                f"Email sent to {self.selected_email['business_name']}",
                 severity="information",
             )
         else:
             self.notify(
-                f"✗ Failed to send email to {self.selected_email['business_name']}",
+                f"Failed to send email to {self.selected_email['business_name']}",
                 severity="error",
             )
 
@@ -370,7 +370,7 @@ class MarketReviewScreen(Screen):
 
 
 class WebContractorTUI(App):
-    """Web Contractor Terminal User Interface"""
+    """Web Contractor Terminal User Interface with Performance Optimizations"""
 
     CSS = """
     Screen {
@@ -440,7 +440,7 @@ class WebContractorTUI(App):
     #settings-container {
         padding: 1;
     }
-    
+
     .settings-section {
         border: tall $primary;
         margin-bottom: 1;
@@ -553,9 +553,17 @@ class WebContractorTUI(App):
 
         self.repo = LeadRepository()
         self.repo.setup_database()
-        self.discovery = Discovery(repo=self.repo, logger=thread_safe_log)
-        self.outreach = Outreach(repo=self.repo, logger=thread_safe_log)
-        self.email_sender = EmailSender(repo=self.repo, logger=thread_safe_log)
+
+        # Initialize components with performance optimizations
+        self.discovery = Discovery(
+            repo=self.repo, logger=thread_safe_log, max_workers=5
+        )
+        self.outreach = Outreach(
+            repo=self.repo, logger=thread_safe_log, max_workers=5
+        )
+        self.email_sender = EmailSender(
+            repo=self.repo, logger=thread_safe_log, pool_size=3
+        )
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -636,7 +644,7 @@ class WebContractorTUI(App):
         self.sub_title = "Lead Discovery & Outreach Automation"
         self.refresh_stats()
         self.refresh_settings()
-        self.write_log("✓ Web Contractor initialized", "success")
+        self.write_log("Web Contractor initialized", "success")
         self.write_log(
             "Press [d] Discovery, [a] Audit, [g] Generate, [v] Review, [s] Send, [q] Quit",
             "info",
@@ -652,11 +660,11 @@ class WebContractorTUI(App):
         """Write to activity log"""
         log_widget = self.query_one("#activity-log", RichLog)
         if style == "success":
-            log_widget.write(f"[green]✓[/green] {message}")
+            log_widget.write(f"[green][/green] {message}")
         elif style == "error":
-            log_widget.write(f"[red]✗[/red] {message}")
+            log_widget.write(f"[red][/red] {message}")
         elif style == "info":
-            log_widget.write(f"[cyan]ℹ[/cyan] {message}")
+            log_widget.write(f"[cyan][/cyan] {message}")
         else:
             log_widget.write(message)
 
@@ -718,6 +726,28 @@ class WebContractorTUI(App):
         sl = self.query_one("#status-label", Label)
         sl.update(f"System Status: {status}")
 
+    def _audit_progress_callback(self, current: int, total: int, business_name: str):
+        """Thread-safe callback for audit progress updates"""
+        try:
+            self.call_from_thread(
+                self.write_log,
+                f"Progress: [{current}/{total}] Auditing {business_name}",
+                "info",
+            )
+        except Exception:
+            pass
+
+    def _email_gen_progress_callback(self, current: int, total: int, business_name: str):
+        """Thread-safe callback for email generation progress updates"""
+        try:
+            self.call_from_thread(
+                self.write_log,
+                f"Progress: [{current}/{total}] Generating email for {business_name}",
+                "info",
+            )
+        except Exception:
+            pass
+
     @on(Button.Pressed, "#save-geo-btn")
     def save_geographic_focus(self) -> None:
         """Save geographic focus from textarea"""
@@ -778,10 +808,11 @@ class WebContractorTUI(App):
 
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:
-        """Run discovery pipeline (Stage 0 + Stage A)"""
+        """Run discovery pipeline (Stage 0 + Stage A) with parallel scraping"""
         self.call_from_thread(self.update_status, "Running Discovery...")
         try:
-            self.discovery.run(max_queries=5)
+            # Use parallel=True for multi-threaded scraping
+            self.discovery.run(max_queries=5, parallel=True)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Discovery failed: {e}", "error")
         finally:
@@ -790,10 +821,15 @@ class WebContractorTUI(App):
 
     @work(exclusive=True, thread=True)
     def action_run_audit(self) -> None:
-        """Run audit pipeline (Stage B)"""
-        self.call_from_thread(self.update_status, "Auditing Leads...")
+        """Run audit pipeline (Stage B) with parallel processing"""
+        self.call_from_thread(self.update_status, "Auditing Leads (Parallel)...")
         try:
-            self.outreach.audit_leads(limit=10)
+            # Use parallel=True with progress callback
+            self.outreach.audit_leads(
+                limit=20,
+                parallel=True,
+                progress_callback=self._audit_progress_callback,
+            )
         except Exception as e:
             self.call_from_thread(self.write_log, f"Audit failed: {e}", "error")
         finally:
@@ -802,10 +838,15 @@ class WebContractorTUI(App):
 
     @work(exclusive=True, thread=True)
     def action_generate_emails(self) -> None:
-        """Generate emails (Stage C)"""
-        self.call_from_thread(self.update_status, "Generating Emails...")
+        """Generate emails (Stage C) with parallel processing"""
+        self.call_from_thread(self.update_status, "Generating Emails (Parallel)...")
         try:
-            self.outreach.generate_emails(limit=10)
+            # Use parallel=True with progress callback
+            self.outreach.generate_emails(
+                limit=20,
+                parallel=True,
+                progress_callback=self._email_gen_progress_callback,
+            )
         except Exception as e:
             self.call_from_thread(
                 self.write_log, f"Email generation failed: {e}", "error"
