@@ -6,14 +6,15 @@ Performance optimizations:
 - HTTP session reuse
 - Batch email generation with parallel LLM calls
 - Thread-safe _audit_single_lead() method
+- LLM rate limiting with cooldown between calls
 """
 
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,6 +23,8 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 
 from lead_repository import LeadRepository
+
+T = TypeVar("T")
 
 
 class Outreach:
@@ -32,16 +35,22 @@ class Outreach:
         repo: Optional[LeadRepository] = None,
         logger: Optional[Callable] = None,
         max_workers: int = 5,
+        llm_cooldown: float = 2.0,
     ):
         self.repo = repo or LeadRepository()
         self.ollama_url = "http://localhost:11434"
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
         self.max_workers = max_workers
+        self.llm_cooldown = llm_cooldown
         self._driver: Optional[webdriver.Chrome] = None
 
         # HTTP session for reuse - MUST be initialized before _test_ollama()
         self._session: Optional[requests.Session] = None
+
+        # LLM rate limiting: lock ensures only one call at a time, last_call tracks cooldown
+        self._llm_lock = threading.Lock()
+        self._last_llm_call: float = 0.0
 
         # Test Ollama connection after _session is initialized
         self.ollama_enabled = self._test_ollama()
@@ -117,72 +126,78 @@ class Outreach:
     def _run_visual_audit(
         self, business_name: str, base64_image: str, config: Dict
     ) -> Optional[Dict]:
-        """Run visual audit using Ollama Vision model with retry logic for 500 errors"""
-        prompt = config.get("prompt", "").format(business_name=business_name)
+        """Run visual audit using Ollama Vision model with retry logic for 500 errors.
 
-        max_retries = 3
-        base_delay = 2.0
+        This method is wrapped with cooldown to prevent overwhelming the API.
+        """
+        def _do_visual_audit() -> Optional[Dict]:
+            prompt = config.get("prompt", "").format(business_name=business_name)
 
-        for attempt in range(max_retries):
-            try:
-                response = self._get_session().post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
-                        "prompt": prompt,
-                        "images": [base64_image],
-                        "stream": False,
-                        "format": "json",
-                        "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
-                    },
-                    timeout=60,
-                )
+            max_retries = 3
+            base_delay = 2.0
 
-                if response.status_code == 200:
-                    raw = response.json().get("response", "{}")
-                    if not raw or raw.strip() == "":
-                        return None
-                    try:
-                        return json.loads(raw)
-                    except json.JSONDecodeError as e:
-                        self.log(f"Failed to parse visual audit JSON: {e}", "error")
-                        return None
-                elif response.status_code == 500:
-                    # Server error - might be resource limit or temporary issue
+            for attempt in range(max_retries):
+                try:
+                    response = self._get_session().post(
+                        f"{self.ollama_url}/api/generate",
+                        json={
+                            "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
+                            "prompt": prompt,
+                            "images": [base64_image],
+                            "stream": False,
+                            "format": "json",
+                            "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
+                        },
+                        timeout=60,
+                    )
+
+                    if response.status_code == 200:
+                        raw = response.json().get("response", "{}")
+                        if not raw or raw.strip() == "":
+                            return None
+                        try:
+                            return json.loads(raw)
+                        except json.JSONDecodeError as e:
+                            self.log(f"Failed to parse visual audit JSON: {e}", "error")
+                            return None
+                    elif response.status_code == 500:
+                        # Server error - might be resource limit or temporary issue
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            self.log(
+                                f"Visual audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                                f"Retrying in {delay:.1f}s...",
+                                "error",
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            self.log(
+                                f"Visual audit API failed with 500 after {max_retries} attempts. "
+                                "This may be due to resource limits or server overload.",
+                                "error",
+                            )
+                    else:
+                        self.log(f"Visual audit API failed: {response.status_code}", "error")
+                        # Don't retry on non-500 errors
+                        break
+                except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
                         self.log(
-                            f"Visual audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Visual audit timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
                             "error",
                         )
                         time.sleep(delay)
-                        continue
                     else:
-                        self.log(
-                            f"Visual audit API failed with 500 after {max_retries} attempts. "
-                            "This may be due to resource limits or server overload.",
-                            "error",
-                        )
-                else:
-                    self.log(f"Visual audit API failed: {response.status_code}", "error")
-                    # Don't retry on non-500 errors
+                        self.log("Visual audit timed out after all retry attempts", "error")
+                except Exception as e:
+                    self.log(f"Visual audit call failed: {e}", "error")
                     break
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    self.log(
-                        f"Visual audit timeout (attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {delay:.1f}s...",
-                        "error",
-                    )
-                    time.sleep(delay)
-                else:
-                    self.log("Visual audit timed out after all retry attempts", "error")
-            except Exception as e:
-                self.log(f"Visual audit call failed: {e}", "error")
-                break
-        return None
+            return None
+
+        return self._llm_call_with_cooldown(_do_visual_audit)
 
     def _normalize_severity(self, severity: str) -> str:
         """Normalize severity to match DB constraints ('critical', 'warning', 'info')"""
@@ -192,6 +207,27 @@ class Outreach:
         if s in ["warning", "medium", "warn"]:
             return "warning"
         return "info"
+
+    def _llm_call_with_cooldown(self, call_fn: Callable[[], T]) -> T:
+        """Execute an LLM call with cooldown to prevent overwhelming the API.
+
+        This method ensures:
+        1. Only one LLM call happens at a time (thread-safe)
+        2. A cooldown period between calls to avoid rate limiting
+        """
+        with self._llm_lock:
+            # Calculate time since last call
+            elapsed = time.time() - self._last_llm_call
+            if elapsed < self.llm_cooldown:
+                sleep_time = self.llm_cooldown - elapsed
+                self.log(f"  LLM cooldown: waiting {sleep_time:.1f}s...", "info")
+                time.sleep(sleep_time)
+
+            try:
+                result = call_fn()
+                return result
+            finally:
+                self._last_llm_call = time.time()
 
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
@@ -502,173 +538,184 @@ class Outreach:
     def _run_llm_audit(
         self, business_name: str, content: str, config: Dict
     ) -> Optional[Dict]:
-        """Run qualitative audit using Ollama with retry logic for 500 errors"""
-        prompt = config.get("prompt", "").format(
-            business_name=business_name, content=content
-        )
+        """Run qualitative audit using Ollama with retry logic for 500 errors.
 
-        max_retries = 3
-        base_delay = 2.0
+        This method is wrapped with cooldown to prevent overwhelming the API.
+        """
+        def _do_llm_audit() -> Optional[Dict]:
+            prompt = config.get("prompt", "").format(
+                business_name=business_name, content=content
+            )
 
-        for attempt in range(max_retries):
-            try:
-                response = self._get_session().post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": config.get("model", "qwen3:1.7b"),
-                        "prompt": prompt,
-                        "stream": False,
-                        "format": "json",
-                        "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
-                    },
-                    timeout=30,
-                )
+            max_retries = 3
+            base_delay = 2.0
 
-                if response.status_code == 200:
-                    raw = response.json().get("response", "{}")
-                    if not raw or raw.strip() == "":
-                        self.log("LLM audit returned an empty response", "error")
-                        return None
-                    try:
-                        return json.loads(raw)
-                    except json.JSONDecodeError as e:
-                        self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
-                        return None
-                elif response.status_code == 500:
-                    # Server error - might be resource limit or temporary issue
+            for attempt in range(max_retries):
+                try:
+                    response = self._get_session().post(
+                        f"{self.ollama_url}/api/generate",
+                        json={
+                            "model": config.get("model", "qwen3:1.7b"),
+                            "prompt": prompt,
+                            "stream": False,
+                            "format": "json",
+                            "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
+                        },
+                        timeout=30,
+                    )
+
+                    if response.status_code == 200:
+                        raw = response.json().get("response", "{}")
+                        if not raw or raw.strip() == "":
+                            self.log("LLM audit returned an empty response", "error")
+                            return None
+                        try:
+                            return json.loads(raw)
+                        except json.JSONDecodeError as e:
+                            self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
+                            return None
+                    elif response.status_code == 500:
+                        # Server error - might be resource limit or temporary issue
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            self.log(
+                                f"LLM audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                                f"Retrying in {delay:.1f}s...",
+                                "error",
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            self.log(
+                                f"LLM audit API failed with 500 after {max_retries} attempts. "
+                                "This may be due to resource limits or server overload.",
+                                "error",
+                            )
+                    else:
+                        self.log(
+                            f"LLM audit API failed with status {response.status_code}: {response.text}",
+                            "error",
+                        )
+                        # Don't retry on non-500 errors
+                        break
+                except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
                         self.log(
-                            f"LLM audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"LLM audit timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
                             "error",
                         )
                         time.sleep(delay)
-                        continue
                     else:
-                        self.log(
-                            f"LLM audit API failed with 500 after {max_retries} attempts. "
-                            "This may be due to resource limits or server overload.",
-                            "error",
-                        )
-                else:
-                    self.log(
-                        f"LLM audit API failed with status {response.status_code}: {response.text}",
-                        "error",
-                    )
-                    # Don't retry on non-500 errors
+                        self.log("LLM audit timed out after all retry attempts", "error")
+                except Exception as e:
+                    self.log(f"LLM audit call failed: {e}", "error")
                     break
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    self.log(
-                        f"LLM audit timeout (attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {delay:.1f}s...",
-                        "error",
-                    )
-                    time.sleep(delay)
-                else:
-                    self.log("LLM audit timed out after all retry attempts", "error")
-            except Exception as e:
-                self.log(f"LLM audit call failed: {e}", "error")
-                break
-        return None
+            return None
+
+        return self._llm_call_with_cooldown(_do_llm_audit)
 
     def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict:
-        """Refine an existing email based on user instructions using Ollama with retry logic"""
+        """Refine an existing email based on user instructions using Ollama with retry logic.
+
+        This method is wrapped with cooldown to prevent overwhelming the API.
+        """
         if not self.ollama_enabled:
             return {"subject": subject, "body": body}
 
-        prompt = f"""Refine this cold email based on the following instructions.
+        def _do_refinement() -> Dict:
+            prompt = f"""Refine this cold email based on the following instructions.
 
-    Instructions: {instructions}
+        Instructions: {instructions}
 
-    Current Subject: {subject}
-    Current Body:
-    {body}
+        Current Subject: {subject}
+        Current Body:
+        {body}
 
-    Return ONLY JSON:
-    {{
-    "subject": "refined subject line",
-    "body": "refined email body with proper line breaks"
-    }}"""
+        Return ONLY JSON:
+        {{
+        "subject": "refined subject line",
+        "body": "refined email body with proper line breaks"
+        }}"""
 
-        max_retries = 3
-        base_delay = 2.0
+            max_retries = 3
+            base_delay = 2.0
 
-        for attempt in range(max_retries):
-            try:
-                response = self._get_session().post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": "qwen3:1.7b",
-                        "prompt": prompt,
-                        "stream": False,
-                        "format": "json",
-                        "system": "You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
-                    },
-                    timeout=60,
-                )
+            for attempt in range(max_retries):
+                try:
+                    response = self._get_session().post(
+                        f"{self.ollama_url}/api/generate",
+                        json={
+                            "model": "qwen3:1.7b",
+                            "prompt": prompt,
+                            "stream": False,
+                            "format": "json",
+                            "system": "You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
+                        },
+                        timeout=60,
+                    )
 
-                if response.status_code == 200:
-                    raw = response.json().get("response", "{}")
-                    try:
-                        data = json.loads(raw)
-                        return {
-                            "subject": data.get("subject", subject),
-                            "body": data.get("body", body),
-                        }
-                    except json.JSONDecodeError as e:
-                        self.log(
-                            f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}",
-                            "error",
-                        )
-                        return {"subject": subject, "body": body}  # Return original, unchanged
-                    except Exception as e:
-                        self.log(f"Error in email refinement parsing: {e}", "error")
-                        return {"subject": subject, "body": body}
-                elif response.status_code == 500:
-                    # Server error - might be resource limit or temporary issue
+                    if response.status_code == 200:
+                        raw = response.json().get("response", "{}")
+                        try:
+                            data = json.loads(raw)
+                            return {
+                                "subject": data.get("subject", subject),
+                                "body": data.get("body", body),
+                            }
+                        except json.JSONDecodeError as e:
+                            self.log(
+                                f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}",
+                                "error",
+                            )
+                            return {"subject": subject, "body": body}  # Return original, unchanged
+                        except Exception as e:
+                            self.log(f"Error in email refinement parsing: {e}", "error")
+                            return {"subject": subject, "body": body}
+                    elif response.status_code == 500:
+                        # Server error - might be resource limit or temporary issue
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            self.log(
+                                f"Email refinement API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                                f"Retrying in {delay:.1f}s...",
+                                "error",
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            self.log(
+                                f"Email refinement API failed with 500 after {max_retries} attempts. "
+                                "This may be due to resource limits or server overload.",
+                                "error",
+                            )
+                    else:
+                        self.log(f"Email refinement failed: {response.status_code}", "error")
+                        break
+                except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
                         self.log(
-                            f"Email refinement API returned 500 (attempt {attempt + 1}/{max_retries}). "
+                            f"Email refinement timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
                             "error",
                         )
                         time.sleep(delay)
-                        continue
                     else:
-                        self.log(
-                            f"Email refinement API failed with 500 after {max_retries} attempts. "
-                            "This may be due to resource limits or server overload.",
-                            "error",
-                        )
-                else:
-                    self.log(f"Email refinement failed: {response.status_code}", "error")
+                        self.log("Email refinement timed out after all retry attempts", "error")
+                except Exception as e:
+                    self.log(f"Error refining email: {e}", "error")
                     break
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    self.log(
-                        f"Email refinement timeout (attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {delay:.1f}s...",
-                        "error",
-                    )
-                    time.sleep(delay)
-                else:
-                    self.log("Email refinement timed out after all retry attempts", "error")
-            except Exception as e:
-                self.log(f"Error refining email: {e}", "error")
-                break
 
-        return {"subject": subject, "body": body}
+            return {"subject": subject, "body": body}
 
-    @lru_cache(maxsize=128)
-    def _generate_email_cached(
+        return self._llm_call_with_cooldown(_do_refinement)
+
+    def _generate_email_uncached(
         self, business_name: str, issues_key: str, bucket: str
     ) -> Dict:
-        """Cached email generation - internal method with retry logic for 500 errors"""
+        """Uncached email generation with retry logic - wrapped by cooldown in public method."""
         if not self.ollama_enabled:
             raise Exception("Ollama is not enabled. Cannot generate email.")
 
@@ -801,10 +848,35 @@ class Outreach:
     def generate_email_ollama(
         self, business_name: str, issues: List[Dict], bucket: str
     ) -> Dict:
-        """Generate email using Ollama LLM with LRU caching"""
+        """Generate email using Ollama LLM with LRU caching and cooldown.
+
+        This method applies a cooldown between API calls to prevent overwhelming
+        the LLM service. Cached results are returned immediately without cooldown.
+        """
         # Create a cacheable key from issues
         issues_key = json.dumps(issues, sort_keys=True)
-        return self._generate_email_cached(business_name, issues_key, bucket)
+
+        # Use a simple cache dict on the instance
+        cache_key = (business_name, issues_key, bucket)
+        if not hasattr(self, '_email_cache'):
+            self._email_cache: Dict[Tuple[str, str, str], Dict] = {}
+
+        if cache_key in self._email_cache:
+            return self._email_cache[cache_key]
+
+        # Not in cache - apply cooldown and make API call
+        def _do_generate() -> Dict:
+            return self._generate_email_uncached(business_name, issues_key, bucket)
+
+        result = self._llm_call_with_cooldown(_do_generate)
+
+        # Store in cache (limit size to prevent memory growth)
+        if len(self._email_cache) >= 128:
+            # Clear oldest entries (simple approach)
+            self._email_cache.clear()
+        self._email_cache[cache_key] = result
+
+        return result
 
     def _audit_single_lead(self, lead: Dict) -> Tuple[int, Dict, float]:
         """Thread-safe method to audit a single lead"""
