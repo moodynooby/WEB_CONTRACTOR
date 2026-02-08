@@ -6,13 +6,14 @@ Performance optimizations:
 - Connection health checks
 """
 
+import json
 import smtplib
 import threading
 import time
 from contextlib import contextmanager
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional
 
 from lead_repository import LeadRepository
 
@@ -134,6 +135,24 @@ class EmailSender:
         self.logger = logger
         self.pool_size = pool_size
         self._pool: Optional[SMTPConnectionPool] = None
+        self.email_signature = self._load_email_signature()
+
+    def _load_email_signature(self) -> str:
+        """Load email signature from config file"""
+        try:
+            with open("config/email_prompts.json", "r") as f:
+                config = json.load(f)
+                sig_config = config.get("email_signature", {})
+                template = sig_config.get("template", "\n\nBest regards,\nManas Doshi")
+                return template.format(
+                    name=sig_config.get("name", "Manas Doshi"),
+                    company=sig_config.get("company", "Future Forwards"),
+                    website=sig_config.get(
+                        "website", "https://man27.netlify.app/services"
+                    ),
+                )
+        except Exception:
+            return "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
@@ -178,114 +197,3 @@ class EmailSender:
         except Exception as e:
             self.log(f"Email send error: {e}", "error")
             return False
-
-    def send_pending_emails(
-        self,
-        limit: int = 10,
-        batch_size: int = 5,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ) -> Dict:
-        """Send all pending emails using pooled connections with batch processing"""
-        self.log(f"\n{'=' * 60}")
-        self.log("EMAIL SENDER: Sending Pending Emails (Connection Pool)")
-        self.log(f"{'=' * 60}")
-
-        if not self.email or not self.password:
-            self.log("Gmail credentials not configured", "error")
-            return {"sent": 0, "failed": 0}
-
-        emails = self.repo.get_pending_emails(limit)
-        if not emails:
-            self.log("No pending emails to send.", "info")
-            return {"sent": 0, "failed": 0}
-
-        self.log(f"Sending {len(emails)} emails...", "info")
-
-        sent = 0
-        failed = 0
-        results: List[Tuple[int, bool, Optional[str]]] = []
-
-        try:
-            # Process emails in batches
-            for batch_start in range(0, len(emails), batch_size):
-                batch = emails[batch_start : batch_start + batch_size]
-
-                with self._get_pool().connection() as server:
-                    for i, email_data in enumerate(batch, 1):
-                        overall_index = batch_start + i
-
-                        try:
-                            msg = MIMEMultipart()
-                            msg["From"] = self.email
-                            msg["To"] = email_data["email"]
-                            msg["Subject"] = email_data["subject"]
-                            msg.attach(MIMEText(email_data["body"], "plain"))
-
-                            server.send_message(msg)
-                            results.append((email_data["campaign_id"], True, None))
-                            sent += 1
-                            self.log(
-                                f"[{overall_index}/{len(emails)}] Sent to {email_data['email']}",
-                                "success",
-                            )
-                        except Exception as e:
-                            results.append(
-                                (email_data["campaign_id"], False, str(e))
-                            )
-                            failed += 1
-                            self.log(
-                                f"[{overall_index}/{len(emails)}] Failed to {email_data['email']}: {e}",
-                                "error",
-                            )
-
-                        if progress_callback:
-                            progress_callback(
-                                overall_index, len(emails), email_data["business_name"]
-                            )
-
-                        # Small delay to be polite to SMTP server
-                        time.sleep(0.5)
-
-            # Update database with results
-            for campaign_id, success, error in results:
-                self.repo.mark_email_sent(campaign_id, success, error)
-
-        except Exception as e:
-            self.log(f"SMTP Session failed: {e}", "error")
-            # Update remaining as failed
-            for campaign_id, _, _ in results:
-                self.repo.mark_email_sent(campaign_id, False, error="SMTP session failed")
-
-        finally:
-            self._cleanup()
-
-        self.log(f"\n{'=' * 60}")
-        self.log(f"Email Sending Complete: {sent} sent, {failed} failed", "success")
-        self.log(f"{'=' * 60}\n")
-
-        return {"sent": sent, "failed": failed}
-
-    def send_single_batch(
-        self, email_data_list: List[Dict]
-    ) -> List[Tuple[int, bool, Optional[str]]]:
-        """Send a batch of emails using a single connection"""
-        results: List[Tuple[int, bool, Optional[str]]] = []
-
-        with self._get_pool().connection() as server:
-            for email_data in email_data_list:
-                try:
-                    msg = MIMEMultipart()
-                    msg["From"] = self.email
-                    msg["To"] = email_data["email"]
-                    msg["Subject"] = email_data["subject"]
-                    msg.attach(MIMEText(email_data["body"], "plain"))
-
-                    server.send_message(msg)
-                    results.append((email_data["campaign_id"], True, None))
-                except Exception as e:
-                    error_msg: Optional[str] = str(e)
-                    results.append((email_data["campaign_id"], False, error_msg))
-
-                time.sleep(0.5)
-
-        return results

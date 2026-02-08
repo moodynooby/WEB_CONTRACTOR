@@ -37,6 +37,7 @@ T = TypeVar("T")
 
 def exponential_backoff(max_retries: int = 3, base_delay: float = 1.0) -> Callable:
     """Decorator for exponential backoff retry logic"""
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
@@ -49,7 +50,9 @@ def exponential_backoff(max_retries: int = 3, base_delay: float = 1.0) -> Callab
                     delay = base_delay * (2**attempt) + random.uniform(0, 1)
                     time.sleep(delay)
             return None  # type: ignore
+
         return wrapper
+
     return decorator
 
 
@@ -148,7 +151,7 @@ class Discovery:
         repo: Optional[LeadRepository] = None,
         logger: Optional[Callable] = None,
         max_workers: int = 5,
-        llm_cooldown: float = 2.0,
+        llm_cooldown: float = 0.5,
     ):
         self.repo = repo or LeadRepository()
         self.buckets = self._load_buckets()
@@ -181,9 +184,11 @@ class Discovery:
         """Get or create reusable HTTP session"""
         if self._session is None:
             self._session = requests.Session()
-            self._session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
+            self._session.headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            )
         return self._session
 
     def _get_driver_pool(self) -> WebDriverPool:
@@ -212,9 +217,7 @@ class Discovery:
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
         try:
-            response = self._get_session().get(
-                f"{self.ollama_url}/api/tags", timeout=5
-            )
+            response = self._get_session().get(f"{self.ollama_url}/api/tags", timeout=5)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -297,17 +300,22 @@ class Discovery:
                     if response.status_code == 200:
                         raw = response.json().get("response", "{}")
                         if not raw or raw.strip() == "":
-                            self.log("Expansion LLM returned an empty response", "error")
+                            self.log(
+                                "Expansion LLM returned an empty response", "error"
+                            )
                             return None
                         try:
                             return json.loads(raw)
                         except json.JSONDecodeError as e:
-                            self.log(f"Failed to parse expansion JSON: {e}\nRaw: {raw}", "error")
+                            self.log(
+                                f"Failed to parse expansion JSON: {e}\nRaw: {raw}",
+                                "error",
+                            )
                             return None
                     elif response.status_code == 500:
                         # Server error - might be resource limit or temporary issue
                         if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
+                            delay = base_delay * (2**attempt)
                             self.log(
                                 f"Expansion API returned 500 (attempt {attempt + 1}/{max_retries}). "
                                 f"Retrying in {delay:.1f}s...",
@@ -329,7 +337,7 @@ class Discovery:
                         break
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"Expansion API timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -337,7 +345,9 @@ class Discovery:
                         )
                         time.sleep(delay)
                     else:
-                        self.log("Expansion API timed out after all retry attempts", "error")
+                        self.log(
+                            "Expansion API timed out after all retry attempts", "error"
+                        )
                 except Exception as e:
                     self.log(f"Expansion failed: {e}", "error")
                     break
@@ -398,17 +408,23 @@ class Discovery:
                     if response.status_code == 200:
                         raw = response.json().get("response", "[]")
                         if not raw or raw.strip() == "":
-                            self.log("Market discovery LLM returned an empty response", "error")
+                            self.log(
+                                "Market discovery LLM returned an empty response",
+                                "error",
+                            )
                             return None
                         try:
                             return json.loads(raw)
                         except json.JSONDecodeError as e:
-                            self.log(f"Failed to parse market discovery JSON: {e}\nRaw: {raw}", "error")
+                            self.log(
+                                f"Failed to parse market discovery JSON: {e}\nRaw: {raw}",
+                                "error",
+                            )
                             return None
                     elif response.status_code == 500:
                         # Server error - might be resource limit or temporary issue
                         if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
+                            delay = base_delay * (2**attempt)
                             self.log(
                                 f"Market discovery API returned 500 (attempt {attempt + 1}/{max_retries}). "
                                 f"Retrying in {delay:.1f}s...",
@@ -430,7 +446,7 @@ class Discovery:
                         break
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"Market discovery API timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -438,7 +454,10 @@ class Discovery:
                         )
                         time.sleep(delay)
                     else:
-                        self.log("Market discovery API timed out after all retry attempts", "error")
+                        self.log(
+                            "Market discovery API timed out after all retry attempts",
+                            "error",
+                        )
                 except Exception as e:
                     self.log(f"Market discovery failed: {e}", "error")
                     break
@@ -453,7 +472,9 @@ class Discovery:
         """Generate search queries from bucket patterns"""
         self.buckets = self._load_buckets()
         queries = []
-        buckets = [b for b in self.buckets if not bucket_name or b["name"] == bucket_name]
+        buckets = [
+            b for b in self.buckets if not bucket_name or b["name"] == bucket_name
+        ]
 
         # Load geographic focus from DB
         geo_focus = self.repo.get_config("geographic_focus") or {}
@@ -493,7 +514,9 @@ class Discovery:
 
                 for city in cities[:2]:
                     query = pattern.replace("{city}", city)
-                    queries.append({"query": query, "bucket": bucket["name"], "city": city})
+                    queries.append(
+                        {"query": query, "bucket": bucket["name"], "city": city}
+                    )
                     if len(queries) >= limit:
                         return queries
 
@@ -520,7 +543,9 @@ class Discovery:
 
         with pool.get_driver() as driver:
             try:
-                search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+                search_url = (
+                    f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+                )
                 driver.get(search_url)
                 time.sleep(3)
 
@@ -533,7 +558,8 @@ class Discovery:
                     )
                 except TimeoutException:
                     self.log(
-                        f"Google Maps search results not loaded for query '{query}'", "error"
+                        f"Google Maps search results not loaded for query '{query}'",
+                        "error",
                     )
                     return leads
 
@@ -549,11 +575,15 @@ class Discovery:
 
                         # Extract business name
                         try:
-                            name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text
+                            name = driver.find_element(
+                                By.CSS_SELECTOR, "h1.DUwDvf"
+                            ).text
                         except NoSuchElementException:
                             name = "Unknown Business"
                         except Exception as e:
-                            self.log(f"Unexpected error finding business name: {e}", "error")
+                            self.log(
+                                f"Unexpected error finding business name: {e}", "error"
+                            )
                             name = "Unknown Business"
 
                         # Extract website
@@ -566,7 +596,10 @@ class Discovery:
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting website from Google Maps: {e}", "error")
+                            self.log(
+                                f"Error extracting website from Google Maps: {e}",
+                                "error",
+                            )
 
                         # Extract phone
                         phone = None
@@ -578,7 +611,9 @@ class Discovery:
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting phone from Google Maps: {e}", "error")
+                            self.log(
+                                f"Error extracting phone from Google Maps: {e}", "error"
+                            )
 
                         if name:
                             leads.append(
@@ -589,7 +624,9 @@ class Discovery:
                                     "source": "google_maps",
                                     "bucket": bucket,
                                     "category": query.split()[0],
-                                    "location": query.split()[-1] if " " in query else "Unknown",
+                                    "location": query.split()[-1]
+                                    if " " in query
+                                    else "Unknown",
                                 }
                             )
 
@@ -613,8 +650,12 @@ class Discovery:
                 # Format query for JustDial URL
                 query_parts = query.split()
                 city = query_parts[-1] if len(query_parts) > 1 else "Mumbai"
-                search_term = " ".join(query_parts[:-1]) if len(query_parts) > 1 else query
-                search_url = f"https://www.justdial.com/{city}/{search_term.replace(' ', '-')}"
+                search_term = (
+                    " ".join(query_parts[:-1]) if len(query_parts) > 1 else query
+                )
+                search_url = (
+                    f"https://www.justdial.com/{city}/{search_term.replace(' ', '-')}"
+                )
 
                 driver.get(search_url)
                 time.sleep(3)
@@ -628,7 +669,8 @@ class Discovery:
                     )
                 except TimeoutException:
                     self.log(
-                        f"JustDial search results not loaded for query '{query}'", "error"
+                        f"JustDial search results not loaded for query '{query}'",
+                        "error",
                     )
                     return leads
 
@@ -644,7 +686,11 @@ class Discovery:
                             name_elem = element.find_element(
                                 By.CSS_SELECTOR, ".jsx-2c8ae8c8b6b8b1b0"
                             )
-                            name = name_elem.text.strip() if name_elem else "Unknown Business"
+                            name = (
+                                name_elem.text.strip()
+                                if name_elem
+                                else "Unknown Business"
+                            )
                         except NoSuchElementException:
                             name = "Unknown Business"
 
@@ -658,7 +704,9 @@ class Discovery:
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting phone from JustDial: {e}", "error")
+                            self.log(
+                                f"Error extracting phone from JustDial: {e}", "error"
+                            )
 
                         # Extract website (often requires clicking through)
                         website = None
@@ -667,12 +715,16 @@ class Discovery:
                                 By.CSS_SELECTOR, "a[href*='http']"
                             )
                             website = (
-                                website_elem.get_attribute("href") if website_elem else None
+                                website_elem.get_attribute("href")
+                                if website_elem
+                                else None
                             )
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting website from JustDial: {e}", "error")
+                            self.log(
+                                f"Error extracting website from JustDial: {e}", "error"
+                            )
 
                         if name:
                             leads.append(
@@ -715,7 +767,8 @@ class Discovery:
                     )
                 except TimeoutException:
                     self.log(
-                        f"IndiaMART search results not loaded for query '{query}'", "error"
+                        f"IndiaMART search results not loaded for query '{query}'",
+                        "error",
                     )
                     return leads
 
@@ -728,8 +781,14 @@ class Discovery:
                     try:
                         # Extract business name
                         try:
-                            name_elem = element.find_element(By.CSS_SELECTOR, ".lst_clg a")
-                            name = name_elem.text.strip() if name_elem else "Unknown Business"
+                            name_elem = element.find_element(
+                                By.CSS_SELECTOR, ".lst_clg a"
+                            )
+                            name = (
+                                name_elem.text.strip()
+                                if name_elem
+                                else "Unknown Business"
+                            )
                         except NoSuchElementException:
                             name = "Unknown Business"
 
@@ -740,12 +799,16 @@ class Discovery:
                                 By.CSS_SELECTOR, ".lst_clg a"
                             )
                             website = (
-                                website_elem.get_attribute("href") if website_elem else None
+                                website_elem.get_attribute("href")
+                                if website_elem
+                                else None
                             )
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting website from IndiaMART: {e}", "error")
+                            self.log(
+                                f"Error extracting website from IndiaMART: {e}", "error"
+                            )
 
                         # Extract phone
                         phone = None
@@ -755,7 +818,9 @@ class Discovery:
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting phone from IndiaMART: {e}", "error")
+                            self.log(
+                                f"Error extracting phone from IndiaMART: {e}", "error"
+                            )
 
                         if name:
                             leads.append(
@@ -789,7 +854,9 @@ class Discovery:
 
         with pool.get_driver() as driver:
             try:
-                search_url = f"https://www.yelp.com/search?find_desc={query.replace(' ', '+')}"
+                search_url = (
+                    f"https://www.yelp.com/search?find_desc={query.replace(' ', '+')}"
+                )
                 driver.get(search_url)
                 time.sleep(3)
 
@@ -801,7 +868,9 @@ class Discovery:
                         )
                     )
                 except TimeoutException:
-                    self.log(f"Yelp search results not loaded for query '{query}'", "error")
+                    self.log(
+                        f"Yelp search results not loaded for query '{query}'", "error"
+                    )
                     return leads
 
                 # Get business listings
@@ -816,7 +885,11 @@ class Discovery:
                             name_elem = element.find_element(
                                 By.CSS_SELECTOR, "a[href*='/biz/']"
                             )
-                            name = name_elem.text.strip() if name_elem else "Unknown Business"
+                            name = (
+                                name_elem.text.strip()
+                                if name_elem
+                                else "Unknown Business"
+                            )
                         except NoSuchElementException:
                             name = "Unknown Business"
 
@@ -827,12 +900,16 @@ class Discovery:
                                 By.CSS_SELECTOR, "a[href*='biz/']"
                             )
                             website = (
-                                website_elem.get_attribute("href") if website_elem else None
+                                website_elem.get_attribute("href")
+                                if website_elem
+                                else None
                             )
                         except NoSuchElementException:
                             pass
                         except Exception as e:
-                            self.log(f"Error extracting website from Yelp: {e}", "error")
+                            self.log(
+                                f"Error extracting website from Yelp: {e}", "error"
+                            )
 
                         # Extract phone
                         phone = None
@@ -923,11 +1000,15 @@ class Discovery:
             if parallel and len(queries) > 1:
                 # Parallel scraping
                 with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    futures = {executor.submit(self._scrape_query, q): q for q in queries}
+                    futures = {
+                        executor.submit(self._scrape_query, q): q for q in queries
+                    }
 
                     for i, future in enumerate(as_completed(futures), 1):
                         query_data = futures[future]
-                        self.log(f"\n[{i}/{len(queries)}] {query_data['query']}", "info")
+                        self.log(
+                            f"\n[{i}/{len(queries)}] {query_data['query']}", "info"
+                        )
 
                         try:
                             query_leads = future.result(timeout=120)
@@ -956,7 +1037,8 @@ class Discovery:
                         total_saved += saved
                         total_leads += len(query_leads)
                         self.log(
-                            f"  Found {len(query_leads)} leads, saved {saved}", "success"
+                            f"  Found {len(query_leads)} leads, saved {saved}",
+                            "success",
                         )
 
         self.log(f"\n{'=' * 60}")

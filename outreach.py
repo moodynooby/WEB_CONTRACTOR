@@ -35,12 +35,13 @@ class Outreach:
         repo: Optional[LeadRepository] = None,
         logger: Optional[Callable] = None,
         max_workers: int = 5,
-        llm_cooldown: float = 2.0,
+        llm_cooldown: float = 0.5,
     ):
         self.repo = repo or LeadRepository()
         self.ollama_url = "http://localhost:11434"
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
+        self.email_prompts = self._load_email_prompts()
         self.max_workers = max_workers
         self.llm_cooldown = llm_cooldown
         self._driver: Optional[webdriver.Chrome] = None
@@ -60,9 +61,23 @@ class Outreach:
         try:
             with open("config/audit_settings.json", "r") as f:
                 return json.load(f)
-        except Exception as e:
-            self.log(f"Error loading audit settings: {e}", "error")
-            return {"technical_checks": [], "llm_audit": {"enabled": False}}
+        except Exception:
+            return {
+                "technical_checks": [],
+                "llm_audit": {"enabled": False},
+                "visual_audit": {"enabled": False},
+            }
+
+    def _load_email_prompts(self) -> Dict:
+        """Load email prompts from config file"""
+        try:
+            with open("config/email_prompts.json", "r") as f:
+                return json.load(f)
+        except Exception:
+            return {
+                "cold_email": {"system_message": "", "prompt_template": ""},
+                "email_signature": {},
+            }
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
@@ -75,9 +90,11 @@ class Outreach:
         """Get or create reusable HTTP session"""
         if self._session is None:
             self._session = requests.Session()
-            self._session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
+            self._session.headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            )
         return self._session
 
     def _get_driver(self) -> Optional[webdriver.Chrome]:
@@ -130,6 +147,7 @@ class Outreach:
 
         This method is wrapped with cooldown to prevent overwhelming the API.
         """
+
         def _do_visual_audit() -> Optional[Dict]:
             prompt = config.get("prompt", "").format(business_name=business_name)
 
@@ -141,12 +159,14 @@ class Outreach:
                     response = self._get_session().post(
                         f"{self.ollama_url}/api/generate",
                         json={
-                            "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
+                            "model": config.get(
+                                "model", "richardyoung/smolvlm2-2.2b-instruct"
+                            ),
                             "prompt": prompt,
                             "images": [base64_image],
                             "stream": False,
                             "format": "json",
-                            "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
+                            "system": system_message,
                         },
                         timeout=60,
                     )
@@ -163,7 +183,7 @@ class Outreach:
                     elif response.status_code == 500:
                         # Server error - might be resource limit or temporary issue
                         if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
+                            delay = base_delay * (2**attempt)
                             self.log(
                                 f"Visual audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
                                 f"Retrying in {delay:.1f}s...",
@@ -178,12 +198,14 @@ class Outreach:
                                 "error",
                             )
                     else:
-                        self.log(f"Visual audit API failed: {response.status_code}", "error")
+                        self.log(
+                            f"Visual audit API failed: {response.status_code}", "error"
+                        )
                         # Don't retry on non-500 errors
                         break
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"Visual audit timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -191,7 +213,9 @@ class Outreach:
                         )
                         time.sleep(delay)
                     else:
-                        self.log("Visual audit timed out after all retry attempts", "error")
+                        self.log(
+                            "Visual audit timed out after all retry attempts", "error"
+                        )
                 except Exception as e:
                     self.log(f"Visual audit call failed: {e}", "error")
                     break
@@ -232,9 +256,7 @@ class Outreach:
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
         try:
-            response = self._get_session().get(
-                f"{self.ollama_url}/api/tags", timeout=5
-            )
+            response = self._get_session().get(f"{self.ollama_url}/api/tags", timeout=5)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -369,7 +391,10 @@ class Outreach:
 
                 elif check_type == "html_count":
                     count = len(soup.select(selector))
-                    if check.get("max_count") is not None and count > check["max_count"]:
+                    if (
+                        check.get("max_count") is not None
+                        and count > check["max_count"]
+                    ):
                         issues.append(
                             {
                                 "type": check["id"],
@@ -450,8 +475,23 @@ class Outreach:
                         )
                         score -= check["score_impact"]
 
+                elif check_type == "text_match":
+                    patterns = check.get("patterns", [])
+                    text = soup.get_text().lower()
+                    found = any(p.lower() in text for p in patterns)
+                    if not found:
+                        issues.append(
+                            {
+                                "type": check["id"],
+                                "severity": severity,
+                                "description": check["description"],
+                            }
+                        )
+                        score -= check["score_impact"]
+
             # Qualitative LLM Audit (Stage B.1)
             llm_config = self.audit_settings.get("llm_audit", {})
+            qual_score = 100
             if self.ollama_enabled and llm_config.get("enabled"):
                 # Extract text for LLM
                 for script in soup(["script", "style"]):
@@ -463,9 +503,6 @@ class Outreach:
                 )
                 if llm_result:
                     qual_score = llm_result.get("qualitative_score", 100)
-                    # Adjust main score based on qualitative score (weighted 30%)
-                    score = (score * 0.7) + (qual_score * 0.3)
-
                     for obs in llm_result.get("observations", []):
                         issues.append(
                             {
@@ -479,6 +516,7 @@ class Outreach:
 
             # Visual LLM Audit (Stage B.2)
             visual_config = self.audit_settings.get("visual_audit", {})
+            vis_score = 100
             if self.ollama_enabled and visual_config.get("enabled"):
                 self.log("  Capturing screenshot for visual audit...", "info")
                 base64_image = self._take_screenshot(url)
@@ -488,9 +526,6 @@ class Outreach:
                     )
                     if visual_result:
                         vis_score = visual_result.get("visual_score", 100)
-                        # Adjust main score based on visual score (weighted 20%)
-                        score = (score * 0.8) + (vis_score * 0.2)
-
                         for obs in visual_result.get("observations", []):
                             issues.append(
                                 {
@@ -504,6 +539,22 @@ class Outreach:
                         self.log(
                             f"  Visual audit complete (Score: {vis_score})", "success"
                         )
+
+            # Unified Weighted Scoring
+            weights = self.audit_settings.get(
+                "scoring_weights",
+                {"technical_score": 0.35, "content_score": 0.35, "visual_score": 0.30},
+            )
+
+            # Technical score is the base 'score' calculated from manual checks
+            tech_score = max(0, score)
+
+            final_score = (
+                (tech_score * weights.get("technical_score", 0.35))
+                + (qual_score * weights.get("content_score", 0.35))
+                + (vis_score * weights.get("visual_score", 0.30))
+            )
+            score = final_score
 
         except requests.exceptions.Timeout:
             issues.append(
@@ -524,8 +575,18 @@ class Outreach:
             )
             score = 30
 
-        # Qualification logic
-        qualified = score < 85 and score > 40 and len(issues) >= 2
+        # Formalized Qualification Logic (Imperfect Site Targeting)
+        rules = self.audit_settings.get("qualification_rules", {})
+        target_min = rules.get("target_score_min", 40)
+        target_max = rules.get("target_score_max", 84)
+        min_issues = rules.get("min_issues_required", 2)
+
+        qualified = (
+            score >= target_min
+            and score <= target_max
+            and len([i for i in issues if i["severity"] in ["warning", "critical"]])
+            >= min_issues
+        )
 
         return {
             "url": url,
@@ -542,8 +603,14 @@ class Outreach:
 
         This method is wrapped with cooldown to prevent overwhelming the API.
         """
+
         def _do_llm_audit() -> Optional[Dict]:
-            prompt = config.get("prompt", "").format(
+            prompt_template = config.get("prompt_template", "")
+            system_message = config.get(
+                "system_message",
+                "You are a professional website quality auditor. Output ONLY valid JSON.",
+            )
+            prompt = prompt_template.format(
                 business_name=business_name, content=content
             )
 
@@ -559,7 +626,7 @@ class Outreach:
                             "prompt": prompt,
                             "stream": False,
                             "format": "json",
-                            "system": "You are a professional website quality auditor. Output ONLY valid JSON with 'qualitative_score' and 'observations'.",
+                            "system": system_message,
                         },
                         timeout=30,
                     )
@@ -572,12 +639,15 @@ class Outreach:
                         try:
                             return json.loads(raw)
                         except json.JSONDecodeError as e:
-                            self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
+                            self.log(
+                                f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}",
+                                "error",
+                            )
                             return None
                     elif response.status_code == 500:
                         # Server error - might be resource limit or temporary issue
                         if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
+                            delay = base_delay * (2**attempt)
                             self.log(
                                 f"LLM audit API returned 500 (attempt {attempt + 1}/{max_retries}). "
                                 f"Retrying in {delay:.1f}s...",
@@ -600,7 +670,7 @@ class Outreach:
                         break
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"LLM audit timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -608,7 +678,9 @@ class Outreach:
                         )
                         time.sleep(delay)
                     else:
-                        self.log("LLM audit timed out after all retry attempts", "error")
+                        self.log(
+                            "LLM audit timed out after all retry attempts", "error"
+                        )
                 except Exception as e:
                     self.log(f"LLM audit call failed: {e}", "error")
                     break
@@ -625,19 +697,19 @@ class Outreach:
             return {"subject": subject, "body": body}
 
         def _do_refinement() -> Dict:
-            prompt = f"""Refine this cold email based on the following instructions.
+            prompt = f"""Refine this cold email based on instructions.
 
-        Instructions: {instructions}
+Instructions: {instructions}
 
-        Current Subject: {subject}
-        Current Body:
-        {body}
+Current Subject: {subject}
+Current Body:
+{body}
 
-        Return ONLY JSON:
-        {{
-        "subject": "refined subject line",
-        "body": "refined email body with proper line breaks"
-        }}"""
+Return ONLY JSON:
+{{
+"subject": "refined subject line",
+"body": "refined email body with proper line breaks"
+}}"""
 
             max_retries = 3
             base_delay = 2.0
@@ -669,14 +741,17 @@ class Outreach:
                                 f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}",
                                 "error",
                             )
-                            return {"subject": subject, "body": body}  # Return original, unchanged
+                            return {
+                                "subject": subject,
+                                "body": body,
+                            }  # Return original, unchanged
                         except Exception as e:
                             self.log(f"Error in email refinement parsing: {e}", "error")
                             return {"subject": subject, "body": body}
                     elif response.status_code == 500:
                         # Server error - might be resource limit or temporary issue
                         if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
+                            delay = base_delay * (2**attempt)
                             self.log(
                                 f"Email refinement API returned 500 (attempt {attempt + 1}/{max_retries}). "
                                 f"Retrying in {delay:.1f}s...",
@@ -691,11 +766,13 @@ class Outreach:
                                 "error",
                             )
                     else:
-                        self.log(f"Email refinement failed: {response.status_code}", "error")
+                        self.log(
+                            f"Email refinement failed: {response.status_code}", "error"
+                        )
                         break
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"Email refinement timeout (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -703,7 +780,10 @@ class Outreach:
                         )
                         time.sleep(delay)
                     else:
-                        self.log("Email refinement timed out after all retry attempts", "error")
+                        self.log(
+                            "Email refinement timed out after all retry attempts",
+                            "error",
+                        )
                 except Exception as e:
                     self.log(f"Error refining email: {e}", "error")
                     break
@@ -738,27 +818,16 @@ class Outreach:
         # Build prompt
         issue_summary = "\n".join([f"- {i['description']}" for i in sorted_issues[:6]])
 
-        prompt = f"""Generate a professional cold email for {business_name}.
-
-        Website Audit Findings:
-        {issue_summary}
-
-        Create a personalized outreach email that:
-        1. Shows you've reviewed their website (mention 1-2 specific visual or technical details).
-        2. Highlights 1-2 critical areas for improvement from the list above (especially visual updates, performance issues, bugs, or responsiveness).
-        3. Briefly explains how these issues might be affecting their business (e.g., losing mobile customers, slow loading scaring users).
-        4. Offers value and a soft call-to-action for a brief audit review call.
-        5. Keeps it professional, under 150 words, and avoids being pushy.
-        6. DO NOT include a signature or closing like "Best regards" - I will add that myself.
-
-        Return ONLY JSON:
-        {{
-        "subject": "brief subject line",
-        "body": "email body with proper line breaks"
-        }}"""
-
-        max_retries = 3
-        base_delay = 2.0
+        prompt_template = self.email_prompts.get("cold_email", {}).get(
+            "prompt_template", ""
+        )
+        system_message = self.email_prompts.get("cold_email", {}).get(
+            "system_message",
+            "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
+        )
+        prompt = prompt_template.format(
+            business_name=business_name, issue_summary=issue_summary
+        )
 
         for attempt in range(max_retries):
             try:
@@ -769,7 +838,7 @@ class Outreach:
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
-                        "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
+                        "system": system_message,
                     },
                     timeout=60,
                 )
@@ -789,11 +858,28 @@ class Outreach:
                         if "Best regards" in body or "Manas Doshi" in body:
                             # Simple cleanup if LLM ignored instruction
                             body = (
-                                body.split("Best regards")[0].split("Sincerely")[0].strip()
+                                body.split("Best regards")[0]
+                                .split("Sincerely")[0]
+                                .strip()
                             )
 
-                        # Append consistent signature
-                        signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
+                        # Append signature from email_prompts config
+                        signature = self.email_prompts.get("email_signature", {}).get(
+                            "template",
+                            "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services",
+                        )
+                        if "{name}" in signature or "{company}" in signature:
+                            signature = signature.format(
+                                name=self.email_prompts.get("email_signature", {}).get(
+                                    "name", "Manas Doshi"
+                                ),
+                                company=self.email_prompts.get(
+                                    "email_signature", {}
+                                ).get("company", "Future Forwards"),
+                                website=self.email_prompts.get(
+                                    "email_signature", {}
+                                ).get("website", "https://man27.netlify.app/services"),
+                            )
                         final_body = body.strip() + signature
 
                         return {
@@ -803,12 +889,14 @@ class Outreach:
                             "body": final_body,
                         }
                     except json.JSONDecodeError as e:
-                        self.log(f"Failed to parse email JSON: {e}\nRaw: {raw}", "error")
+                        self.log(
+                            f"Failed to parse email JSON: {e}\nRaw: {raw}", "error"
+                        )
                         raise
                 elif response.status_code == 500:
                     # Server error - might be resource limit or temporary issue
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         self.log(
                             f"Email generation API returned 500 (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {delay:.1f}s...",
@@ -831,7 +919,7 @@ class Outreach:
                     raise Exception(f"API failed with status {response.status_code}")
             except requests.exceptions.Timeout:
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
+                    delay = base_delay * (2**attempt)
                     self.log(
                         f"Email generation timeout (attempt {attempt + 1}/{max_retries}). "
                         f"Retrying in {delay:.1f}s...",
@@ -839,7 +927,9 @@ class Outreach:
                     )
                     time.sleep(delay)
                 else:
-                    self.log("Email generation timed out after all retry attempts", "error")
+                    self.log(
+                        "Email generation timed out after all retry attempts", "error"
+                    )
                     raise Exception("API timeout after retries")
             except Exception as e:
                 self.log(f"Error generating email: {e}", "error")
@@ -858,7 +948,7 @@ class Outreach:
 
         # Use a simple cache dict on the instance
         cache_key = (business_name, issues_key, bucket)
-        if not hasattr(self, '_email_cache'):
+        if not hasattr(self, "_email_cache"):
             self._email_cache: Dict[Tuple[str, str, str], Dict] = {}
 
         if cache_key in self._email_cache:
@@ -896,7 +986,9 @@ class Outreach:
             error_result = {
                 "url": lead.get("website", ""),
                 "score": 0,
-                "issues": [{"type": "error", "severity": "critical", "description": str(e)}],
+                "issues": [
+                    {"type": "error", "severity": "critical", "description": str(e)}
+                ],
                 "qualified": 0,
                 "discovered_info": {},
             }
@@ -939,11 +1031,13 @@ class Outreach:
                             self.repo.update_lead_contact_info(lead_id, info)
 
                         # Queue for batch save
-                        audit_batch.append({
-                            "lead_id": lead_id,
-                            "data": audit_result,
-                            "duration": duration,
-                        })
+                        audit_batch.append(
+                            {
+                                "lead_id": lead_id,
+                                "data": audit_result,
+                                "duration": duration,
+                            }
+                        )
 
                         audited += 1
                         if audit_result["qualified"]:
@@ -977,11 +1071,13 @@ class Outreach:
                             )
 
                     # Queue for batch save
-                    audit_batch.append({
-                        "lead_id": lead_id,
-                        "data": audit_result,
-                        "duration": duration,
-                    })
+                    audit_batch.append(
+                        {
+                            "lead_id": lead_id,
+                            "data": audit_result,
+                            "duration": duration,
+                        }
+                    )
 
                     audited += 1
                     if audit_result["qualified"]:
@@ -1004,7 +1100,9 @@ class Outreach:
             self._quit_driver()
 
         self.log(f"\n{'=' * 60}")
-        self.log(f"Auditing Complete: {audited} audited, {qualified} qualified", "success")
+        self.log(
+            f"Auditing Complete: {audited} audited, {qualified} qualified", "success"
+        )
         self.log(f"{'=' * 60}\n")
 
         return {"audited": audited, "qualified": qualified}
@@ -1028,7 +1126,9 @@ class Outreach:
                 "duration": duration,
             }
         except Exception as e:
-            self.log(f"  Error generating email for {lead['business_name']}: {e}", "error")
+            self.log(
+                f"  Error generating email for {lead['business_name']}: {e}", "error"
+            )
             return None
 
     def generate_emails(
@@ -1081,7 +1181,10 @@ class Outreach:
                 if result:
                     email_batch.append(result)
                     generated += 1
-                    self.log(f"  Email generated (Time: {result['duration']:.1f}s)", "success")
+                    self.log(
+                        f"  Email generated (Time: {result['duration']:.1f}s)",
+                        "success",
+                    )
 
         # Batch save all emails
         if email_batch:

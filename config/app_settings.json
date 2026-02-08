@@ -1,0 +1,62 @@
+{
+  "geographic_focus": {
+    "tier_1_metros": {
+      "tier": "Tier-1",
+      "cities": ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"],
+      "priority": 1
+    },
+    "tier_2_cities": {
+      "tier": "Tier-2",
+      "cities": ["Ahmedabad", "Jaipur", "Lucknow", "Indore", "Surat", "Nagpur", "Bhopal"],
+      "priority": 2
+    },
+    "gujarat_state": {
+      "tier": "State-wide",
+      "cities": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Gandhinagar"],
+      "priority": 3
+    },
+    "business_districts": {
+      "tier": "Business Districts",
+      "cities": ["Bandra-Mumbai", "Connaught Place-Delhi", "MG Road-Bangalore", "Banjara Hills-Hyderabad"],
+      "priority": 1
+    },
+    "expanded": {
+      "cities": ["Chennai", "Bengaluru", "Mumbai", "Bangalore"]
+    }
+  },
+  "discovery_sources": {
+    "sources": {
+      "google_maps": {
+        "enabled": true,
+        "priority": 1,
+        "max_results": 2,
+        "regions": ["global"],
+        "description": "Google Maps business listings"
+      },
+      "justdial": {
+        "enabled": true,
+        "priority": 2,
+        "max_results": 3,
+        "regions": ["india"],
+        "description": "Indian business directory"
+      },
+      "indiamart": {
+        "enabled": true,
+        "priority": 3,
+        "max_results": 3,
+        "regions": ["india", "b2b"],
+        "description": "B2B marketplace for India"
+      },
+      "yelp": {
+        "enabled": true,
+        "priority": 2,
+        "max_results": 3,
+        "regions": ["international"],
+        "description": "International business reviews"
+      }
+    },
+    "fallback_strategy": "priority",
+    "max_total_results": 3,
+    "test_results": {}
+  }
+}

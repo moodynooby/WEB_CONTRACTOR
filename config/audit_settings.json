@@ -1,4 +1,10 @@
 {
+  "audit_metadata": {
+    "version": "2.0",
+    "description": "Website audit configuration with technical, content, and visual checks",
+    "default_qualification_threshold": 60,
+    "critical_failure_threshold": 25
+  },
   "technical_checks": [
     {
       "id": "missing_title",
@@ -8,7 +14,8 @@
       "min_length": 10,
       "score_impact": 15,
       "severity": "critical",
-      "description": "Page title missing or too short"
+      "description": "Page title missing or too short",
+      "remediation": "Add a descriptive page title (10-60 characters) that includes target keywords"
     },
     {
       "id": "missing_meta",
@@ -17,7 +24,8 @@
       "selector": "meta[name='description']",
       "score_impact": 10,
       "severity": "warning",
-      "description": "Meta description missing"
+      "description": "Meta description missing",
+      "remediation": "Add a compelling meta description (150-160 characters) that summarizes page content"
     },
     {
       "id": "no_viewport",
@@ -26,7 +34,8 @@
       "selector": "meta[name='viewport']",
       "score_impact": 20,
       "severity": "critical",
-      "description": "Not mobile-friendly"
+      "description": "Not mobile-friendly - missing viewport meta tag",
+      "remediation": "Add <meta name='viewport' content='width=device-width, initial-scale=1.0'>"
     },
     {
       "id": "no_h1",
@@ -35,7 +44,8 @@
       "selector": "h1",
       "score_impact": 10,
       "severity": "warning",
-      "description": "Missing H1 heading"
+      "description": "Missing H1 heading - poor SEO and accessibility",
+      "remediation": "Add a single, descriptive H1 tag as the main page heading"
     },
     {
       "id": "multiple_h1",
@@ -45,7 +55,8 @@
       "max_count": 1,
       "score_impact": 5,
       "severity": "info",
-      "description": "Multiple H1 tags"
+      "description": "Multiple H1 tags found - confuses search engines",
+      "remediation": "Keep only one H1 per page; use H2-H6 for subheadings"
     },
     {
       "id": "missing_alt_text",
@@ -54,16 +65,18 @@
       "threshold": 0.3,
       "score_impact": 10,
       "severity": "warning",
-      "description": "Too many images without alt text"
+      "description": "Too many images without alt text - impacts SEO and accessibility",
+      "remediation": "Add descriptive alt text to all images (at least 30% coverage recommended)"
     },
     {
       "id": "no_analytics",
-      "name": "Analytics",
+      "name": "Analytics Tracking",
       "type": "script_match",
-      "patterns": ["google-analytics", "gtag"],
+      "patterns": ["google-analytics", "gtag", "analytics.google.com"],
       "score_impact": 5,
       "severity": "info",
-      "description": "No Google Analytics detected"
+      "description": "No Google Analytics or tracking detected",
+      "remediation": "Implement Google Analytics or similar tool to track visitor behavior"
     },
     {
       "id": "no_ssl",
@@ -72,59 +85,131 @@
       "protocol": "https://",
       "score_impact": 25,
       "severity": "critical",
-      "description": "Website not using HTTPS"
+      "description": "Website not using HTTPS - security risk and SEO penalty",
+      "remediation": "Install SSL certificate and redirect all HTTP traffic to HTTPS"
     },
     {
       "id": "slow_load",
-      "name": "Load Time",
+      "name": "Page Load Time",
       "type": "load_time",
       "threshold": 3.0,
       "score_impact": 10,
       "severity": "warning",
-      "description": "Slow page load time"
+      "description": "Slow page load time - impacts user experience and rankings",
+      "remediation": "Optimize images, leverage caching, minimize CSS/JS, consider CDN"
     },
     {
       "id": "missing_contact_page",
-      "name": "Contact Page",
+      "name": "Contact Information",
       "type": "link_match",
-      "patterns": ["contact", "get-in-touch"],
+      "patterns": ["contact", "get-in-touch", "contact-us", "reach-us"],
       "score_impact": 10,
       "severity": "warning",
-      "description": "No contact page found"
+      "description": "No contact page or contact information found",
+      "remediation": "Add a dedicated contact page with email, phone, or contact form"
     },
     {
       "id": "no_social_media",
-      "name": "Social Media",
+      "name": "Social Media Links",
       "type": "link_match",
-      "patterns": ["facebook.com", "instagram.com", "linkedin.com", "twitter.com"],
+      "patterns": ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com"],
       "score_impact": 5,
       "severity": "info",
-      "description": "No social media links found"
+      "description": "No social media links found",
+      "remediation": "Add links to active social media profiles to build credibility"
+    },
+    {
+      "id": "no_cta",
+      "name": "Call-to-Action",
+      "type": "text_match",
+      "patterns": ["contact us", "get started", "book now", "learn more", "request quote", "schedule"],
+      "score_impact": 8,
+      "severity": "warning",
+      "description": "No clear call-to-action elements",
+      "remediation": "Add prominent, actionable CTAs throughout the site (buttons, forms)"
     }
   ],
   "llm_audit": {
     "enabled": true,
     "model": "qwen3:1.7b",
-    "prompt": "Analyze the following website content for '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Performance hints (excessive scripts, heavy text)\n5. UX Bugs or logical flaws in messaging\n6. Trust signals (testimonials, case studies)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type' (e.g., 'perf', 'bug', 'ux'), 'severity' (critical/warning/info), and 'description')."
+    "system_message": "You are a professional website quality auditor with expertise in conversion optimization, UX, and digital marketing. Analyze websites critically and provide actionable insights. Output ONLY valid JSON.",
+    "prompt_template": "Analyze the website content and structure for '{business_name}'.\n\nContent Preview:\n{content}\n\nEvaluate based on:\n1. **Value Proposition**: Is the core offering clear within 3 seconds?\n2. **Call-to-Action Effectiveness**: Are CTAs visible, compelling, and action-oriented?\n3. **Professional Tone**: Is the copy well-written, grammatically correct, and professional?\n4. **Trust Signals**: Are there testimonials, credentials, guarantees, or case studies?\n5. **Information Architecture**: Is content well-organized and easy to find?\n6. **Conversion Optimization**: Does the site guide visitors toward desired actions?\n\nReturn ONLY valid JSON:\n{{\n  \"qualitative_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"value_proposition|cta|tone|trust|ux|conversion\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"impact\": \"high|medium|low\"\n    }}\n  ]\n}}"
   },
   "visual_audit": {
     "enabled": true,
-    "model": "ahmadwaqar/smolvlm2-agentic-gui",
-    "prompt": "Analyze this website screenshot for '{business_name}' as a professional GUI auditor.\n\nUse your GUI grounding and agentic reasoning capabilities to evaluate:\n\n1. **UI Element Localization & Actionability**: Identify all major interactive elements (buttons, forms, navigation, CTAs). Are they discoverable, properly sized for interaction, and clearly labeled? Assess visual prominence and clickability.\n\n2. **User Journey & Interaction Flow**: Map the primary user journeys from entry to conversion/contact. Identify the main CTA and secondary actions. Are interaction steps logical and unobstructed? Where would users drop off?\n\n3. **Mobile Responsiveness & Touch Targets**: Evaluate how UI elements reflow on mobile. Assess button/link sizes for accurate touch targets (minimum 44x44px), text readability, spacing, and layout adaptation.\n\n4. **Visual Hierarchy & Perception**: Assess color contrast, typography scale, whitespace, visual balance, and emphasis. Does the design guide attention to key actions? Is the value proposition immediately clear?\n\n5. **Performance & Perception Issues**: Identify visual clutter, misaligned elements, broken layouts, excessive animations, poor contrast, and anything degrading perceived performance or professionalism.\n\n6. **Trust & Conversion Signals**: Look for credibility elements - testimonials, trust badges, clear contact info, professional imagery, and calls-to-action effectiveness.\n\nReturn JSON only with 'visual_score' (0-100), 'interaction_quality_score' (0-100), and 'observations' array (each with 'type' [e.g., 'ui_element', 'interaction', 'responsive', 'visual', 'hierarchy', 'performance', 'trust'], 'severity' ['critical'/'warning'/'info'], 'description', and 'location' describing where on the page)."
+    "model": "richardyoung/smolvlm2-2.2b-instruct",
+    "system_message": "You are an expert web design and UX auditor. Analyze website screenshots for design quality, usability, and conversion potential. Output ONLY valid JSON with structured observations.",
+    "prompt_template": "Analyze the website screenshot for '{business_name}'.\n\nEvaluate the following aspects:\n\n1. **Visual Design & Branding**\n   - Color scheme consistency and appeal\n   - Typography: hierarchy, readability\n   - Whitespace and layout balance\n   - Brand identity coherence\n\n2. **User Interface Elements**\n   - Button clarity and prominence\n   - Navigation clarity and accessibility\n   - Form fields and input clarity\n   - Icon usage and appropriateness\n\n3. **Mobile Responsiveness**\n   - Touch target sizes\n   - Layout adaptation for mobile\n   - Text readability on small screens\n\n4. **Conversion & UX**\n   - Visual hierarchy guides user attention\n   - CTAs are prominent and compelling\n   - Visual flow toward conversion goals\n   - Clutter or distraction elements\n\n5. **Trust & Credibility**\n   - Professional appearance\n   - Trust signals visibility (testimonials, badges, logos)\n   - Outdated or broken elements\n   - Contact information prominence\n\nReturn ONLY valid JSON:\n{{\n  \"visual_score\": <0-100>,\n  \"design_quality\": <0-100>,\n  \"usability_score\": <0-100>,\n  \"conversion_potential\": <0-100>,\n  \"observations\": [\n    {{\n      \"category\": \"design|ui|mobile|conversion|trust|performance\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific observation\",\n      \"location\": \"header|hero|nav|content|footer|sidebar\",\n      \"recommendation\": \"actionable improvement\"\n    }}\n  ]\n}}"
+  },
+  "scoring_weights": {
+    "technical_score": 0.35,
+    "content_score": 0.35,
+    "visual_score": 0.30
+  },
+  "qualification_rules": {
+    "target_score_min": 0,
+    "target_score_max": 84,
+    "min_issues_required": 3,
+    "weighted_calculation": true,
+    "bonus_points": {
+      "has_contact_info": 5,
+      "has_social_media": 3,
+      "has_cta": 5,
+      "loads_fast": 3
+    }
   },
   "bucket_overrides": {
     "Interior Designers": {
-        "technical_checks": [
-            {
-                "id": "missing_portfolio",
-                "name": "Portfolio",
-                "type": "link_match",
-                "patterns": ["portfolio", "projects", "gallery"],
-                "score_impact": 20,
-                "severity": "warning",
-                "description": "No portfolio found"
-            }
-        ]
+      "additional_checks": [
+        {
+          "id": "missing_portfolio",
+          "name": "Portfolio/Gallery",
+          "type": "link_match",
+          "patterns": ["portfolio", "projects", "gallery", "work", "design"],
+          "score_impact": 20,
+          "severity": "critical",
+          "description": "No portfolio or project gallery found - critical for design businesses",
+          "remediation": "Create a dedicated portfolio section showcasing completed design projects"
+        },
+        {
+          "id": "no_before_after",
+          "name": "Before/After Examples",
+          "type": "text_match",
+          "patterns": ["before", "after", "transformation", "makeover"],
+          "score_impact": 10,
+          "severity": "warning",
+          "description": "No before/after or transformation examples",
+          "remediation": "Add before/after photos and transformation showcases"
+        }
+      ]
+    },
+    "Developers": {
+      "additional_checks": [
+        {
+          "id": "github_presence",
+          "name": "GitHub Profile",
+          "type": "link_match",
+          "patterns": ["github.com"],
+          "score_impact": 10,
+          "severity": "info",
+          "description": "No GitHub link found",
+          "remediation": "Link to GitHub profile to showcase coding skills"
+        }
+      ]
+    },
+    "Marketing Agencies": {
+      "additional_checks": [
+        {
+          "id": "case_studies",
+          "name": "Case Studies",
+          "type": "link_match",
+          "patterns": ["case study", "case studies", "client success", "results"],
+          "score_impact": 15,
+          "severity": "warning",
+          "description": "No case studies or client success stories",
+          "remediation": "Publish detailed case studies with metrics and client results"
+        }
+      ]
     }
   }
 }

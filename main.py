@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
@@ -19,11 +18,8 @@ from textual.widgets import (
     Label,
     RichLog,
     Static,
-    TabbedContent,
-    TabPane,
-    TextArea,
 )
-from textual import work, on
+from textual import work
 
 from discovery import Discovery
 from email_sender import EmailSender
@@ -377,30 +373,6 @@ class WebContractorTUI(App):
         background: $surface;
     }
 
-    #stats-container, #perf-container {
-        height: 7;
-        border: solid $primary;
-        margin: 1;
-    }
-
-    .stat-box {
-        width: 1fr;
-        height: 5;
-        border: solid $accent;
-        margin: 0 1;
-        padding: 1;
-        content-align: center middle;
-    }
-
-    .perf-box {
-        border: dashed $accent;
-    }
-
-    .stat-value {
-        text-style: bold;
-        color: $success;
-    }
-
     #controls {
         height: 5;
         border: solid $primary;
@@ -434,18 +406,6 @@ class WebContractorTUI(App):
         margin: 1;
         text-style: italic;
         color: $accent;
-    }
-
-    /* Settings Tab CSS */
-    #settings-container {
-        padding: 1;
-    }
-
-    .settings-section {
-        border: tall $primary;
-        margin-bottom: 1;
-        padding: 1;
-        height: auto;
     }
 
     /* Review Screen CSS */
@@ -558,9 +518,7 @@ class WebContractorTUI(App):
         self.discovery = Discovery(
             repo=self.repo, logger=thread_safe_log, max_workers=5
         )
-        self.outreach = Outreach(
-            repo=self.repo, logger=thread_safe_log, max_workers=5
-        )
+        self.outreach = Outreach(repo=self.repo, logger=thread_safe_log, max_workers=5)
         self.email_sender = EmailSender(
             repo=self.repo, logger=thread_safe_log, pool_size=3
         )
@@ -569,72 +527,10 @@ class WebContractorTUI(App):
         """Create child widgets"""
         yield Header()
 
-        with TabbedContent(id="main-tabs"):
-            with TabPane("Dashboard", id="tab-dashboard"):
-                yield Label("System Status: Idle", id="status-label")
+        yield Label("System Status: Idle", id="status-label")
 
-                with Container(id="log-container"):
-                    yield RichLog(id="activity-log", markup=True)
-
-            with TabPane("Stats", id="tab-stats"):
-                with Container(id="stats-container"):
-                    with Horizontal():
-                        yield Static(
-                            "", id="stat-leads", classes="stat-box", markup=True
-                        )
-                        yield Static(
-                            "", id="stat-qualified", classes="stat-box", markup=True
-                        )
-                        yield Static(
-                            "", id="stat-review", classes="stat-box", markup=True
-                        )
-                        yield Static(
-                            "", id="stat-pending", classes="stat-box", markup=True
-                        )
-                        yield Static(
-                            "", id="stat-emails", classes="stat-box", markup=True
-                        )
-
-                with Container(id="perf-container"):
-                    with Horizontal():
-                        yield Static(
-                            "",
-                            id="stat-audit-perf",
-                            classes="stat-box perf-box",
-                            markup=True,
-                        )
-                        yield Static(
-                            "",
-                            id="stat-gen-perf",
-                            classes="stat-box perf-box",
-                            markup=True,
-                        )
-                        yield Static(
-                            "",
-                            id="stat-qual-perf",
-                            classes="stat-box perf-box",
-                            markup=True,
-                        )
-                        yield Static(
-                            "",
-                            id="stat-reply-perf",
-                            classes="stat-box perf-box",
-                            markup=True,
-                        )
-
-            with TabPane("Settings", id="tab-settings"):
-                with Vertical(id="settings-container"):
-                    with Vertical(classes="settings-section"):
-                        yield Label("[b]Geographic Focus[/b]")
-                        yield Label("Current cities (JSON format):")
-                        geo_text_area = TextArea(id="setting-geo-focus")
-                        geo_text_area.text = ""
-                        yield geo_text_area
-                        yield Button(
-                            "Save Geographic Focus",
-                            variant="primary",
-                            id="save-geo-btn",
-                        )
+        with Container(id="log-container"):
+            yield RichLog(id="activity-log", markup=True)
 
         yield Footer()
 
@@ -642,19 +538,11 @@ class WebContractorTUI(App):
         """Initialize UI on mount"""
         self.title = "Web Contractor"
         self.sub_title = "Lead Discovery & Outreach Automation"
-        self.refresh_stats()
-        self.refresh_settings()
         self.write_log("Web Contractor initialized", "success")
         self.write_log(
             "Press [d] Discovery, [a] Audit, [g] Generate, [v] Review, [s] Send, [q] Quit",
             "info",
         )
-
-    def refresh_settings(self) -> None:
-        """Load settings into UI"""
-        geo_focus = self.repo.get_config("geographic_focus") or {}
-        geo_text = json.dumps(geo_focus, indent=2)
-        self.query_one("#setting-geo-focus", TextArea).text = geo_text
 
     def write_log(self, message: str, style: str = ""):
         """Write to activity log"""
@@ -667,59 +555,6 @@ class WebContractorTUI(App):
             log_widget.write(f"[cyan][/cyan] {message}")
         else:
             log_widget.write(message)
-
-    @on(TabbedContent.TabActivated)
-    def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Refresh stats when switching to the Stats tab"""
-        if event.pane.id == "tab-stats":
-            self.refresh_stats()
-
-    def refresh_stats(self) -> None:
-        """Update statistics display with consolidated data and performance metrics"""
-        # Only refresh if the Stats tab is active
-        try:
-            tabbed = self.query_one(TabbedContent)
-            if tabbed.active != "tab-stats":
-                return
-        except NoMatches:
-            return  # Widget not ready yet
-        except Exception as e:
-            # Stats refresh is non-critical, but good to know if it fails unexpectedly
-            self.write_log(f"Error checking tab status: {e}", "error")
-            return
-
-        stats = self.repo.get_stats()
-
-        # Core Metrics
-        self.query_one("#stat-leads").update(
-            f"[b]Total Leads[/b]\n[green]{stats['total_leads']}[/green]"
-        )
-        self.query_one("#stat-qualified").update(
-            f"[b]Qualified[/b]\n[yellow]{stats['qualified_leads']}[/yellow]"
-        )
-        self.query_one("#stat-review").update(
-            f"[b]Needs Review[/b]\n[orange3]{stats['emails_review']}[/orange3]"
-        )
-        self.query_one("#stat-pending").update(
-            f"[b]Approved[/b]\n[magenta]{stats['emails_pending']}[/magenta]"
-        )
-        self.query_one("#stat-emails").update(
-            f"[b]Sent[/b]\n[cyan]{stats['emails_sent']}[/cyan]"
-        )
-
-        # Performance Metrics
-        self.query_one("#stat-audit-perf").update(
-            f"[b]Avg Audit[/b]\n[cyan]{stats['avg_audit_duration']:.1f}s[/cyan]"
-        )
-        self.query_one("#stat-gen-perf").update(
-            f"[b]Avg Gen[/b]\n[cyan]{stats['avg_gen_duration']:.1f}s[/cyan]"
-        )
-        self.query_one("#stat-qual-perf").update(
-            f"[b]Qual Rate[/b]\n[yellow]{stats['qualification_rate']:.1f}%[/yellow]"
-        )
-        self.query_one("#stat-reply-perf").update(
-            f"[b]Reply Rate[/b]\n[green]{stats['reply_rate']:.1f}%[/green]"
-        )
 
     def update_status(self, status: str = "Idle"):
         """Update status label"""
@@ -737,7 +572,9 @@ class WebContractorTUI(App):
         except Exception:
             pass
 
-    def _email_gen_progress_callback(self, current: int, total: int, business_name: str):
+    def _email_gen_progress_callback(
+        self, current: int, total: int, business_name: str
+    ):
         """Thread-safe callback for email generation progress updates"""
         try:
             self.call_from_thread(
@@ -747,26 +584,6 @@ class WebContractorTUI(App):
             )
         except Exception:
             pass
-
-    @on(Button.Pressed, "#save-geo-btn")
-    def save_geographic_focus(self) -> None:
-        """Save geographic focus from textarea"""
-        text = self.query_one("#setting-geo-focus", TextArea).text
-        try:
-            geo_focus = json.loads(text)
-            self.repo.save_config("geographic_focus", geo_focus)
-            self.notify("Geographic focus saved!")
-            self.write_log("Geographic focus updated", "success")
-        except Exception as e:
-            self.notify(f"Invalid JSON: {e}", severity="error")
-
-    @on(Button.Pressed, "#refresh-all-btn")
-    def action_refresh_all(self) -> None:
-        """Refresh statistics and settings"""
-        self.refresh_stats()
-        self.refresh_settings()
-        self.write_log("System data refreshed", "info")
-        self.notify("All data refreshed")
 
     @work(exclusive=True, thread=True)
     def action_expand_markets(self) -> None:
@@ -799,12 +616,9 @@ class WebContractorTUI(App):
             )
         finally:
             self.call_from_thread(self.update_status, "Idle")
-            self.call_from_thread(self.refresh_stats)
 
     def show_market_review(self, suggestions: List[Dict]):
-        self.push_screen(
-            MarketReviewScreen(suggestions, self.repo), lambda _: self.refresh_stats()
-        )
+        self.push_screen(MarketReviewScreen(suggestions, self.repo))
 
     @work(exclusive=True, thread=True)
     def action_run_discovery(self) -> None:
@@ -817,7 +631,6 @@ class WebContractorTUI(App):
             self.call_from_thread(self.write_log, f"Discovery failed: {e}", "error")
         finally:
             self.call_from_thread(self.update_status, "Idle")
-            self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_run_audit(self) -> None:
@@ -834,7 +647,6 @@ class WebContractorTUI(App):
             self.call_from_thread(self.write_log, f"Audit failed: {e}", "error")
         finally:
             self.call_from_thread(self.update_status, "Idle")
-            self.call_from_thread(self.refresh_stats)
 
     @work(exclusive=True, thread=True)
     def action_generate_emails(self) -> None:
@@ -853,11 +665,10 @@ class WebContractorTUI(App):
             )
         finally:
             self.call_from_thread(self.update_status, "Idle")
-            self.call_from_thread(self.refresh_stats)
 
     def action_review_emails(self) -> None:
         """Open email review screen"""
-        self.push_screen(ReviewScreen(self.repo), lambda _: self.refresh_stats())
+        self.push_screen(ReviewScreen(self.repo))
 
 
 if __name__ == "__main__":

@@ -327,10 +327,14 @@ class LeadRepository:
                     result: Dict = json.loads(row[0])
                     return result
                 except json.JSONDecodeError as e:
-                    self.log(f"Invalid JSON in config value for key '{key}': {e}", "error")
+                    self.log(
+                        f"Invalid JSON in config value for key '{key}': {e}", "error"
+                    )
                     return None
                 except Exception as e:
-                    self.log(f"Unexpected error loading config for key '{key}': {e}", "error")
+                    self.log(
+                        f"Unexpected error loading config for key '{key}': {e}", "error"
+                    )
                     return None
         return None
 
@@ -476,7 +480,9 @@ class LeadRepository:
 
         return leads
 
-    def save_audit(self, lead_id: int, audit_data: Dict, duration: Optional[float] = None) -> None:
+    def save_audit(
+        self, lead_id: int, audit_data: Dict, duration: Optional[float] = None
+    ) -> None:
         """Save audit results with normalized issues and duration"""
         with self.transaction() as conn:
             cursor = conn.cursor()
@@ -569,7 +575,9 @@ class LeadRepository:
                         )
 
                     # Update lead status
-                    new_status = "qualified" if audit_data.get("qualified") else "unqualified"
+                    new_status = (
+                        "qualified" if audit_data.get("qualified") else "unqualified"
+                    )
                     cursor.execute(
                         "UPDATE leads SET status = ? WHERE id = ?",
                         (new_status, lead_id),
@@ -616,7 +624,9 @@ class LeadRepository:
 
         return leads
 
-    def stream_qualified_leads(self, batch_size: int = 100) -> Generator[Dict, None, None]:
+    def stream_qualified_leads(
+        self, batch_size: int = 100
+    ) -> Generator[Dict, None, None]:
         """Stream qualified leads for memory-efficient processing"""
         with self.connection() as conn:
             cursor = conn.cursor()
@@ -814,13 +824,16 @@ class LeadRepository:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM email_campaigns WHERE id = ?", (campaign_id,))
 
-    def mark_email_sent(self, campaign_id: int, success: bool, error: Optional[str] = None) -> None:
+    def mark_email_sent(
+        self, campaign_id: int, success: bool, error: Optional[str] = None
+    ) -> None:
         """Mark email as sent or failed with retry logic"""
         with self.transaction() as conn:
             cursor = conn.cursor()
 
             if success:
                 from datetime import datetime
+
                 now = datetime.now().isoformat()
                 cursor.execute(
                     """
@@ -875,202 +888,6 @@ class LeadRepository:
                 """,
                     (campaign_id,),
                 )
-
-    def get_stats(self) -> Dict:
-        """Get overall statistics in a single consolidated query"""
-        query = """
-        SELECT
-            (SELECT COUNT(*) FROM leads) as total_leads,
-            (SELECT COUNT(*) FROM leads WHERE status = 'qualified') as qualified_leads,
-            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'sent') as emails_sent,
-            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'pending') as emails_pending,
-            (SELECT COUNT(*) FROM email_campaigns WHERE status = 'needs_review') as emails_review,
-            (SELECT COUNT(*) FROM email_campaigns WHERE opened_at IS NOT NULL) as emails_opened,
-            (SELECT COUNT(*) FROM email_campaigns WHERE clicked_at IS NOT NULL) as emails_clicked,
-            (SELECT COUNT(*) FROM email_campaigns WHERE replied_at IS NOT NULL) as emails_replied,
-            (SELECT COUNT(*) FROM audits) as total_audited,
-            (SELECT AVG(duration) FROM audits WHERE duration IS NOT NULL) as avg_audit_duration,
-            (SELECT AVG(duration) FROM email_campaigns WHERE duration IS NOT NULL) as avg_gen_duration,
-            (SELECT AVG(score) FROM audits) as avg_audit_score
-        """
-        with self.connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query)
-            row = cursor.fetchone()
-
-            # Map row to dictionary
-            stats = {
-                "total_leads": row[0] or 0,
-                "qualified_leads": row[1] or 0,
-                "emails_sent": row[2] or 0,
-                "emails_pending": row[3] or 0,
-                "emails_review": row[4] or 0,
-                "emails_opened": row[5] or 0,
-                "emails_clicked": row[6] or 0,
-                "emails_replied": row[7] or 0,
-                "total_audited": row[8] or 0,
-                "avg_audit_duration": row[9] or 0.0,
-                "avg_gen_duration": row[10] or 0.0,
-                "avg_audit_score": row[11] or 0.0,
-            }
-
-            # Calculate derived performance metrics
-            stats["qualification_rate"] = (
-                (stats["qualified_leads"] / stats["total_audited"] * 100)
-                if stats["total_audited"] > 0
-                else 0
-            )
-            stats["reply_rate"] = (
-                (stats["emails_replied"] / stats["emails_sent"] * 100)
-                if stats["emails_sent"] > 0
-                else 0
-            )
-
-            return stats
-
-    def consolidate_database(self) -> Dict:
-        """Clean up and optimize database"""
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-
-            # 1. Remove leads with absolutely no contact info
-            cursor.execute("""
-                DELETE FROM leads
-                WHERE (website IS NULL OR website = '')
-                AND (phone IS NULL OR phone = '')
-                AND (email IS NULL OR email = '')
-            """)
-            deleted_count = cursor.rowcount
-
-            # 2. Reset daily email counters for new day
-            cursor.execute("""
-                UPDATE buckets
-                SET daily_email_count = 0, last_reset_date = CURRENT_DATE
-                WHERE last_reset_date < CURRENT_DATE
-            """)
-            reset_count = cursor.rowcount
-
-            # 3. Retry failed emails that are ready
-            cursor.execute("""
-                UPDATE email_campaigns
-                SET status = 'pending'
-                WHERE status = 'failed'
-                AND next_retry_at <= CURRENT_TIMESTAMP
-                AND retry_count < max_retries
-            """)
-            retry_count = cursor.rowcount
-
-            # 4. Optimize database
-            cursor.execute("VACUUM")
-
-        return {
-            "deleted_empty_leads": deleted_count,
-            "reset_daily_counters": reset_count,
-            "emails_queued_for_retry": retry_count,
-            "status": "optimized",
-        }
-
-    # New methods for email engagement tracking
-    def track_email_opened(self, campaign_id: int) -> None:
-        """Track when email is opened"""
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE email_campaigns
-                SET opened_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND opened_at IS NULL
-            """,
-                (campaign_id,),
-            )
-
-    def track_email_clicked(self, campaign_id: int) -> None:
-        """Track when email link is clicked"""
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE email_campaigns
-                SET clicked_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND clicked_at IS NULL
-            """,
-                (campaign_id,),
-            )
-
-    def track_email_replied(self, campaign_id: int) -> None:
-        """Track when prospect replies to email"""
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE email_campaigns
-                SET replied_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND replied_at IS NULL
-            """,
-                (campaign_id,),
-            )
-
-    def get_retry_emails(self, limit: int = 10) -> List[Dict]:
-        """Get emails ready for retry"""
-        with self.connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT ec.id, l.business_name, l.email, ec.subject, ec.body, l.id as lead_id
-                FROM email_campaigns ec
-                JOIN leads l ON ec.lead_id = l.id
-                WHERE ec.status = 'failed'
-                AND ec.next_retry_at <= CURRENT_TIMESTAMP
-                AND ec.retry_count < ec.max_retries
-                LIMIT ?
-            """,
-                (limit,),
-            )
-
-            emails = []
-            for row in cursor.fetchall():
-                emails.append(
-                    {
-                        "campaign_id": row[0],
-                        "business_name": row[1],
-                        "email": row[2],
-                        "subject": row[3],
-                        "body": row[4],
-                        "lead_id": row[5],
-                    }
-                )
-
-        return emails
-
-    def get_issues_by_type(self, issue_type: str) -> List[Dict]:
-        """Get all audits with specific issue type"""
-        with self.connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT l.id, l.business_name, l.website, ai.description, ai.severity
-                FROM audit_issues ai
-                JOIN audits a ON ai.audit_id = a.id
-                JOIN leads l ON a.lead_id = l.id
-                WHERE ai.issue_type = ?
-                ORDER BY ai.severity DESC
-            """,
-                (issue_type,),
-            )
-
-            issues = []
-            for row in cursor.fetchall():
-                issues.append(
-                    {
-                        "lead_id": row[0],
-                        "business_name": row[1],
-                        "website": row[2],
-                        "description": row[3],
-                        "severity": row[4],
-                    }
-                )
-
-        return issues
 
     def close(self) -> None:
         """Close thread-local connection if exists"""

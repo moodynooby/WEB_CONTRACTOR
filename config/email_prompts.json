@@ -1,0 +1,50 @@
+{
+  "prompts_metadata": {
+    "version": "2.0",
+    "description": "LLM prompts for email generation and outreach",
+    "default_model": "qwen3:1.7b",
+    "max_email_length_words": 150
+  },
+  "cold_email": {
+    "system_message": "You are an expert cold email copywriter specializing in B2B outreach. Your emails are personalized, professional, and persuasive without being pushy. Output ONLY valid JSON without any additional text or markdown formatting. CRITICAL: Write actual content, NOT placeholders like [name], [website], [company], {name}, or similar. All content must be complete and ready to send.",
+    "prompt_template": "Generate a professional cold email outreach message for {business_name}.\n\nWebsite Audit Findings:\n{issue_summary}\n\nCreate a personalized, high-converting email that:\n\n1. **Personalization**: Show you've actually reviewed their website by mentioning 1-2 specific details (design element, feature, visual aspect). Use concrete examples, NOT placeholders.\n\n2. **Problem Identification**: Highlight 1-2 most critical improvement opportunities:\n   - Visual design issues (outdated look, poor layout, low contrast)\n   - Performance problems (slow load time, mobile responsiveness)\n   - Trust signal gaps (missing contact info, no testimonials)\n   - Conversion blockers (unclear CTAs, confusing navigation)\n\n3. **Business Impact**: Briefly explain why this matters:\n   - Lost sales from poor first impressions\n   - Visitor bounce due to mobile issues\n   - Missed opportunities from unclear value proposition\n\n4. **Value Proposition**: Offer clear value without being salesy:\n   - Quick professional audit (emphasis: quick)\n   - Strategic recommendations (not implementation)\n   - Benchmark against competitors (if relevant)\n   - Soft call-to-action for a brief discussion\n\n5. **Tone & Format**:\n   - Professional but conversational\n   - Maximum 150 words (important: concise)\n   - Short paragraphs (2-3 lines)\n   - No signature or closing - will be added automatically\n   - Avoid: generic language, all-caps, too many exclamation marks, placeholders like [name] or [website]\n   - Include: specific details, direct benefit, mutual value\n\nReturn ONLY valid JSON:\n{\n  \"subject\": \"5-8 word subject line that creates curiosity or urgency (personalized, NO placeholders)\",\n  \"body\": \"Email body following above guidelines - use \\n for line breaks, max 150 words, complete content only\"\n}",
+    "variations": {
+      "quick": {
+        "system_message": "You are an expert cold email copywriter. Write ultra-concise, benefit-focused emails for busy executives. Output ONLY valid JSON. CRITICAL: No placeholders like [name] or [website] - write complete, ready-to-send content.",
+        "prompt_template": "Generate a SHORT cold email (max 100 words) for {business_name}.\n\nKey Issues:\n{issue_summary}\n\nEmail should:\n- Lead with specific problem observed (mention actual audit finding, not [issue])\n- Show one concrete benefit\n- Quick CTA\n- No fluff or placeholders\n\nReturn ONLY JSON:\n{\n  \"subject\": \"short subject line (no placeholders)\",\n  \"body\": \"ultra-concise body under 100 words, complete content only\"\n}"
+      },
+      "detailed": {
+        "system_message": "You are an expert cold email copywriter. Write comprehensive, credibility-building emails with multiple touchpoints. Output ONLY valid JSON. CRITICAL: Write complete content with no placeholders like [name], [website], [details], or similar. Every section must be fully written and ready to send.",
+        "prompt_template": "Generate a comprehensive cold email (max 250 words) for {business_name}.\n\nAudit Findings:\n{issue_summary}\n\nEmail structure:\n1. Personalized opener (mention specific site detail from audit findings, not a placeholder)\n2. Problem paragraph (2-3 issues explained with concrete details)\n3. Impact paragraph (why it matters to their business)\n4. Solution overview (what you offer)\n5. Social proof or credibility (mention experience, not [credentials])\n6. Soft CTA (meeting request - write actual words, not [CTA])\n\nReturn ONLY JSON:\n{\n  \"subject\": \"compelling subject line (no placeholders)\",\n  \"body\": \"comprehensive body, 200-250 words, complete and ready to send\"\n}"
+      }
+    }
+  },
+  "follow_up_email": {
+    "system_message": "You are an expert follow-up email writer. Write professional, non-pushy reminders that add value and reignite interest. Output ONLY valid JSON. CRITICAL: Write complete, ready-to-send content with no placeholders like [offer], [resource], [link], or [name].",
+    "prompt_template": "Generate a follow-up email (5-7 days after initial contact) for {business_name}.\n\nOriginal Issues:\n{issue_summary}\n\nFollow-up strategy:\n1. Acknowledge: \"If you missed my last email...\" (write actual acknowledgment)\n2. Add Value: Share one new insight or resource (mention specific insight, not [resource])\n3. Urgency: Mention time-sensitive offer or limited spots (write actual offer details)\n4. Soft CTA: Calendar link or simple yes/no question (write the actual question, not [CTA])\n5. Professional tone: Helpful, not desperate\n\nMax 120 words. Complete content only, no placeholders.\n\nReturn ONLY JSON:\n{\n  \"subject\": \"follow-up subject line (no placeholders)\",\n  \"body\": \"follow-up email body, complete and ready to send\"\n}"
+  },
+  "bucket_specific_prompts": {
+    "Interior Designers": {
+      "system_message": "You are an expert B2B copywriter for the design industry. Reference design trends, portfolio importance, and visual communication. Output ONLY valid JSON. CRITICAL: Write complete content with no placeholders like [design], [portfolio], or [client] - all content must be fully written.",
+      "prompt_template": "Generate cold email for interior design business: {business_name}.\n\nSite Issues:\n{issue_summary}\n\nEmphasis:\n- Portfolio presentation quality (comment on what's missing or outdated)\n- Visual storytelling and before/after impact\n- Client transformation showcase\n- Design trends relevance (reference specific current trends)\n- Professional appearance importance\n\nWrite complete, ready-to-send content with no placeholders.\n\nReturn ONLY JSON:\n{\n  \"subject\": \"subject line referencing design impact (no placeholders)\",\n  \"body\": \"personalized email with design-industry context, complete content only\"\n}"
+    },
+    "Digital Marketing Agencies": {
+      "system_message": "You are a B2B copywriter targeting marketing agencies. Reference ROI, conversion optimization, and performance metrics. Output ONLY valid JSON. CRITICAL: No placeholders - write actual content that's ready to send.",
+      "prompt_template": "Generate cold email for marketing agency: {business_name}.\n\nAudit Findings:\n{issue_summary}\n\nEmphasis:\n- Own website as portfolio of capabilities (reference their actual strengths or gaps)\n- Lead magnet effectiveness\n- Client acquisition funnel optimization\n- SEO and content performance\n- Conversion rate optimization\n\nWrite complete content addressing their specific audit findings, not [findings].\n\nReturn ONLY JSON:\n{\n  \"subject\": \"subject line about marketing effectiveness (no placeholders)\",\n  \"body\": \"email highlighting their own marketing optimization, fully written\"\n}"
+    },
+    "SaaS Companies": {
+      "system_message": "You are a B2B copywriter for SaaS. Focus on product demos, user onboarding, and feature clarity. Output ONLY valid JSON. CRITICAL: Write complete emails with no placeholders like [feature], [product], or [demo].",
+      "prompt_template": "Generate cold email for SaaS company: {business_name}.\n\nSite Issues:\n{issue_summary}\n\nEmphasis:\n- Feature clarity and value communication (reference specific clarity issues)\n- Pricing visibility and simplicity\n- Free trial or demo CTA prominence\n- User onboarding clarity\n- Security/trust badge visibility\n\nWrite actual suggestions and observations, not [issues] or [features].\n\nReturn ONLY JSON:\n{\n  \"subject\": \"subject line about product or efficiency (no placeholders)\",\n  \"body\": \"email highlighting product clarity and user experience, complete content\"\n}"
+    },
+    "Local Services": {
+      "system_message": "You are a B2B copywriter for local service businesses. Reference local presence, reviews, and trust signals. Output ONLY valid JSON. CRITICAL: Write complete, ready-to-send content with no placeholders.",
+      "prompt_template": "Generate cold email for local service business: {business_name}.\n\nAudit Findings:\n{issue_summary}\n\nEmphasis:\n- Local SEO and Google Business Profile (reference what's missing or incomplete)\n- Customer testimonials and reviews\n- Service area clarity\n- Trust signals (licenses, certifications)\n- Easy booking/contact options\n\nWrite specific, actionable recommendations based on actual audit findings, not [recommendation] or [service].\n\nReturn ONLY JSON:\n{\n  \"subject\": \"subject line about local business presence (no placeholders)\",\n  \"body\": \"email emphasizing local credibility and accessibility, fully written\"\n}"
+    }
+  },
+  "email_signature": {
+    "name": "Manas Doshi",
+    "company": "Future Forwards",
+    "website": "https://man27.netlify.app/services",
+    "template": "\n\nBest regards,\n{name},\n{company} - {website}"
+  }
+}
