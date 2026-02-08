@@ -107,7 +107,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:4b",
+                    "model": "qwen3:1.7b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -163,7 +163,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:4b",
+                    "model": "qwen3:1.7b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -224,7 +224,12 @@ class Discovery:
                         cities.extend(geo_focus[seg_name].get("cities", [])[:2])
 
                 if not cities:
-                    cities = ["Mumbai", "Delhi", "Bangalore"]
+                    self.log(
+                        f"No cities found for bucket '{bucket['name']}' pattern '{pattern}'. "
+                        f"Configure geographic_focus in settings.",
+                        "error"
+                    )
+                    continue
 
                 for city in cities[:2]:
                     query = pattern.replace("{city}", city)

@@ -104,13 +104,13 @@
   ],
   "llm_audit": {
     "enabled": true,
-    "model": "qwen3:4b",
+    "model": "qwen3:1.7b",
     "prompt": "Analyze the following website content for '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Performance hints (excessive scripts, heavy text)\n5. UX Bugs or logical flaws in messaging\n6. Trust signals (testimonials, case studies)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type' (e.g., 'perf', 'bug', 'ux'), 'severity' (critical/warning/info), and 'description')."
   },
   "visual_audit": {
     "enabled": true,
-    "model": "qwen3-vl:4b",
-    "prompt": "Analyze this website screenshot for '{business_name}'. \n\nEvaluate and suggest:\n1. Visual Updates: Modernize design, typography, and colors.\n2. Performance: Identify visual clutter or elements that slow down perception.\n3. Bugs: Find overlapping text, broken layouts, or alignment issues.\n4. Responsiveness: Evaluate how well the design would scale to mobile.\n\nReturn JSON only with a 'visual_score' (0-100) and a list of 'observations' (each with 'type' (e.g., 'visual', 'perf', 'bug', 'responsive'), 'severity' (critical/warning/info), and 'description')."
+    "model": "ahmadwaqar/smolvlm2-agentic-gui",
+    "prompt": "Analyze this website screenshot for '{business_name}' as a professional GUI auditor.\n\nUse your GUI grounding and agentic reasoning capabilities to evaluate:\n\n1. **UI Element Localization & Actionability**: Identify all major interactive elements (buttons, forms, navigation, CTAs). Are they discoverable, properly sized for interaction, and clearly labeled? Assess visual prominence and clickability.\n\n2. **User Journey & Interaction Flow**: Map the primary user journeys from entry to conversion/contact. Identify the main CTA and secondary actions. Are interaction steps logical and unobstructed? Where would users drop off?\n\n3. **Mobile Responsiveness & Touch Targets**: Evaluate how UI elements reflow on mobile. Assess button/link sizes for accurate touch targets (minimum 44x44px), text readability, spacing, and layout adaptation.\n\n4. **Visual Hierarchy & Perception**: Assess color contrast, typography scale, whitespace, visual balance, and emphasis. Does the design guide attention to key actions? Is the value proposition immediately clear?\n\n5. **Performance & Perception Issues**: Identify visual clutter, misaligned elements, broken layouts, excessive animations, poor contrast, and anything degrading perceived performance or professionalism.\n\n6. **Trust & Conversion Signals**: Look for credibility elements - testimonials, trust badges, clear contact info, professional imagery, and calls-to-action effectiveness.\n\nReturn JSON only with 'visual_score' (0-100), 'interaction_quality_score' (0-100), and 'observations' array (each with 'type' [e.g., 'ui_element', 'interaction', 'responsive', 'visual', 'hierarchy', 'performance', 'trust'], 'severity' ['critical'/'warning'/'info'], 'description', and 'location' describing where on the page)."
   },
   "bucket_overrides": {
     "Interior Designers": {

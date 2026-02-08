@@ -95,7 +95,7 @@ class Outreach:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": config.get("model", "qwen3-vl:4b"),
+                    "model": config.get("model", "ahmadwaqar/smolvlm2-agentic-gui"),
                     "prompt": prompt,
                     "images": [base64_image],
                     "stream": False,
@@ -441,7 +441,7 @@ class Outreach:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": config.get("model", "qwen3:4b"),
+                    "model": config.get("model", "qwen3:1.7b"),
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -489,7 +489,7 @@ class Outreach:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:4b",
+                    "model": "qwen3:1.7b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -565,7 +565,7 @@ class Outreach:
            response = requests.post(
                f"{self.ollama_url}/api/generate",
                json={
-                   "model": "qwen3:4b",
+                   "model": "qwen3:1.7b",
                    "prompt": prompt,
                    "stream": False,
                    "format": "json",
