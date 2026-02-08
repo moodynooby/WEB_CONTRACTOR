@@ -35,12 +35,16 @@ class Outreach:
     ):
         self.repo = repo or LeadRepository()
         self.ollama_url = "http://localhost:11434"
-        self.ollama_enabled = self._test_ollama()
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
         self.max_workers = max_workers
         self._driver: Optional[webdriver.Chrome] = None
+
+        # HTTP session for reuse - MUST be initialized before _test_ollama()
         self._session: Optional[requests.Session] = None
+
+        # Test Ollama connection after _session is initialized
+        self.ollama_enabled = self._test_ollama()
 
     def _load_audit_settings(self) -> Dict:
         """Load audit settings from config file"""

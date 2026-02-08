@@ -151,14 +151,16 @@ class Discovery:
         self.buckets = self._load_buckets()
         self.logger = logger
         self.ollama_url = "http://localhost:11434"
-        self.ollama_enabled = self._test_ollama()
         self.max_workers = max_workers
 
         # WebDriver pool for parallel scraping
         self._driver_pool: Optional[WebDriverPool] = None
 
-        # HTTP session for reuse
+        # HTTP session for reuse - MUST be initialized before _test_ollama()
         self._session: Optional[requests.Session] = None
+
+        # Test Ollama connection after _session is initialized
+        self.ollama_enabled = self._test_ollama()
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
