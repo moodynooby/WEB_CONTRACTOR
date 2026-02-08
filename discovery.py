@@ -5,7 +5,11 @@ import time
 import requests
 from typing import List, Dict, Optional
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -103,7 +107,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:8b",
+                    "model": "qwen3:4b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -114,7 +118,14 @@ class Discovery:
 
             if response.status_code == 200:
                 raw = response.json().get("response", "{}")
-                return json.loads(raw)
+                if not raw or raw.strip() == "":
+                    self.log("Expansion LLM returned an empty response", "error")
+                    return None
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as e:
+                    self.log(f"Failed to parse expansion JSON: {e}\nRaw: {raw}", "error")
+                    return None
         except Exception as e:
             self.log(f"Expansion failed: {e}", "error")
 
@@ -152,7 +163,7 @@ class Discovery:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:8b",
+                    "model": "qwen3:4b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -163,13 +174,20 @@ class Discovery:
 
             if response.status_code == 200:
                 raw = response.json().get("response", "[]")
-                return json.loads(raw)
+                if not raw or raw.strip() == "":
+                    self.log("Market discovery LLM returned an empty response", "error")
+                    return None
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as e:
+                    self.log(f"Failed to parse market discovery JSON: {e}\nRaw: {raw}", "error")
+                    return None
         except Exception as e:
             self.log(f"Market discovery failed: {e}", "error")
 
         return None
 
-    def generate_queries(self, bucket_name: str = None, limit: int = 20) -> List[Dict]:
+    def generate_queries(self, bucket_name: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Generate search queries from bucket patterns"""
         self.buckets = self._load_buckets()
         queries = []
@@ -186,7 +204,8 @@ class Discovery:
             if isinstance(search_patterns, str):
                 try:
                     search_patterns = json.loads(search_patterns)
-                except:
+                except json.JSONDecodeError as e:
+                    self.log(f"Invalid JSON in search_patterns: {e}", "error")
                     search_patterns = []
 
             for pattern in search_patterns[:3]:
@@ -196,7 +215,8 @@ class Discovery:
                 if isinstance(segments, str):
                     try:
                         segments = json.loads(segments)
-                    except:
+                    except json.JSONDecodeError as e:
+                        self.log(f"Invalid JSON in geographic_segments: {e}", "error")
                         segments = []
 
                 for seg_name in segments:
@@ -237,7 +257,8 @@ class Discovery:
                         (By.CSS_SELECTOR, "a[href*='/maps/place/']")
                     )
                 )
-            except:
+            except TimeoutException:
+                self.log(f"Google Maps search results not loaded for query '{query}'", "error")
                 return leads
 
             # Get business listings
@@ -253,7 +274,10 @@ class Discovery:
                     # Extract business name
                     try:
                         name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text
-                    except:
+                    except NoSuchElementException:
+                        name = "Unknown Business"
+                    except Exception as e:
+                        self.log(f"Unexpected error finding business name: {e}", "error")
                         name = "Unknown Business"
 
                     # Extract website
@@ -263,8 +287,10 @@ class Discovery:
                             By.CSS_SELECTOR, "a[data-item-id*='authority']"
                         )
                         website = website_element.get_attribute("href")
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting website from Google Maps: {e}", "error")
 
                     # Extract phone
                     phone = None
@@ -273,8 +299,10 @@ class Discovery:
                             By.CSS_SELECTOR, "button[data-item-id*='phone']"
                         )
                         phone = phone_element.get_attribute("aria-label")
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting phone from Google Maps: {e}", "error")
 
                     if name:
                         leads.append(
@@ -327,7 +355,8 @@ class Discovery:
                         (By.CSS_SELECTOR, ".jsx-1e1a185d7f5319c2")
                     )
                 )
-            except:
+            except TimeoutException:
+                self.log(f"JustDial search results not loaded for query '{query}'", "error")
                 return leads
 
             # Get business listings
@@ -338,10 +367,13 @@ class Discovery:
             for element in business_elements:
                 try:
                     # Extract business name
-                    name_elem = element.find_element(
-                        By.CSS_SELECTOR, ".jsx-2c8ae8c8b6b8b1b0"
-                    )
-                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    try:
+                        name_elem = element.find_element(
+                            By.CSS_SELECTOR, ".jsx-2c8ae8c8b6b8b1b0"
+                        )
+                        name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    except NoSuchElementException:
+                        name = "Unknown Business"
 
                     # Extract phone
                     phone = None
@@ -350,8 +382,10 @@ class Discovery:
                             By.CSS_SELECTOR, ".jsx-3c8ae8c8b6b8b1b0"
                         )
                         phone = phone_elem.text.strip() if phone_elem else None
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting phone from JustDial: {e}", "error")
 
                     # Extract website (often requires clicking through)
                     website = None
@@ -362,8 +396,10 @@ class Discovery:
                         website = (
                             website_elem.get_attribute("href") if website_elem else None
                         )
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting website from JustDial: {e}", "error")
 
                     if name:
                         leads.append(
@@ -386,79 +422,7 @@ class Discovery:
 
         return leads
 
-    def scrape_yellowpages(
-        self, query: str, bucket: str, max_results: int = 5
-    ) -> List[Dict]:
-        """Scrape Yellow Pages for business leads using pooled driver"""
-        leads = []
-        driver = self._get_driver()
-        if not driver:
-            return leads
 
-        try:
-            search_url = f"https://www.yellowpages.com/search?search_terms={query.replace(' ', '+')}"
-            driver.get(search_url)
-            time.sleep(3)
-
-            # Wait for results
-            try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".result"))
-                )
-            except:
-                return leads
-
-            # Get business listings
-            business_elements = driver.find_elements(By.CSS_SELECTOR, ".result")[
-                :max_results
-            ]
-
-            for element in business_elements:
-                try:
-                    # Extract business name
-                    name_elem = element.find_element(By.CSS_SELECTOR, "a.business-name")
-                    name = name_elem.text.strip() if name_elem else "Unknown Business"
-
-                    # Extract website
-                    website = None
-                    try:
-                        website_elem = element.find_element(
-                            By.CSS_SELECTOR, "a.website-link"
-                        )
-                        website = (
-                            website_elem.get_attribute("href") if website_elem else None
-                        )
-                    except:
-                        pass
-
-                    # Extract phone
-                    phone = None
-                    try:
-                        phone_elem = element.find_element(By.CSS_SELECTOR, ".phone")
-                        phone = phone_elem.text.strip() if phone_elem else None
-                    except:
-                        pass
-
-                    if name:
-                        leads.append(
-                            {
-                                "business_name": name,
-                                "website": website,
-                                "phone": phone,
-                                "source": "yellowpages",
-                                "bucket": bucket,
-                                "category": query.split()[0],
-                                "location": "USA",
-                            }
-                        )
-
-                except Exception:
-                    continue
-
-        except Exception as e:
-            self.log(f"Error scraping Yellow Pages: {e}", "error")
-
-        return leads
 
     def scrape_indiamart(
         self, query: str, bucket: str, max_results: int = 5
@@ -481,7 +445,8 @@ class Discovery:
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, ".pbox"))
                 )
-            except:
+            except TimeoutException:
+                self.log(f"IndiaMART search results not loaded for query '{query}'", "error")
                 return leads
 
             # Get business listings
@@ -492,8 +457,11 @@ class Discovery:
             for element in business_elements:
                 try:
                     # Extract business name
-                    name_elem = element.find_element(By.CSS_SELECTOR, ".lst_clg a")
-                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    try:
+                        name_elem = element.find_element(By.CSS_SELECTOR, ".lst_clg a")
+                        name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    except NoSuchElementException:
+                        name = "Unknown Business"
 
                     # Extract website
                     website = None
@@ -504,16 +472,20 @@ class Discovery:
                         website = (
                             website_elem.get_attribute("href") if website_elem else None
                         )
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting website from IndiaMART: {e}", "error")
 
                     # Extract phone
                     phone = None
                     try:
                         phone_elem = element.find_element(By.CSS_SELECTOR, ".pnum")
                         phone = phone_elem.text.strip() if phone_elem else None
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting phone from IndiaMART: {e}", "error")
 
                     if name:
                         leads.append(
@@ -528,11 +500,15 @@ class Discovery:
                             }
                         )
 
-                except Exception:
+                except Exception as e:
+                    self.log(f"Error processing IndiaMART listing: {e}", "error")
                     continue
 
         except Exception as e:
-            self.log(f"Error scraping IndiaMART: {e}", "error")
+            self.log(
+                f"Error scraping IndiaMART - query='{query}', bucket='{bucket}': {e}",
+                "error"
+            )
 
         return leads
 
@@ -557,7 +533,8 @@ class Discovery:
                         (By.CSS_SELECTOR, ".container__09f24__mpRFF")
                     )
                 )
-            except:
+            except TimeoutException:
+                self.log(f"Yelp search results not loaded for query '{query}'", "error")
                 return leads
 
             # Get business listings
@@ -568,10 +545,13 @@ class Discovery:
             for element in business_elements:
                 try:
                     # Extract business name
-                    name_elem = element.find_element(
-                        By.CSS_SELECTOR, "a[href*='/biz/']"
-                    )
-                    name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    try:
+                        name_elem = element.find_element(
+                            By.CSS_SELECTOR, "a[href*='/biz/']"
+                        )
+                        name = name_elem.text.strip() if name_elem else "Unknown Business"
+                    except NoSuchElementException:
+                        name = "Unknown Business"
 
                     # Extract website
                     website = None
@@ -582,8 +562,10 @@ class Discovery:
                         website = (
                             website_elem.get_attribute("href") if website_elem else None
                         )
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting website from Yelp: {e}", "error")
 
                     # Extract phone
                     phone = None
@@ -592,8 +574,10 @@ class Discovery:
                             By.CSS_SELECTOR, ".phone__09f24__pARZf"
                         )
                         phone = phone_elem.text.strip() if phone_elem else None
-                    except:
+                    except NoSuchElementException:
                         pass
+                    except Exception as e:
+                        self.log(f"Error extracting phone from Yelp: {e}", "error")
 
                     if name:
                         leads.append(
@@ -608,15 +592,19 @@ class Discovery:
                             }
                         )
 
-                except Exception:
+                except Exception as e:
+                    self.log(f"Error processing Yelp listing: {e}", "error")
                     continue
 
         except Exception as e:
-            self.log(f"Error scraping Yelp: {e}", "error")
+            self.log(
+                f"Error scraping Yelp - query='{query}', bucket='{bucket}': {e}",
+                "error"
+            )
 
         return leads
 
-    def run(self, bucket_name: str = None, max_queries: int = 5) -> Dict:
+    def run(self, bucket_name: Optional[str] = None, max_queries: int = 5) -> Dict:
         """Execute full discovery pipeline with driver pooling and batch saving"""
         self.buckets = self._load_buckets()
         self.log(f"\n{'=' * 60}")
@@ -663,14 +651,6 @@ class Discovery:
                 if len(query_leads) < 3:
                     query_leads.extend(
                         self.scrape_yelp(q["query"], q["bucket"], 3 - len(query_leads))
-                    )
-
-                # Source 5: Yellow Pages
-                if len(query_leads) < 3:
-                    query_leads.extend(
-                        self.scrape_yellowpages(
-                            q["query"], q["bucket"], 3 - len(query_leads)
-                        )
                     )
 
                 # Batch Save leads to database

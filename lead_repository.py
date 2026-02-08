@@ -12,6 +12,10 @@ class LeadRepository:
     def __init__(self, db_path="leads.db"):
         self.db_path = db_path
 
+    def log(self, message: str, style: str = ""):
+        """Log message with optional style"""
+        print(f"[{style.upper()}] {message}")
+
     def _get_connection(self):
         """Get database connection with proper settings"""
         conn = sqlite3.connect(self.db_path)
@@ -62,12 +66,12 @@ class LeadRepository:
             try:
                 cursor.execute("ALTER TABLE leads ADD COLUMN social_links TEXT")
             except sqlite3.OperationalError:
-                pass  # Already exists
+                pass  # social_links column already exists
 
             try:
                 cursor.execute("ALTER TABLE leads ADD COLUMN contact_form_url TEXT")
             except sqlite3.OperationalError:
-                pass  # Already exists
+                pass  # contact_form_url column already exists
 
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS audits (
@@ -130,22 +134,7 @@ class LeadRepository:
             )
             """)
 
-            # Simplified email_templates table (keeping for backward compatibility)
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS email_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bucket_id INTEGER,
-                issue_type TEXT,
-                template_id TEXT,
-                subject_pattern TEXT,
-                body_template TEXT,
-                tone TEXT,
-                word_count_range TEXT, -- JSON list
-                conversion_focus TEXT,
-                FOREIGN KEY(bucket_id) REFERENCES buckets(id) ON DELETE CASCADE,
-                UNIQUE(bucket_id, issue_type)
-            )
-            """)
+
 
             # App config table (keeping for system settings)
             cursor.execute("""
@@ -245,7 +234,8 @@ class LeadRepository:
                     if d.get(field):
                         try:
                             d[field] = json.loads(d[field])
-                        except:
+                        except json.JSONDecodeError as e:
+                            self.log(f"Invalid JSON in bucket.{field}: {e}", "error")
                             d[field] = []
                 buckets.append(d)
 
@@ -258,69 +248,6 @@ class LeadRepository:
             cursor.execute("SELECT id FROM buckets WHERE name = ?", (bucket_name,))
             result = cursor.fetchone()
             return result[0] if result else None
-
-    def save_template(self, bucket_name: str, issue_type: str, template_data: Dict):
-        """Save email template with bucket foreign key"""
-        import json
-
-        bucket_id = self.get_bucket_id_by_name(bucket_name)
-        if not bucket_id:
-            raise ValueError(f"Bucket '{bucket_name}' not found")
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO email_templates (bucket_id, issue_type, template_id, subject_pattern, 
-                                           body_template, tone, word_count_range, conversion_focus)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(bucket_id, issue_type) DO UPDATE SET
-                    template_id=excluded.template_id,
-                    subject_pattern=excluded.subject_pattern,
-                    body_template=excluded.body_template,
-                    tone=excluded.tone,
-                    word_count_range=excluded.word_count_range,
-                    conversion_focus=excluded.conversion_focus
-            """,
-                (
-                    bucket_id,
-                    issue_type,
-                    template_data.get("template_id"),
-                    template_data.get("subject_pattern"),
-                    template_data.get("body_template"),
-                    template_data.get("tone"),
-                    json.dumps(template_data.get("word_count_range", [])),
-                    template_data.get("conversion_focus"),
-                ),
-            )
-
-    def get_templates_for_bucket(self, bucket_name: str) -> Dict:
-        """Get all templates for a bucket"""
-        import json
-
-        bucket_id = self.get_bucket_id_by_name(bucket_name)
-        if not bucket_id:
-            return {}
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM email_templates WHERE bucket_id = ?", (bucket_id,)
-            )
-            columns = [description[0] for description in cursor.description]
-
-            templates = {}
-            for row in cursor.fetchall():
-                d = dict(zip(columns, row))
-                issue_type = d.pop("issue_type")
-                if d.get("word_count_range"):
-                    try:
-                        d["word_count_range"] = json.loads(d["word_count_range"])
-                    except:
-                        d["word_count_range"] = []
-                templates[issue_type] = d
-
-        return templates
 
     def save_config(self, key: str, value: Dict):
         """Save global config"""
@@ -348,7 +275,11 @@ class LeadRepository:
         if row:
             try:
                 return json.loads(row[0])
-            except:
+            except json.JSONDecodeError as e:
+                self.log(f"Invalid JSON in config value for key '{key}': {e}", "error")
+                return None
+            except Exception as e:
+                self.log(f"Unexpected error loading config for key '{key}': {e}", "error")
                 return None
         return None
 
@@ -486,7 +417,7 @@ class LeadRepository:
 
         return leads
 
-    def save_audit(self, lead_id: int, audit_data: Dict, duration: float = None):
+    def save_audit(self, lead_id: int, audit_data: Dict, duration: Optional[float] = None):
         """Save audit results with normalized issues and duration"""
         import json
 
@@ -574,7 +505,7 @@ class LeadRepository:
         subject: str,
         body: str,
         status: str = "needs_review",
-        duration: float = None,
+        duration: Optional[float] = None,
     ):
         """Save generated email with generation duration"""
         with self._get_connection() as conn:
@@ -703,7 +634,7 @@ class LeadRepository:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM email_campaigns WHERE id = ?", (campaign_id,))
 
-    def mark_email_sent(self, campaign_id: int, success: bool, error: str = None):
+    def mark_email_sent(self, campaign_id: int, success: bool, error: Optional[str] = None):
         """Mark email as sent or failed with retry logic"""
         with self._get_connection() as conn:
             cursor = conn.cursor()

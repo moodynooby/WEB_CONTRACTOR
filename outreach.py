@@ -6,6 +6,11 @@ import time
 import re
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.common.exceptions import (
+    WebDriverException,
+)
+from selenium.webdriver.chrome.options import Options
 from lead_repository import LeadRepository
 
 
@@ -19,6 +24,7 @@ class Outreach:
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
         self.max_workers = 5  # Number of parallel audits/generations
+        self._driver: Optional[webdriver.Chrome] = None
 
     def _load_audit_settings(self) -> Dict:
         """Load audit settings from config file"""
@@ -35,6 +41,93 @@ class Outreach:
             self.logger(message, style)
         else:
             print(message)
+
+    def _get_driver(self) -> Optional[webdriver.Chrome]:
+        """Lazy initialization of headless Chrome driver"""
+        if self._driver is None:
+            try:
+                chrome_options = Options()
+                chrome_options.add_argument("--headless")
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--window-size=1280,720")
+                self._driver = webdriver.Chrome(options=chrome_options)
+                self._driver.set_page_load_timeout(30)
+            except Exception as e:
+                self.log(
+                    f"Failed to initialize Chrome driver for visual audit: {e}", "error"
+                )
+        return self._driver
+
+    def _quit_driver(self):
+        """Properly shut down the driver"""
+        if self._driver:
+            try:
+                self._driver.quit()
+            except WebDriverException:
+                pass  # Driver already closed or cleanup failed, continue anyway
+            except Exception as e:
+                self.log(f"Unexpected error closing driver: {e}", "error")
+            self._driver = None
+
+    def _take_screenshot(self, url: str) -> Optional[str]:
+        """Capture website screenshot and return as base64 string"""
+        driver = self._get_driver()
+        if not driver:
+            return None
+
+        try:
+            driver.get(url)
+            time.sleep(3)  # Wait for rendering
+            screenshot = driver.get_screenshot_as_base64()
+            return screenshot
+        except Exception as e:
+            self.log(f"Failed to take screenshot: {e}", "error")
+            return None
+
+    def _run_visual_audit(
+        self, business_name: str, base64_image: str, config: Dict
+    ) -> Optional[Dict]:
+        """Run visual audit using Ollama Vision model"""
+        prompt = config.get("prompt", "").format(business_name=business_name)
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": config.get("model", "qwen3-vl:4b"),
+                    "prompt": prompt,
+                    "images": [base64_image],
+                    "stream": False,
+                    "format": "json",
+                    "system": "You are a professional website visual auditor. Output ONLY valid JSON with 'visual_score' and 'observations'.",
+                },
+                timeout=60,
+            )
+
+            if response.status_code == 200:
+                raw = response.json().get("response", "{}")
+                if not raw or raw.strip() == "":
+                    return None
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as e:
+                    self.log(f"Failed to parse visual audit JSON: {e}", "error")
+                    return None
+            else:
+                self.log(f"Visual audit API failed: {response.status_code}", "error")
+        except Exception as e:
+            self.log(f"Visual audit call failed: {e}", "error")
+        return None
+
+    def _normalize_severity(self, severity: str) -> str:
+        """Normalize severity to match DB constraints ('critical', 'warning', 'info')"""
+        s = str(severity).lower().strip()
+        if s in ["critical", "high", "error", "fatal"]:
+            return "critical"
+        if s in ["warning", "medium", "warn"]:
+            return "warning"
+        return "info"
 
     def _test_ollama(self) -> bool:
         """Test Ollama connection"""
@@ -96,7 +189,7 @@ class Outreach:
         return contact_info
 
     def audit_website(
-        self, url: str, business_name: str = "this business", bucket_name: str = None
+        self, url: str, business_name: str = "this business", bucket_name: Optional[str] = None
     ) -> Dict:
         """Audit website for technical and qualitative issues + Deep Discovery"""
         issues = []
@@ -130,8 +223,15 @@ class Outreach:
                         discovered_info["email"] = c_info["email"]
                     if c_info["phone"] and not discovered_info["phone"]:
                         discovered_info["phone"] = c_info["phone"]
-                except:
-                    pass
+                except requests.RequestException as e:
+                    self.log(
+                        f"Error fetching contact page {discovered_info['contact_form_url']}: {e}",
+                        "error"
+                    )
+                    # Continue with what we already found
+                except Exception as e:
+                    self.log(f"Error parsing contact page: {e}", "error")
+                    # Continue with what we already found
 
             # Combine global checks with bucket overrides
             checks = self.audit_settings.get("technical_checks", []).copy()
@@ -145,6 +245,7 @@ class Outreach:
             for check in checks:
                 check_type = check.get("type")
                 selector = check.get("selector")
+                severity = self._normalize_severity(check.get("severity", "info"))
 
                 if check_type == "html_exists":
                     elem = soup.select_one(selector)
@@ -155,7 +256,7 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": check["description"],
                             }
                         )
@@ -170,7 +271,7 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": f"{check['description']} ({count} found)",
                             }
                         )
@@ -184,7 +285,7 @@ class Outreach:
                             issues.append(
                                 {
                                     "type": check["id"],
-                                    "severity": check["severity"],
+                                    "severity": severity,
                                     "description": f"{len(without_alt)}/{len(images)} images missing alt text",
                                 }
                             )
@@ -201,7 +302,7 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": check["description"],
                             }
                         )
@@ -212,7 +313,7 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": check["description"],
                             }
                         )
@@ -223,7 +324,7 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": f"{check['description']} ({response.elapsed.total_seconds():.2f}s)",
                             }
                         )
@@ -241,13 +342,13 @@ class Outreach:
                         issues.append(
                             {
                                 "type": check["id"],
-                                "severity": check["severity"],
+                                "severity": severity,
                                 "description": check["description"],
                             }
                         )
                         score -= check["score_impact"]
 
-            # Qualitative LLM Audit
+            # Qualitative LLM Audit (Stage B.1)
             llm_config = self.audit_settings.get("llm_audit", {})
             if self.ollama_enabled and llm_config.get("enabled"):
                 # Extract text for LLM
@@ -267,9 +368,35 @@ class Outreach:
                         issues.append(
                             {
                                 "type": f"llm_{obs.get('type', 'observation')}",
-                                "severity": obs.get("severity", "info"),
+                                "severity": self._normalize_severity(obs.get("severity", "info")),
                                 "description": f"LLM: {obs.get('description')}",
                             }
+                        )
+
+            # Visual LLM Audit (Stage B.2)
+            visual_config = self.audit_settings.get("visual_audit", {})
+            if self.ollama_enabled and visual_config.get("enabled"):
+                self.log("  📸 Capturing screenshot for visual audit...", "info")
+                base64_image = self._take_screenshot(url)
+                if base64_image:
+                    visual_result = self._run_visual_audit(
+                        business_name, base64_image, visual_config
+                    )
+                    if visual_result:
+                        vis_score = visual_result.get("visual_score", 100)
+                        # Adjust main score based on visual score (weighted 20%)
+                        score = (score * 0.8) + (vis_score * 0.2)
+
+                        for obs in visual_result.get("observations", []):
+                            issues.append(
+                                {
+                                    "type": f"visual_{obs.get('type', 'observation')}",
+                                    "severity": self._normalize_severity(obs.get("severity", "info")),
+                                    "description": f"Visual: {obs.get('description')}",
+                                }
+                            )
+                        self.log(
+                            f"  ✓ Visual audit complete (Score: {vis_score})", "success"
                         )
 
         except requests.exceptions.Timeout:
@@ -314,7 +441,7 @@ class Outreach:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": config.get("model", "qwen3:8b"),
+                    "model": config.get("model", "qwen3:4b"),
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -325,9 +452,18 @@ class Outreach:
 
             if response.status_code == 200:
                 raw = response.json().get("response", "{}")
-                return json.loads(raw)
-        except:
-            pass
+                if not raw or raw.strip() == "":
+                    self.log("LLM audit returned an empty response", "error")
+                    return None
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as e:
+                    self.log(f"Failed to parse LLM audit JSON: {e}\nRaw: {raw}", "error")
+                    return None
+            else:
+                self.log(f"LLM audit API failed with status {response.status_code}: {response.text}", "error")
+        except Exception as e:
+            self.log(f"LLM audit call failed: {e}", "error")
         return None
 
     def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict:
@@ -337,23 +473,23 @@ class Outreach:
 
         prompt = f"""Refine this cold email based on the following instructions.
 
-Instructions: {instructions}
+    Instructions: {instructions}
 
-Current Subject: {subject}
-Current Body:
-{body}
+    Current Subject: {subject}
+    Current Body:
+    {body}
 
-Return ONLY JSON:
-{{
-  "subject": "refined subject line",
-  "body": "refined email body with proper line breaks"
-}}"""
+    Return ONLY JSON:
+    {{
+    "subject": "refined subject line",
+    "body": "refined email body with proper line breaks"
+    }}"""
 
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
-                    "model": "qwen3:8b",
+                    "model": "qwen3:4b",
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
@@ -370,31 +506,37 @@ Return ONLY JSON:
                         "subject": data.get("subject", subject),
                         "body": data.get("body", body),
                     }
-                except:
-                    pass
+                except json.JSONDecodeError as e:
+                    self.log(f"Failed to parse email refinement JSON: {e}\nRaw response: {raw}", "error")
+                    return {"subject": subject, "body": body}  # Return original, unchanged
+                except Exception as e:
+                    self.log(f"Error in email refinement parsing: {e}", "error")
+                    return {"subject": subject, "body": body}
+            else:
+                self.log(f"Email refinement failed: {response.status_code}", "error")
         except Exception as e:
             self.log(f"Error refining email: {e}", "error")
 
         return {"subject": subject, "body": body}
 
-    def generate_email_ollama(
-        self, business_name: str, issues: List[Dict], bucket: str
-    ) -> Dict:
+    def generate_email_ollama(self, business_name: str, issues: List[Dict], bucket: str) -> Dict:
         """Generate email using Ollama LLM"""
         if not self.ollama_enabled:
-            return self.generate_email_template(business_name, issues, bucket)
+            raise Exception(
+                "Ollama is not enabled. Cannot generate email."
+            )
 
         # Prioritize LLM issues and critical issues
         sorted_issues = sorted(
-            issues,
-            key=lambda x: (
-                0 if x.get("type", "").startswith("llm_") else 1,
-                0
-                if x.get("severity") == "critical"
-                else 1
-                if x.get("severity") == "warning"
-                else 2,
-            ),
+           issues,
+           key=lambda x: (
+               0 if x.get("type", "").startswith("llm_") else 1,
+               0
+               if x.get("severity") == "critical"
+               else 1
+               if x.get("severity") == "warning"
+               else 2,
+           ),
         )
 
         # Build prompt
@@ -402,131 +544,75 @@ Return ONLY JSON:
 
         prompt = f"""Generate a professional cold email for {business_name}.
 
-Website Issues found:
-{issue_summary}
+        Website Audit Findings:
+        {issue_summary}
 
-Create a personalized outreach email that:
-1. Shows you've reviewed their website
-2. Mentions 1-2 specific points from the issues listed above (especially qualitative ones if present)
-3. Offers value, not a sales pitch
-4. Has a soft call-to-action
-5. Keeps it under 150 words
-6. DO NOT include a signature or closing like "Best regards" - I will add that myself.
+        Create a personalized outreach email that:
+        1. Shows you've reviewed their website (mention 1-2 specific visual or technical details).
+        2. Highlights 1-2 critical areas for improvement from the list above (especially visual updates, performance issues, bugs, or responsiveness).
+        3. Briefly explains how these issues might be affecting their business (e.g., losing mobile customers, slow loading scaring users).
+        4. Offers value and a soft call-to-action for a brief audit review call.
+        5. Keeps it professional, under 150 words, and avoids being pushy.
+        6. DO NOT include a signature or closing like "Best regards" - I will add that myself.
 
-Return ONLY JSON:
-{{
-  "subject": "brief subject line",
-  "body": "email body with proper line breaks"
-}}"""
+        Return ONLY JSON:
+        {{
+        "subject": "brief subject line",
+        "body": "email body with proper line breaks"
+        }}"""
 
         try:
-            response = requests.post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": "qwen3:8b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
-                },
-                timeout=60,
-            )
+           response = requests.post(
+               f"{self.ollama_url}/api/generate",
+               json={
+                   "model": "qwen3:4b",
+                   "prompt": prompt,
+                   "stream": False,
+                   "format": "json",
+                   "system": "You are a professional email writer. Output ONLY valid JSON. Do not include signatures.",
+               },
+               timeout=60,
+           )
 
-            if response.status_code == 200:
-                raw = response.json().get("response", "{}")
-                try:
-                    data = json.loads(raw)
-                    body = data.get("body", "")
+           if response.status_code == 200:
+               raw = response.json().get("response", "{}")
+               if not raw or raw.strip() == "":
+                   self.log("Email generation LLM returned an empty response", "error")
+                   raise Exception("Empty response from LLM")
+               
+               try:
+                   data = json.loads(raw)
+                   body = data.get("body", "")
+                   if not body:
+                       self.log(f"LLM returned JSON without body: {raw}", "error")
+                       raise Exception("Missing body in LLM response")
 
-                    # Ensure the body doesn't already have a signature (safety check)
-                    if "Best regards" in body or "Manas Doshi" in body:
-                        # Simple cleanup if LLM ignored instruction
-                        body = (
-                            body.split("Best regards")[0].split("Sincerely")[0].strip()
-                        )
+                   # Ensure the body doesn't already have a signature (safety check)
+                   if "Best regards" in body or "Manas Doshi" in body:
+                       # Simple cleanup if LLM ignored instruction
+                       body = (
+                           body.split("Best regards")[0].split("Sincerely")[0].strip()
+                       )
 
-                    # Append consistent signature
-                    signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
-                    final_body = body.strip() + signature
+                   # Append consistent signature
+                   signature = "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
+                   final_body = body.strip() + signature
 
-                    return {
-                        "subject": data.get(
-                            "subject", f"Quick note about {business_name}"
-                        ),
-                        "body": final_body,
-                    }
-                except:
-                    pass
-        except:
-            pass
-
-        return self.generate_email_template(business_name, issues, bucket)
-
-    def generate_email_template(
-        self, business_name: str, issues: List[Dict], bucket: str = None
-    ) -> Dict:
-        """Generate email using DB templates"""
-        if bucket:
-            templates = self.repo.get_templates_for_bucket(bucket)
-            # Map audit issues to template issue types
-            # Audit issues types: missing_title, missing_meta, no_viewport, etc.
-            # Template issue types (from file): mobile_unfriendly, etc.
-
-            # Simple mapping for now
-            issue_map = {
-                "no_viewport": "mobile_unfriendly",
-                "missing_title": "seo_issue",
-                "missing_meta": "seo_issue",
-            }
-
-            for issue in issues:
-                mapped_type = issue_map.get(issue["type"])
-                if mapped_type and mapped_type in templates:
-                    tpl = templates[mapped_type]
-                    subject = tpl.get("subject_pattern", "").replace(
-                        "{business_name}", business_name
-                    )
-                    body = tpl.get("body_template", "").replace(
-                        "{business_name}", business_name
-                    )
-                    if subject and body:
-                        return {"subject": subject, "body": body}
-
-        # Fallback if no template found
-        issue_desc = issues[0]["description"] if issues else "website improvements"
-
-        subject = f"Quick question about {business_name}'s website"
-        body = f"""Hi {business_name} team,
-
-I came across your website while researching local businesses in your area.
-
-I noticed {issue_desc.lower()}, which might be affecting your online visibility.
-
-Would you be open to a quick chat about how to improve your web presence?
-
-Best regards,
-Manas Doshi,
-Future Forwards - https://man27.netlify.app/services
-
-"""
-
-        return {"subject": subject, "body": body}
-
-    def _fallback_email(self, business_name: str, issues: List[Dict]) -> str:
-        """Fallback email body"""
-        issue_desc = issues[0]["description"] if issues else "some opportunities"
-        return f"""Hi {business_name} team,
-
-I recently reviewed your website and noticed {issue_desc.lower()}.
-
-I'd love to share some suggestions that could help improve your online presence.
-
-Would you be interested in a brief conversation?
-
-Best regards,
-Manas Doshi,
-Future Forwards - https://man27.netlify.app/services
-"""
+                   return {
+                       "subject": data.get(
+                           "subject", f"Quick note about {business_name}"
+                       ),
+                       "body": final_body,
+                   }
+               except json.JSONDecodeError as e:
+                   self.log(f"Failed to parse email JSON: {e}\nRaw: {raw}", "error")
+                   raise
+           else:
+               self.log(f"Email generation API failed with status {response.status_code}: {response.text}", "error")
+               raise Exception(f"API failed with status {response.status_code}")
+        except Exception as e:
+           self.log(f"Error generating email: {e}", "error")
+           raise
 
     def audit_leads(self, limit: int = 20) -> Dict:
         """Audit pending leads with duration tracking"""
@@ -540,43 +626,48 @@ Future Forwards - https://man27.netlify.app/services
         audited = 0
         qualified = 0
 
-        for i, lead in enumerate(leads, 1):
-            self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
+        try:
+            for i, lead in enumerate(leads, 1):
+                self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
 
-            start_time = time.time()
-            audit_result = self.audit_website(
-                lead["website"], lead["business_name"], lead.get("bucket") or "default"
-            )
-            duration = time.time() - start_time
+                start_time = time.time()
+                audit_result = self.audit_website(
+                    lead["website"],
+                    lead["business_name"],
+                    lead.get("bucket") or "default",
+                )
+                duration = time.time() - start_time
 
-            self.repo.save_audit(lead["id"], audit_result, duration=duration)
+                self.repo.save_audit(lead["id"], audit_result, duration=duration)
 
-            # DEEP DISCOVERY: Update lead with newly found contact info
-            if "discovered_info" in audit_result:
-                info = audit_result["discovered_info"]
-                self.repo.update_lead_contact_info(lead["id"], info)
-                if info.get("email"):
-                    self.log(f"  ✉ Found email: {info['email']}", "success")
-                if info.get("social_links"):
+                # DEEP DISCOVERY: Update lead with newly found contact info
+                if "discovered_info" in audit_result:
+                    info = audit_result["discovered_info"]
+                    self.repo.update_lead_contact_info(lead["id"], info)
+                    if info.get("email"):
+                        self.log(f"  ✉ Found email: {info['email']}", "success")
+                    if info.get("social_links"):
+                        self.log(
+                            f"  🔗 Found {len(info['social_links'])} social links",
+                            "success",
+                        )
+
+                audited += 1
+                if audit_result["qualified"]:
+                    qualified += 1
                     self.log(
-                        f"  🔗 Found {len(info['social_links'])} social links",
+                        f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])}, Time: {duration:.1f}s)",
                         "success",
                     )
+                else:
+                    self.log(
+                        f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)",
+                        "error",
+                    )
 
-            audited += 1
-            if audit_result["qualified"]:
-                qualified += 1
-                self.log(
-                    f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])}, Time: {duration:.1f}s)",
-                    "success",
-                )
-            else:
-                self.log(
-                    f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)",
-                    "error",
-                )
-
-            time.sleep(1)
+                time.sleep(1)
+        finally:
+            self._quit_driver()
 
         self.log(f"\n{'=' * 60}")
         self.log(

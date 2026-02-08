@@ -80,7 +80,7 @@
       "type": "load_time",
       "threshold": 3.0,
       "score_impact": 10,
-      "severity": "medium",
+      "severity": "warning",
       "description": "Slow page load time"
     },
     {
@@ -104,8 +104,13 @@
   ],
   "llm_audit": {
     "enabled": true,
-    "model": "qwen3:8b",
-    "prompt": "Analyze the following website content for a business named '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Trust signals (testimonials, case studies, etc.)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type', 'severity' (critical/warning/info), and 'description')."
+    "model": "qwen3:4b",
+    "prompt": "Analyze the following website content for '{business_name}'. \n\nContent:\n{content}\n\nEvaluate it based on:\n1. Clarity of value proposition\n2. Call to action effectiveness\n3. Professional tone\n4. Performance hints (excessive scripts, heavy text)\n5. UX Bugs or logical flaws in messaging\n6. Trust signals (testimonials, case studies)\n\nReturn JSON only with a 'qualitative_score' (0-100) and a list of 'observations' (each with 'type' (e.g., 'perf', 'bug', 'ux'), 'severity' (critical/warning/info), and 'description')."
+  },
+  "visual_audit": {
+    "enabled": true,
+    "model": "qwen3-vl:4b",
+    "prompt": "Analyze this website screenshot for '{business_name}'. \n\nEvaluate and suggest:\n1. Visual Updates: Modernize design, typography, and colors.\n2. Performance: Identify visual clutter or elements that slow down perception.\n3. Bugs: Find overlapping text, broken layouts, or alignment issues.\n4. Responsiveness: Evaluate how well the design would scale to mobile.\n\nReturn JSON only with a 'visual_score' (0-100) and a list of 'observations' (each with 'type' (e.g., 'visual', 'perf', 'bug', 'responsive'), 'severity' (critical/warning/info), and 'description')."
   },
   "bucket_overrides": {
     "Interior Designers": {

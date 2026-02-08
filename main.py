@@ -22,6 +22,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 from textual import work, on
+from textual.css.query import NoMatches
 from discovery import Discovery
 from outreach import Outreach
 from email_sender import EmailSender
@@ -672,8 +673,12 @@ class WebContractorTUI(App):
             tabbed = self.query_one(TabbedContent)
             if tabbed.active != "tab-stats":
                 return
-        except:
-            pass
+        except NoMatches:
+            return  # Widget not ready yet
+        except Exception as e:
+            # Stats refresh is non-critical, but good to know if it fails unexpectedly
+            self.write_log(f"Error checking tab status: {e}", "error")
+            return
 
         stats = self.repo.get_stats()
 

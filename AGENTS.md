@@ -101,7 +101,7 @@ class Discovery:
 ### Naming Conventions
 - **Classes**: PascalCase (`LeadRepository`, `Discovery`, `ReviewScreen`)
 - **Functions/Methods**: snake_case (`process_lead`, `get_connection`, `scrape_leads`)
-- **Variables**: snake_case (`lead_data`, `email_template`, `audit_results`)
+- **Variables**: snake_case (`lead_data`, `audit_results`)
 - **Constants**: UPPER_SNAKE_CASE (`MAX_WORKERS`, `DEFAULT_TIMEOUT`, `SMTP_PORT`)
 - **Private methods**: Prefix with underscore (`_get_driver`, `_load_settings`)
 
