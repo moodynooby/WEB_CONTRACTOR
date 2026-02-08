@@ -150,9 +150,7 @@ class ReviewScreen(Screen):
         self.repo.update_email_status(email_id, "pending")
 
         # 2. Try to send
-        success = await self.app.run_in_thread(
-            self.app.email_sender.send_email, to_email, subject, body
-        )
+        success = self.app.email_sender.send_email(to_email, subject, body)
 
         if success:
             self.repo.mark_email_sent(email_id, True)
