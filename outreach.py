@@ -149,7 +149,11 @@ class Outreach:
         """
 
         def _do_visual_audit() -> Optional[Dict]:
-            prompt = config.get("prompt", "").format(business_name=business_name)
+            prompt = config.get("prompt_template", "").format(business_name=business_name)
+            system_message = config.get(
+                "system_message",
+                "You are an expert web design and UX auditor. Output ONLY valid JSON.",
+            )
 
             max_retries = 3
             base_delay = 2.0
@@ -828,6 +832,9 @@ Return ONLY JSON:
         prompt = prompt_template.format(
             business_name=business_name, issue_summary=issue_summary
         )
+
+        max_retries = 3
+        base_delay = 2.0
 
         for attempt in range(max_retries):
             try:
