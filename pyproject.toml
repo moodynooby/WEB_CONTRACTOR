@@ -7,11 +7,11 @@ requires-python = ">=3.11"
 dependencies = [
     "textual>=0.47.0",
     "requests>=2.32.5",
-    "beautifulsoup4>=4.14.3",
-    "selenium>=4.40.0",
-    "webdriver-manager>=4.0.0",
+    "playwright>=1.40.0",
     "python-dotenv>=1.2.1",
     "click>=8.1.7",
+    "beautifulsoup4>=4.12.0",
+    "peewee>=4.0.1",
 ]
 
 [dependency-groups]
@@ -20,6 +20,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.15.0",
+    "uncomment>=2.11.0",
 ]
 
 [tool.mypy]

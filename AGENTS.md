@@ -1,220 +1,113 @@
-# Web Contractor - Agent Development Guidelines
+# Web Contractor - Agent Guidelines
 
-This file contains build commands, code style guidelines, and development practices for agentic coding agents working on the Web Contractor lead management system.
+## Architecture
 
-## Build, Lint, and Test Commands
+**Pipeline Stages**:
 
-### Environment Setup
+- **Stage 0 (Query Generation)**: Uses LLM to expand bucket categories and discover new market segments. Generates search patterns with geographic placeholders.
+
+- **Stage A (Lead Scraping)**: Playwright-based scraper searches business directories, extracts contact info (email, phone, social), stores raw leads to `Lead` table with `pending_audit` status.
+
+- **Stage B (Lead Auditing)**: Fetches lead websites, analyzes content with LLM for quality scoring, detects issues (broken links, missing SSL, etc.). Saves audit results.
+
+- **Stage C (Email Generation)**: Generates personalized cold emails using lead context and LLM. Stores in `EmailCampaign` for review.
+
+- **Stage D (Email Delivery)**: SMTP sender. Sends approved emails, tracks delivery.
+
+**Core Modules** (`core/`):
+
+- **db_peewee.py**: Peewee ORM for SQLite. Models: `Bucket`, `Lead`, `Audit`, `EmailCampaign`. Atomic transactions for batch ops.
+- **discovery.py**: Implements Stage 0 + Stage A. Single-threaded with efficient Playwright resource reuse.
+- **outreach.py**: Implements Stage B + Stage C. Single-threaded with LRU caching for LLM calls.
+- **email.py**: Simplified SMTP sender with direct connections.
+- **llm.py**: Ollama API wrapper with retry logic, JSON format support.
+
+**UI Layer** (`ui/app.py`):
+Single Textual TUI. Screens: discovery, audit review, email review, settings. Workers use `@work(exclusive=True)` for sequential execution.
+
+**Data Flow**:
+1. User triggers discovery → Stage 0 generates queries → Stage A scrapes → saves to `Lead`
+2. User runs audit → Stage B scores leads → Stage C generates emails → saves to `EmailCampaign`
+3. User reviews emails in TUI → approves/rejects
+4. User sends emails → Stage D dispatches → marks sent
+
+**Entry Point**: `main.py` loads env, initializes DB, launches TUI.
+
+## Commands
+
 ```bash
-# Install dependencies using uv (recommended)
+# Setup
 uv sync
+source .venv/bin/activate
 
-# Activate virtual environment
-source .venv/bin/activate  # Linux/Mac
-# or
-.venv\Scripts\activate     # Windows
-```
-
-### Code Quality Commands
-```bash
-# Run linting and formatting checks
-uv run ruff check .
-
-# Auto-fix linting issues
-uv run ruff check --fix .
-
-# Format code with ruff
-uv run ruff format .
-
-# Type checking
-uv run mypy .
-
-# Type check specific file
-uv run mypy main.py
-```
-
-### Testing Commands
-```bash
-# Run all tests
-uv run pytest
-
-# Run specific test file
-uv run pytest test_discovery.py
-
-# Run specific test function
-uv run pytest test_discovery.py::test_scrape_leads
-
-# Run tests with coverage
-uv run pytest --cov=.
-
-# Run tests with verbose output
-uv run pytest -v
-```
-
-### Application Commands
-```bash
-# Run the main TUI application
+# Quality
+uv run ruff check .          # lint
+uv run ruff check --fix .    # auto-fix
+uv run ruff format .         # format
+uv run uncomment .   # Uneccesory comments remover
+# Run
 uv run python main.py
-
-
-## Code Style Guidelines
-
-### Import Organization
-- **Standard library imports first**: `os`, `sys`, `json`, `time`, etc.
-- **Third-party imports second**: `requests`, `bs4`, `selenium`, `textual`, etc.
-- **Local imports third**: `lead_repository`, `discovery`, `outreach`, etc.
-- **Use explicit imports**: Avoid `from module import *`
-- **Group related imports**: Keep imports from the same package together
-
-```python
-# ✅ Good import style
-import json
-import time
-from typing import List, Dict, Optional
-
-import requests
-from bs4 import BeautifulSoup
-from selenium import webdriver
-
-from lead_repository import LeadRepository
-from discovery import Discovery
 ```
 
-### Type Annotations
-- **Always annotate function signatures**: Use `typing` for parameters and return types
-- **Use Optional for nullable types**: `Optional[str]` instead of `str | None` for consistency
-- **Annotate class attributes**: Add type hints for class-level variables
-- **Use generic types**: `List[str]`, `Dict[str, int]` for collections
+## Database (Peewee)
 
 ```python
-# ✅ Good type annotations
-def process_lead(self, lead_id: int, data: Dict[str, str]) -> Optional[bool]:
-    """Process a lead with given data"""
-    return True
+from core.db_peewee import Lead, Bucket, db, save_lead
 
-class Discovery:
-    def __init__(self, repo: Optional[LeadRepository] = None):
-        self.repo: LeadRepository = repo or LeadRepository()
-        self.buckets: List[Dict] = []
+# Operations
+lead = Lead.get_or_none(Lead.id == lead_id)
+lead_id = save_lead({'business_name': 'Acme', 'bucket': 'Designers'})
+
+# Transactions
+with db.atomic():
+    bucket = Bucket.create(name='New')
+    Lead.create(business_name='Test', bucket=bucket)
+
+# Batch
+with db.atomic():
+    for lead_data in leads:
+        Lead.create(**lead_data)
 ```
 
-### Naming Conventions
-- **Classes**: PascalCase (`LeadRepository`, `Discovery`, `ReviewScreen`)
-- **Functions/Methods**: snake_case (`process_lead`, `get_connection`, `scrape_leads`)
-- **Variables**: snake_case (`lead_data`, `audit_results`)
-- **Constants**: UPPER_SNAKE_CASE (`MAX_WORKERS`, `DEFAULT_TIMEOUT`, `SMTP_PORT`)
-- **Private methods**: Prefix with underscore (`_get_driver`, `_load_settings`)
+## Error Handling
 
-### Error Handling
-- **Use specific exceptions**: Catch `ValueError`, `KeyError` instead of generic `Exception`
-- **Always log errors**: Use the provided logger or print with context
-- **Provide fallback values**: Return sensible defaults when operations fail
-- **Clean up resources**: Use `finally` blocks or context managers for cleanup
+- Catch specific exceptions (`ValueError`, `KeyError`)
+- Log with context
+- Return sensible defaults
+- Clean up resources in `finally` or use context managers
 
-```python
-# ✅ Good error handling
-def scrape_leads(self, query: str) -> List[Dict]:
-    try:
-        driver = self._get_driver()
-        results = self._perform_search(driver, query)
-        return results
-    except WebDriverException as e:
-        self.log(f"Selenium error during scraping: {e}", "error")
-        return []
-    except Exception as e:
-        self.log(f"Unexpected error during scraping: {e}", "error")
-        return []
-    finally:
-        self._quit_driver()
-```
+## Concurrency
 
-### Database Operations
-- **Use context managers**: Always use `with repo:` for database transactions
-- **Handle connection errors**: Wrap database operations in try-catch blocks
-- **Use parameterized queries**: Prevent SQL injection with proper parameter binding
-- **Close connections**: Use context managers or explicit connection closing
+- Single-threaded design for simplicity and reliability
+- Workers use `@work(exclusive=True)` for sequential execution
+- Playwright browser context is reused across operations
+- No shared state issues - each operation runs to completion before next starts
 
-```python
-# ✅ Good database pattern
-def save_lead(self, lead_data: Dict[str, str]) -> Optional[int]:
-    try:
-        with self.repo as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO leads (business_name, email, website)
-                VALUES (?, ?, ?)
-            """, (lead_data['name'], lead_data['email'], lead_data['website']))
-            return cursor.lastrowid
-    except sqlite3.Error as e:
-        self.log(f"Database error saving lead: {e}", "error")
-        return None
-```
+## Textual TUI
 
-### Threading and Concurrency
-- **Use ThreadPoolExecutor**: For parallel processing of audits/generations
-- **Limit concurrent operations**: Respect `max_workers` setting (default: 5)
-- **Thread-safe UI updates**: Use `call_from_thread` for UI updates from workers
-- **Avoid shared state**: Pass data explicitly between threads
+- Define shortcuts in `BINDINGS` class attribute
+- Use `app.pop_screen()` to dismiss modals
+- Use `@work` decorator for background tasks
+- Manage focus and selection state properly
 
-### Configuration Management
-- **Use environment variables**: For sensitive data (email credentials, API keys)
-- **Load JSON configs**: Use proper error handling for configuration files
-- **Provide defaults**: Always have fallback values for missing configuration
-- **Validate config**: Check required fields and data types
+## Security
 
-### Code Structure
-- **Single responsibility**: Each class/method should have one clear purpose
-- **Keep methods small**: Prefer methods under 50 lines when possible
-- **Use composition**: Prefer dependency injection over inheritance
-- **Document public methods**: Add docstrings for public APIs
+- Never commit `.env` files
+- Use environment variables for credentials
+- Validate user input
 
-### Textual TUI Specific
-- **Use proper bindings**: Define keyboard shortcuts in `BINDINGS` class attribute
-- **Handle screen navigation**: Use `app.pop_screen()` for modal dismissal
-- **Update UI safely**: Use `call_from_thread` for updates from background workers
-- **Manage focus**: Handle cursor position and selection state properly
+## Resource Management
 
-### Testing Guidelines
-- **Write unit tests**: For core business logic and data processing
-- **Mock external dependencies**: Use unittest.mock for web requests, database
-- **Test error cases**: Verify proper error handling and fallback behavior
-- **Use descriptive test names**: `test_scrape_leads_with_invalid_query`
+- **Playwright**: Browser context reused; closed on session exit via `managed_session()`
+- **Database**: Peewee handles connections automatically with `thread_safe=True`
+- **SMTP**: Direct connections with automatic cleanup via `with` statement
 
-### Security Considerations
-- **Never commit secrets**: Keep `.env` files out of version control
-- **Validate user input**: Sanitize data from web scraping and user input
-- **Use parameterized queries**: Prevent SQL injection in database operations
-- **Handle credentials securely**: Use environment variables for SMTP/API keys
+## Workflow
 
-## Common Issues to Watch For
+1. Run `uv run ruff check .` before changes
+2. Make focused, minimal changes
+3. Test locally: `uv run python main.py`
+4. Run `uv run ruff check --fix .`
+5. Run ` uv run uncomment .   `
+6. Commit with descriptive messages
 
-### Missing Imports
-- `time` module often used but not imported
-- `urllib.parse` for URL operations
-- Proper typing imports from `typing` module
-
-### Resource Cleanup
-- Selenium drivers: Always call `driver.quit()` in `finally` block
-- Database connections: Use context managers or explicit closing
-- SMTP connections: Use `with` statements for SMTP sessions
-
-### Error Recovery
-- Web scraping: Implement retry logic for transient failures
-- Database operations: Handle connection timeouts and lock errors
-- Email sending: Validate credentials and handle SMTP errors
-
-### Performance
-- Limit concurrent operations to avoid overwhelming target websites
-- Use connection pooling for database operations when possible
-- Implement proper timeout handling for network requests
-
-## Development Workflow
-
-1. **Before making changes**: Run `uv run ruff check .` and `uv run mypy .`
-2. **Make changes**: Follow the code style guidelines above
-3. **Test locally**: Run the application and verify functionality
-4. **Run quality checks**: `uv run ruff check --fix .` and `uv run mypy .`
-5. **Run tests**: `uv run pytest` if tests exist
-6. **Commit changes**: Use descriptive commit messages
-
-This project uses an ultra-minimal architecture with 4 core modules. Keep changes focused and maintain the simplicity of the design.
