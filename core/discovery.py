@@ -3,14 +3,23 @@
 Single-threaded design with efficient resource management:
 - Browser context reused across scraping operations
 - Automatic cleanup on exit
-- HTTP session reuse for API calls
+- HTTP session for API calls
+- Dynamic configuration from app_settings.json and database
+
+Thread Safety:
+- Playwright browser context is created per-thread using threading.local()
+- Each scraping operation gets its own isolated browser context
+- Context manager ensures proper cleanup even on exceptions
 """
 
 import json
+import random
+import threading
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Callable, Dict, Generator, List, Optional
 
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 from core import llm
 from core.db_peewee import (
@@ -18,7 +27,17 @@ from core.db_peewee import (
     save_leads_batch,
 )
 
+_browser_context_local = threading.local()
 
+
+def _load_app_settings() -> Dict:
+    """Load application settings from config file."""
+    settings_path = Path(__file__).parent.parent / "config" / "app_settings.json"
+    try:
+        with open(settings_path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 class PlaywrightScraper:
@@ -30,14 +49,54 @@ class PlaywrightScraper:
     ):
         self.buckets = get_all_buckets()
         self.logger = logger
-
-        self._playwright: Optional[sync_playwright] = None
-        self._browser: Optional[Browser] = None
-        self._context: Optional[BrowserContext] = None
+        self._settings = _load_app_settings()
 
     @property
     def ollama_enabled(self) -> bool:
         return llm.is_available()
+
+    def _get_llm_settings(self) -> Dict:
+        """Get LLM settings from config."""
+        defaults = {
+            "default_model": "gemma:2b-instruct-q4_0",
+            "expansion_model": "gemma:2b-instruct-q4_0",
+            "timeout_seconds": 30,
+            "max_retries": 2,
+        }
+        settings = self._settings.get("llm_settings", {})
+        return {**defaults, **settings}
+
+    def _get_discovery_limits(self) -> Dict:
+        """Get discovery limits from config."""
+        defaults = {
+            "max_queries_per_run": 20,
+            "max_patterns_per_bucket": 3,
+            "max_cities_per_segment": 2,
+            "max_results_per_query": 5,
+            "max_leads_per_query": 2,
+        }
+        limits = self._settings.get("discovery_limits", {})
+        return {**defaults, **limits}
+
+    def _get_scraper_settings(self) -> Dict:
+        """Get scraper settings from config."""
+        defaults = {
+            "headless": True,
+            "user_agents": [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            ],
+            "page_load_timeout_ms": 5000,
+            "search_wait_timeout_ms": 10000,
+            "result_click_delay_ms": 2000,
+        }
+        settings = self._settings.get("scraper_settings", {})
+        return {**defaults, **settings}
+
+    def _get_random_user_agent(self) -> str:
+        """Get a random user agent from configured list."""
+        scraper_settings = self._get_scraper_settings()
+        user_agents = scraper_settings["user_agents"]
+        return random.choice(user_agents) if user_agents else user_agents[0]
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
@@ -46,61 +105,54 @@ class PlaywrightScraper:
         else:
             print(message)
 
-    def _ensure_browser(self) -> Browser:
-        """Ensure browser is initialized (lazy loading)"""
-        if self._playwright is None:
-            self._playwright = sync_playwright().start()
-        if self._browser is None:
-            self._browser = self._playwright.chromium.launch(headless=True)
-        return self._browser
-
-    def _ensure_context(self) -> BrowserContext:
-        """Ensure browser context is initialized (reused across calls)"""
-        browser = self._ensure_browser()
-        if self._context is None:
-            self._context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    @contextmanager
+    def managed_session(self):
+        """Context manager for scraping session - creates thread-local browser context
+        
+        Thread Safety:
+        - Each thread gets its own browser context via threading.local()
+        - Browser is launched once per thread and reused for all operations in that thread
+        - Proper cleanup ensures no resource leaks
+        """
+        if hasattr(_browser_context_local, 'context') and _browser_context_local.context is not None:
+            yield self
+            return
+        
+        scraper_settings = self._get_scraper_settings()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=scraper_settings["headless"])
+            context = browser.new_context(
+                user_agent=self._get_random_user_agent()
             )
-        return self._context
+            
+            _browser_context_local.playwright = p
+            _browser_context_local.browser = browser
+            _browser_context_local.context = context
+            
+            try:
+                yield self
+            finally:
+                context.close()
+                browser.close()
+                _browser_context_local.context = None
+                _browser_context_local.browser = None
+                _browser_context_local.playwright = None
 
     @contextmanager
     def get_page(self) -> Generator[Page, None, None]:
-        """Context manager for page - creates new page, yields it, closes after use"""
-        context = self._ensure_context()
-        page = context.new_page()
+        """Context manager for page - uses current thread's context
+        
+        Thread Safety:
+        - Uses thread-local storage to get the correct context for this thread
+        - Raises RuntimeError if called outside managed_session()
+        """
+        if not hasattr(_browser_context_local, 'context') or _browser_context_local.context is None:
+            raise RuntimeError("Scraper must be used within managed_session()")
+        page = _browser_context_local.context.new_page()
         try:
             yield page
         finally:
             page.close()
-
-    def close_all(self) -> None:
-        """Close all Playwright resources (call once at end of session)"""
-        if self._context:
-            try:
-                self._context.close()
-            except Exception:
-                pass
-            self._context = None
-        if self._browser:
-            try:
-                self._browser.close()
-            except Exception:
-                pass
-            self._browser = None
-        if self._playwright:
-            try:
-                self._playwright.stop()
-            except Exception:
-                pass
-            self._playwright = None
-
-    @contextmanager
-    def managed_session(self):
-        """Context manager for full scraping session - ensures cleanup"""
-        try:
-            yield self
-        finally:
-            self.close_all()
 
     def _load_buckets(self) -> List[Dict]:
         """Load bucket configuration from DB"""
@@ -130,12 +182,13 @@ Return ONLY JSON:
 {{"new_categories": ["c1", "c2"], "new_patterns": ["p1 {{city}}"], "new_cities": ["City1"]}}"""
 
         try:
+            llm_settings = self._get_llm_settings()
             raw = llm.generate(
-                model="gemma:2b-instruct-q4_0",
+                model=llm_settings["expansion_model"],
                 prompt=prompt,
                 system="Output ONLY valid JSON. Market research assistant.",
                 format_json=True,
-                timeout=30,
+                timeout=llm_settings["timeout_seconds"],
             )
             return json.loads(raw)
         except llm.OllamaError as e:
@@ -163,12 +216,13 @@ Return ONLY JSON list:
 [{{"name": "Market", "categories": ["c1", "c2"], "search_patterns": ["p1 {{city}}"]}}]"""
 
         try:
+            llm_settings = self._get_llm_settings()
             raw = llm.generate(
-                model="gemma:2b-instruct-q4_0",
+                model=llm_settings["expansion_model"],
                 prompt=prompt,
                 system="Output ONLY valid JSON. Business strategist.",
                 format_json=True,
-                timeout=30,
+                timeout=llm_settings["timeout_seconds"],
             )
             return json.loads(raw)
         except llm.OllamaError as e:
@@ -176,18 +230,32 @@ Return ONLY JSON list:
             return None
 
     def generate_queries(
-        self, bucket_name: Optional[str] = None, limit: int = 20
+        self, bucket_name: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Dict]:
-        """Generate search queries from bucket patterns"""
+        """Generate search queries from bucket patterns
+        
+        Args:
+            bucket_name: Optional bucket name to filter queries
+            limit: Optional limit override. If None, uses config or bucket default.
+        """
         self.buckets = get_all_buckets()
+        limits = self._get_discovery_limits()
+        
+        if limit is None:
+            limit = limits["max_queries_per_run"]
+        
         queries = []
         buckets = [
             b for b in self.buckets if not bucket_name or b["name"] == bucket_name
         ]
+        
+        buckets.sort(key=lambda b: b.get("priority", 1), reverse=True)
 
         geo_focus = get_config("geographic_focus") or {}
 
         for bucket in buckets:
+            bucket_max_queries = bucket.get("max_queries", limits["max_patterns_per_bucket"])
+            
             search_patterns = bucket.get("search_patterns", [])
             if isinstance(search_patterns, str):
                 try:
@@ -196,7 +264,7 @@ Return ONLY JSON list:
                     self.log(f"Invalid JSON in search_patterns: {e}", "error")
                     search_patterns = []
 
-            for pattern in search_patterns[:3]:
+            for pattern in search_patterns[:bucket_max_queries]:
                 cities = []
                 segments = bucket.get("geographic_segments", [])
                 if isinstance(segments, str):
@@ -211,7 +279,8 @@ Return ONLY JSON list:
 
                 for seg_name in segments:
                     if seg_name in geo_focus:
-                        cities.extend(geo_focus[seg_name].get("cities", [])[:2])
+                        max_cities = limits["max_cities_per_segment"]
+                        cities.extend(geo_focus[seg_name].get("cities", [])[:max_cities])
 
                 if not cities:
                     self.log(
@@ -221,7 +290,7 @@ Return ONLY JSON list:
                     )
                     continue
 
-                for city in cities[:2]:
+                for city in cities:
                     query = pattern.replace("{city}", city)
                     queries.append(
                         {"query": query, "bucket": bucket["name"], "city": city}
@@ -232,10 +301,21 @@ Return ONLY JSON list:
         return queries[:limit]
 
     def scrape_google_maps(
-        self, query: str, bucket: str, max_results: int = 5
+        self, query: str, bucket: str, max_results: Optional[int] = None
     ) -> List[Dict]:
-        """Scrape Google Maps for business leads using Playwright"""
+        """Scrape Google Maps for business leads using Playwright
+        
+        Args:
+            query: Search query
+            bucket: Bucket name
+            max_results: Optional max results override. If None, uses config.
+        """
         leads: List[Dict] = []
+        scraper_settings = self._get_scraper_settings()
+        limits = self._get_discovery_limits()
+        
+        if max_results is None:
+            max_results = limits["max_results_per_query"]
 
         with self.get_page() as page:
             try:
@@ -243,10 +323,13 @@ Return ONLY JSON list:
                     f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
                 )
                 page.goto(search_url)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(scraper_settings["page_load_timeout_ms"])
 
                 try:
-                    page.wait_for_selector("a[href*='/maps/place/']", timeout=10000)
+                    page.wait_for_selector(
+                        "a[href*='/maps/place/']", 
+                        timeout=scraper_settings["search_wait_timeout_ms"]
+                    )
                 except Exception:
                     self.log(
                         f"Google Maps search results not loaded for query '{query}'",
@@ -260,7 +343,7 @@ Return ONLY JSON list:
                 for element in business_elements:
                     try:
                         element.click()
-                        page.wait_for_timeout(2000)
+                        page.wait_for_timeout(scraper_settings["result_click_delay_ms"])
 
                         try:
                             name_elem = page.query_selector("h1.DUwDvf")
@@ -329,293 +412,36 @@ Return ONLY JSON list:
 
         return leads
 
-    def scrape_justdial(
-        self, query: str, bucket: str, max_results: int = 5
-    ) -> List[Dict]:
-        """Scrape JustDial for Indian business leads using Playwright"""
-        leads: List[Dict] = []
-
-        with self.get_page() as page:
-            try:
-                query_parts = query.split()
-                city = query_parts[-1] if len(query_parts) > 1 else "Mumbai"
-                search_term = (
-                    " ".join(query_parts[:-1]) if len(query_parts) > 1 else query
-                )
-                search_url = (
-                    f"https://www.justdial.com/{city}/{search_term.replace(' ', '-')}"
-                )
-
-                page.goto(search_url)
-                page.wait_for_timeout(3000)
-
-                try:
-                    page.wait_for_selector(".jsx-1e1a185d7f5319c2", timeout=10000)
-                except Exception:
-                    self.log(
-                        f"JustDial search results not loaded for query '{query}'",
-                        "error",
-                    )
-                    return leads
-
-                business_elements = page.query_selector_all(".jsx-1e1a185d7f5319c2")
-                business_elements = business_elements[:max_results]
-
-                for element in business_elements:
-                    try:
-                        try:
-                            name_elem = element.query_selector(".jsx-2c8ae8c8b6b8b1b0")
-                            name = (
-                                name_elem.inner_text().strip()
-                                if name_elem
-                                else "Unknown Business"
-                            )
-                        except Exception:
-                            name = "Unknown Business"
-
-                        phone = None
-                        try:
-                            phone_elem = element.query_selector(".jsx-3c8ae8c8b6b8b1b0")
-                            phone = (
-                                phone_elem.inner_text().strip() if phone_elem else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting phone from JustDial: {e}", "error"
-                            )
-
-                        website = None
-                        try:
-                            website_elem = element.query_selector("a[href*='http']")
-                            website = (
-                                website_elem.get_attribute("href")
-                                if website_elem
-                                else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting website from JustDial: {e}", "error"
-                            )
-
-                        if name:
-                            leads.append(
-                                {
-                                    "business_name": name,
-                                    "website": website,
-                                    "phone": phone,
-                                    "source": "justdial",
-                                    "bucket": bucket,
-                                    "category": search_term.split()[0],
-                                    "location": city,
-                                }
-                            )
-
-                    except Exception:
-                        continue
-
-            except Exception as e:
-                self.log(f"Error scraping JustDial: {e}", "error")
-
-        return leads
-
-    def scrape_indiamart(
-        self, query: str, bucket: str, max_results: int = 5
-    ) -> List[Dict]:
-        """Scrape IndiaMART for B2B business leads using Playwright"""
-        leads: List[Dict] = []
-
-        with self.get_page() as page:
-            try:
-                search_url = f"https://dir.indiamart.com/search.mp?search={query.replace(' ', '+')}"
-                page.goto(search_url)
-                page.wait_for_timeout(3000)
-
-                try:
-                    page.wait_for_selector(".pbox", timeout=10000)
-                except Exception:
-                    self.log(
-                        f"IndiaMART search results not loaded for query '{query}'",
-                        "error",
-                    )
-                    return leads
-
-                business_elements = page.query_selector_all(".pbox")
-                business_elements = business_elements[:max_results]
-
-                for element in business_elements:
-                    try:
-                        try:
-                            name_elem = element.query_selector(".lst_clg a")
-                            name = (
-                                name_elem.inner_text().strip()
-                                if name_elem
-                                else "Unknown Business"
-                            )
-                        except Exception:
-                            name = "Unknown Business"
-
-                        website = None
-                        try:
-                            website_elem = element.query_selector(".lst_clg a")
-                            website = (
-                                website_elem.get_attribute("href")
-                                if website_elem
-                                else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting website from IndiaMART: {e}", "error"
-                            )
-
-                        phone = None
-                        try:
-                            phone_elem = element.query_selector(".pnum")
-                            phone = (
-                                phone_elem.inner_text().strip() if phone_elem else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting phone from IndiaMART: {e}", "error"
-                            )
-
-                        if name:
-                            leads.append(
-                                {
-                                    "business_name": name,
-                                    "website": website,
-                                    "phone": phone,
-                                    "source": "indiamart",
-                                    "bucket": bucket,
-                                    "category": query.split()[0],
-                                    "location": "India",
-                                }
-                            )
-
-                    except Exception as e:
-                        self.log(f"Error processing IndiaMART listing: {e}", "error")
-                        continue
-
-            except Exception as e:
-                self.log(
-                    f"Error scraping IndiaMART - query='{query}', bucket='{bucket}': {e}",
-                    "error",
-                )
-
-        return leads
-
-    def scrape_yelp(self, query: str, bucket: str, max_results: int = 5) -> List[Dict]:
-        """Scrape Yelp for business leads using Playwright"""
-        leads: List[Dict] = []
-
-        with self.get_page() as page:
-            try:
-                search_url = (
-                    f"https://www.yelp.com/search?find_desc={query.replace(' ', '+')}"
-                )
-                page.goto(search_url)
-                page.wait_for_timeout(3000)
-
-                try:
-                    page.wait_for_selector(".container__09f24__mpRFF", timeout=10000)
-                except Exception:
-                    self.log(
-                        f"Yelp search results not loaded for query '{query}'", "error"
-                    )
-                    return leads
-
-                business_elements = page.query_selector_all(".container__09f24__mpRFF")
-                business_elements = business_elements[:max_results]
-
-                for element in business_elements:
-                    try:
-                        try:
-                            name_elem = element.query_selector("a[href*='/biz/']")
-                            name = (
-                                name_elem.inner_text().strip()
-                                if name_elem
-                                else "Unknown Business"
-                            )
-                        except Exception:
-                            name = "Unknown Business"
-
-                        website = None
-                        try:
-                            website_elem = element.query_selector("a[href*='biz/']")
-                            website = (
-                                website_elem.get_attribute("href")
-                                if website_elem
-                                else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting website from Yelp: {e}", "error"
-                            )
-
-                        phone = None
-                        try:
-                            phone_elem = element.query_selector(".phone__09f24__pARZf")
-                            phone = (
-                                phone_elem.inner_text().strip() if phone_elem else None
-                            )
-                        except Exception as e:
-                            self.log(f"Error extracting phone from Yelp: {e}", "error")
-
-                        if name:
-                            leads.append(
-                                {
-                                    "business_name": name,
-                                    "website": website,
-                                    "phone": phone,
-                                    "source": "yelp",
-                                    "bucket": bucket,
-                                    "category": query.split()[0],
-                                    "location": "International",
-                                }
-                            )
-
-                    except Exception as e:
-                        self.log(f"Error processing Yelp listing: {e}", "error")
-                        continue
-
-            except Exception as e:
-                self.log(
-                    f"Error scraping Yelp - query='{query}', bucket='{bucket}': {e}",
-                    "error",
-                )
-
-        return leads
-
     def _scrape_query(self, query_data: Dict) -> List[Dict]:
-        """Scrape a single query across all sources (for parallel execution)"""
+        """Scrape a single query across all sources sequentially to ensure thread-safety."""
         query = query_data["query"]
         bucket = query_data["bucket"]
-
         query_leads: List[Dict] = []
-
-        query_leads.extend(self.scrape_google_maps(query, bucket, max_results=2))
-
-        if len(query_leads) < 3:
-            query_leads.extend(
-                self.scrape_justdial(query, bucket, 3 - len(query_leads))
-            )
-
-        if len(query_leads) < 3:
-            query_leads.extend(
-                self.scrape_indiamart(query, bucket, 3 - len(query_leads))
-            )
-
-        if len(query_leads) < 3:
-            query_leads.extend(self.scrape_yelp(query, bucket, 3 - len(query_leads)))
+        
+        bucket_data = next((b for b in self.buckets if b["name"] == bucket), None)
+        max_results = bucket_data.get("max_results") if bucket_data else None
+        
+        query_leads.extend(self.scrape_google_maps(query, bucket, max_results=max_results))
 
         return query_leads
 
     def run(
         self,
         bucket_name: Optional[str] = None,
-        max_queries: int = 5,
+        max_queries: Optional[int] = None,
     ) -> Dict:
-        """Execute full discovery pipeline - single-threaded with efficient resource reuse"""
+        """Execute full discovery pipeline - single-threaded with efficient resource reuse
+        
+        Args:
+            bucket_name: Optional bucket name to filter queries
+            max_queries: Optional max queries override. If None, uses config or bucket default.
+        """
         self.buckets = self._load_buckets()
+        limits = self._get_discovery_limits()
+        
+        if max_queries is None:
+            max_queries = limits["max_queries_per_run"]
+        
         self.log(f"\n{'=' * 60}")
         self.log("DISCOVERY: Query Generation + Lead Scraping")
         self.log(f"{'=' * 60}")

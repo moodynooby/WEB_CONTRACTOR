@@ -32,31 +32,34 @@
         "max_results": 2,
         "regions": ["global"],
         "description": "Google Maps business listings"
-      },
-      "justdial": {
-        "enabled": true,
-        "priority": 2,
-        "max_results": 3,
-        "regions": ["india"],
-        "description": "Indian business directory"
-      },
-      "indiamart": {
-        "enabled": true,
-        "priority": 3,
-        "max_results": 3,
-        "regions": ["india", "b2b"],
-        "description": "B2B marketplace for India"
-      },
-      "yelp": {
-        "enabled": true,
-        "priority": 2,
-        "max_results": 3,
-        "regions": ["international"],
-        "description": "International business reviews"
       }
     },
     "fallback_strategy": "priority",
     "max_total_results": 3,
     "test_results": {}
+  },
+  "llm_settings": {
+    "default_model": "gemma:2b-instruct-q4_0",
+    "expansion_model": "gemma:2b-instruct-q4_0",
+    "timeout_seconds": 30,
+    "max_retries": 2
+  },
+  "discovery_limits": {
+    "max_queries_per_run": 20,
+    "max_patterns_per_bucket": 3,
+    "max_cities_per_segment": 2,
+    "max_results_per_query": 5,
+    "max_leads_per_query": 2
+  },
+  "scraper_settings": {
+    "headless": true,
+    "user_agents": [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+    ],
+    "page_load_timeout_ms": 5000,
+    "search_wait_timeout_ms": 10000,
+    "result_click_delay_ms": 2000
   }
 }

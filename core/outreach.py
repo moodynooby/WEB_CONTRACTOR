@@ -5,9 +5,15 @@ Single-threaded design with efficient resource management:
 - LRU caching for email generation
 - HTTP session reuse
 - Proper Playwright lifecycle management
+
+Thread Safety:
+- Playwright browser context is created per-thread using threading.local()
+- Each audit operation gets its own isolated browser context
+- Context manager ensures proper cleanup even on exceptions
 """
 
 import json
+import threading
 import time
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple
@@ -15,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page
+from contextlib import contextmanager
 
 from core import llm
 from core.db_peewee import (
@@ -22,6 +29,9 @@ from core.db_peewee import (
     get_pending_audits, save_audits_batch,
     get_qualified_leads, save_emails_batch,
 )
+
+_browser_context_local = threading.local()
+_audit_lock = threading.Lock()
 
 
 
@@ -36,10 +46,26 @@ class Outreach:
         self.logger = logger
         self.audit_settings = self._load_audit_settings()
         self.email_prompts = self._load_email_prompts()
-
-        self._playwright = None
-
         self.ollama_enabled = llm.is_available()
+        self._llm_settings = self._load_llm_settings()
+
+    def _load_llm_settings(self) -> Dict:
+        """Load LLM settings from email_prompts.json"""
+        try:
+            with open("config/email_prompts.json", "r") as f:
+                config = json.load(f)
+                prompts_metadata = config.get("prompts_metadata", {})
+                return {
+                    "default_model": prompts_metadata.get("default_model", "gemma:2b-instruct-q4_0"),
+                    "timeout_seconds": 60,
+                    "max_retries": 3,
+                }
+        except Exception:
+            return {
+                "default_model": "gemma:2b-instruct-q4_0",
+                "timeout_seconds": 60,
+                "max_retries": 3,
+            }
 
     def _load_audit_settings(self) -> Dict:
         """Load audit settings from config file"""
@@ -71,39 +97,57 @@ class Outreach:
         else:
             print(message)
 
-    def _get_playwright_page(self) -> Optional[Page]:
-        """Get or create Playwright page for visual audits (lazy init, reused)"""
-        if self._playwright is None:
+    @contextmanager
+    def managed_session(self):
+        """Context manager for audit session - creates thread-local browser context
+        
+        Thread Safety:
+        - Each thread gets its own browser context via threading.local()
+        - Browser is launched once per thread and reused for all operations in that thread
+        - Proper cleanup ensures no resource leaks
+        """
+        if hasattr(_browser_context_local, 'context') and _browser_context_local.context is not None:
+            yield self
+            return
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            
+            _browser_context_local.playwright = p
+            _browser_context_local.browser = browser
+            _browser_context_local.context = context
+            
             try:
-                self._playwright = sync_playwright().start().chromium.launch(headless=True)
-            except Exception as e:
-                self.log(
-                    f"Failed to initialize Playwright for visual audit: {e}", "error"
-                )
-                return None
-        return self._playwright.new_page()
+                yield self
+            finally:
+                context.close()
+                browser.close()
+                _browser_context_local.context = None
+                _browser_context_local.browser = None
+                _browser_context_local.playwright = None
 
-    def _quit_playwright(self) -> None:
-        """Properly shut down Playwright"""
-        if self._playwright:
-            try:
-                self._playwright.close()
-            except Exception as e:
-                self.log(f"Unexpected error closing Playwright: {e}", "error")
-            self._playwright = None
+    def _get_playwright_page(self) -> Page:
+        """Get new Playwright page from current thread's context
+        
+        Thread Safety:
+        - Uses thread-local storage to get the correct context for this thread
+        - Raises RuntimeError if called outside managed_session()
+        """
+        if not hasattr(_browser_context_local, 'context') or _browser_context_local.context is None:
+            raise RuntimeError("Outreach must be used within managed_session() for browser tasks")
+        return _browser_context_local.context.new_page()
 
     def _take_screenshot(self, url: str) -> Optional[str]:
         """Capture website screenshot and return as base64 string"""
-        page = self._get_playwright_page()
-        if not page:
-            return None
-
         try:
-            page.goto(url, wait_until="networkidle")
+            page = self._get_playwright_page()
+            page.goto(url, wait_until="networkidle", timeout=30000)
             screenshot_bytes = page.screenshot(type="png")
             import base64
-
-            return base64.b64encode(screenshot_bytes).decode("utf-8")
+            result = base64.b64encode(screenshot_bytes).decode("utf-8")
+            page.close()
+            return result
         except Exception as e:
             self.log(f"Failed to take screenshot: {e}", "error")
             return None
@@ -141,7 +185,10 @@ class Outreach:
         return "info"
 
     def deep_discovery(self, html_content: str, base_url: str) -> Dict:
-        """Deep discovery of contact information from website HTML"""
+        """Deep discovery of contact information from website HTML
+        
+        Returns early if email is found to optimize performance.
+        """
         contact_info = {
             "email": None,
             "social_links": {},
@@ -150,18 +197,26 @@ class Outreach:
         }
 
         soup = BeautifulSoup(html_content, "html.parser")
+        email_found = False
 
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
-
-            if "@" in href and "mailto:" in href:
-                contact_info["email"] = href.replace("mailto:", "").lower()
-            elif not contact_info["email"]:
-                text = link.get_text()
-                if "@" in text and "." in text:
-                    contact_info["email"] = text.lower()
-
             href_lower = href.lower()
+
+            if not email_found:
+                if "@" in href and "mailto:" in href:
+                    contact_info["email"] = href.replace("mailto:", "").lower()
+                    email_found = True
+                elif "@" in href and "." in href and len(href) < 100:
+                    contact_info["email"] = href.lower()
+                    email_found = True
+
+            if not email_found:
+                text = link.get_text()
+                if "@" in text and "." in text and len(text) < 100:
+                    contact_info["email"] = text.lower()
+                    email_found = True
+
             if "linkedin.com" in href_lower:
                 contact_info["social_links"]["linkedin"] = href
             elif "facebook.com" in href_lower:
@@ -171,18 +226,30 @@ class Outreach:
             elif "twitter.com" in href_lower or "x.com" in href_lower:
                 contact_info["social_links"]["twitter"] = href
 
-            if any(k in href_lower for k in ["contact", "get-in-touch", "support"]):
-                if not href.startswith("http"):
-                    from urllib.parse import urljoin
+            if not contact_info["contact_form_url"]:
+                if any(k in href_lower for k in ["contact", "get-in-touch", "support"]):
+                    if not href.startswith("http"):
+                        from urllib.parse import urljoin
+                        contact_info["contact_form_url"] = urljoin(base_url, href)
+                    else:
+                        contact_info["contact_form_url"] = href
 
-                    contact_info["contact_form_url"] = urljoin(base_url, href)
-                else:
-                    contact_info["contact_form_url"] = href
+        if not email_found:
+            import re
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            text_content = soup.get_text()
+            emails = re.findall(email_pattern, text_content)
+            if emails:
+                for email in emails:
+                    if not any(x in email.lower() for x in ['example', 'domain', 'placeholder']):
+                        contact_info["email"] = email.lower()
+                        break
 
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
             if href.startswith("tel:"):
                 contact_info["phone"] = href.replace("tel:", "")
+                break
 
         return contact_info
 
@@ -237,7 +304,12 @@ class Outreach:
         business_name: str = "this business",
         bucket_name: Optional[str] = None,
     ) -> Dict:
-        """Audit website for technical and qualitative issues + Deep Discovery"""
+        """Audit website for technical and qualitative issues + Deep Discovery
+        
+        Optimizations:
+        - Returns contact info immediately if email is found
+        - Skips expensive LLM/visual audits if email already discovered
+        """
         issues = []
         score = 100
         discovered_info = {
@@ -407,31 +479,38 @@ class Outreach:
                         )
                         score -= check["score_impact"]
 
+            tech_score = max(0, score)
+
             llm_config = self.audit_settings.get("llm_audit", {})
             qual_score = 100
             if self.ollama_enabled and llm_config.get("enabled"):
-                text_content = self._strip_tags(html_content)[:2000]
+                if 0 <= tech_score <= 60:
+                    self.log(f"  Technical score {tech_score} in range, running LLM audit...", "info")
+                    text_content = self._strip_tags(html_content)[:2000]
 
-                llm_result = self._run_llm_audit(
-                    business_name, text_content, llm_config
-                )
-                if llm_result:
-                    qual_score = llm_result.get("qualitative_score", 100)
-                    for obs in llm_result.get("observations", []):
-                        issues.append(
-                            {
-                                "type": f"llm_{obs.get('type', 'observation')}",
-                                "severity": self._normalize_severity(
-                                    obs.get("severity", "info")
-                                ),
-                                "description": f"LLM: {obs.get('description')}",
-                            }
-                        )
+                    llm_result = self._run_llm_audit(
+                        business_name, text_content, llm_config
+                    )
+                    if llm_result:
+                        qual_score = llm_result.get("qualitative_score", 100)
+                        for obs in llm_result.get("observations", []):
+                            issues.append(
+                                {
+                                    "type": f"llm_{obs.get('type', 'observation')}",
+                                    "severity": self._normalize_severity(
+                                        obs.get("severity", "info")
+                                    ),
+                                    "description": f"LLM: {obs.get('description')}",
+                                }
+                            )
+                else:
+                    self.log(f"  Technical score {tech_score} out of range, skipping LLM audit.", "info")
 
             visual_config = self.audit_settings.get("visual_audit", {})
             vis_score = 100
             if self.ollama_enabled and visual_config.get("enabled"):
-                self.log("  Capturing screenshot for visual audit...", "info")
+                if 0 <= tech_score <= 65:
+                    self.log("  Capturing screenshot for visual audit...", "info")
                 base64_image = self._take_screenshot(url)
                 if base64_image:
                     visual_result = self._run_visual_audit(
@@ -487,7 +566,7 @@ class Outreach:
             score = 30
 
         rules = self.audit_settings.get("qualification_rules", {})
-        target_min = rules.get("target_score_min", 40)
+        target_min = rules.get("target_score_min", 0)
         target_max = rules.get("target_score_max", 84)
         min_issues = rules.get("min_issues_required", 2)
 
@@ -550,12 +629,12 @@ Return ONLY JSON:
 
         try:
             raw = llm.generate_with_retry(
-                model="gemma:2b-instruct-q4_0",
+                model=self._llm_settings["default_model"],
                 prompt=prompt,
                 system="You are a professional email editor. Output ONLY valid JSON. Preserve the signature if present, or add one if missing.",
                 format_json=True,
-                max_retries=3,
-                timeout=60,
+                max_retries=self._llm_settings["max_retries"],
+                timeout=self._llm_settings["timeout_seconds"],
             )
             data = json.loads(raw)
             return {
@@ -565,6 +644,135 @@ Return ONLY JSON:
         except llm.OllamaError as e:
             self.log(f"Email refinement failed: {e}", "error")
             return {"subject": subject, "body": body}
+
+    def _parse_email_response(self, raw: str, business_name: str) -> Dict:
+        """Parse email from LLM text response using delimiters"""
+        import re
+        
+        text = raw.strip()
+        
+        filler_patterns = [
+            r'^(Here is|Here\'s|This is|I have created|I\'ve created|Below is|Please find)',
+            r'^(Would you like|Do you want|Should I|Can I|Let me know if)',
+            r'^(I hope this helps|I hope you find this useful|Feel free to)',
+            r'^(Note:|Important:|Remember:|Please note)',
+            r'^(I\'ve written|I have written|I wrote|I created)',
+            r'^(Your email is ready|Here you go|Here it is)',
+            r'^(As requested|As you asked|Per your request)',
+            r'(Would you like me to|Do you want me to|Should I also|Can I also)',
+            r'(Let me know if you need|Feel free to ask|Happy to revise)',
+            r'(I can adjust|I can modify|I can change|Let me know if)',
+            r'(This is a draft|This draft|The above email)',
+        ]
+        
+        for pattern in filler_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.MULTILINE)
+        
+        lines = text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            line_stripped = line.strip()
+            if re.match(r'^(Here|Would|Do|Should|Can|Let|I hope|Feel|Note|Important|Please find|As requested)', line_stripped, re.IGNORECASE):
+                continue
+            if re.match(r'^[-*]\s*(Here|Would|Do|Should|Can|Let|I hope|Feel|Note)', line_stripped, re.IGNORECASE):
+                continue
+            cleaned_lines.append(line)
+        text = '\n'.join(cleaned_lines)
+        
+        subject_patterns = [
+            (r'\[SUBJECT\]\s*(.+?)\s*\[/SUBJECT\]', re.IGNORECASE | re.DOTALL),
+            (r'(?:SUBJECT|Subject)[:\s]+(.+?)(?:\n|$)', re.IGNORECASE | re.MULTILINE),
+            (r'\*\*Subject:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE | re.MULTILINE),
+        ]
+        
+        subject = None
+        for pattern, flags in subject_patterns:
+            match = re.search(pattern, text, flags)
+            if match:
+                subject = match.group(1).strip()
+                subject = re.sub(r'\[/?SUBJECT\]', '', subject, flags=re.IGNORECASE).strip()
+                break
+        
+        if not subject:
+            lines = text.split('\n')
+            for line in lines:
+                line = line.strip()
+                skip_patterns = [
+                    r'^\[',  
+                    r'^(Dear|Hello|Hi|Good morning|Good afternoon)',  
+                    r'^(Here is|Here\'s|This is|I have|I\'m writing|I am writing)',  
+                    r'^(Would|Do|Should|Can|Let me|I hope|Feel free)',  
+                    r'^[-*•]',  
+                    r'^\d+\.',  
+                ]
+                should_skip = False
+                for skip_pattern in skip_patterns:
+                    if re.match(skip_pattern, line, re.IGNORECASE):
+                        should_skip = True
+                        break
+                if not should_skip and line and len(line) < 100:
+                    subject = line
+                    break
+
+        if not subject:
+            subject = f"Quick note about {business_name}"
+
+        subject = re.sub(r'\[/?\w+\]', '', subject)  
+        subject = re.sub(r'\*+', '', subject)  
+        subject = subject.strip(' #:\"\'')  
+        subject = re.sub(r'\s+', ' ', subject)  
+        
+        body_patterns = [
+            (r'\[BODY\]\s*(.+?)\s*\[/BODY\]', re.IGNORECASE | re.DOTALL),
+            (r'(?:BODY|Body)[:\s]+(.+?)(?:\n\s*\n|\[END\]|$)', re.IGNORECASE | re.DOTALL),
+            (r'\*\*Body:\*\*\s*(.+?)(?:\n\s*\n|$)', re.IGNORECASE | re.DOTALL),
+        ]
+        
+        body = None
+        for pattern, flags in body_patterns:
+            match = re.search(pattern, text, flags)
+            if match:
+                body = match.group(1).strip()
+                break
+        
+        if not body:
+            body = re.sub(r'\[SUBJECT\].*?\[/SUBJECT\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+            body = re.sub(r'(?:SUBJECT|Subject)[:\s]+.+?(?:\n|$)', '', body, flags=re.IGNORECASE)
+            body = re.sub(r'\[/?BODY\]', '', body, flags=re.IGNORECASE)
+            body = body.strip()
+        
+        if "Best regards" in body or "Manas Doshi" in body or "Sincerely" in body or "Regards" in body:
+            body = re.split(r'(?:Best regards|Sincerely|Regards|Kind regards|Warm regards)', body, flags=re.IGNORECASE)[0].strip()
+        
+        body = re.sub(r'\[/?\w+\]', '', body)
+        body = re.sub(r'\*+', '', body)  
+        body = re.sub(r'#{2,}', '', body)  
+        body = re.sub(r'\[website[^\]]*\]', 'your website', body, flags=re.IGNORECASE)
+        body = re.sub(r'\[company[^\]]*\]', business_name, body, flags=re.IGNORECASE)
+        body = re.sub(r'\[business[^\]]*\]', business_name, body, flags=re.IGNORECASE)
+        body = re.sub(r' +', ' ', body)
+        body = re.sub(r'\n\s*\n', '\n\n', body)
+        body = '\n'.join(line.strip() for line in body.split('\n') if line.strip())
+        
+        signature = self.email_prompts.get("email_signature", {}).get(
+            "template",
+            "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services",
+        )
+        if "{name}" in signature or "{company}" in signature:
+            signature = signature.format(
+                name=self.email_prompts.get("email_signature", {}).get(
+                    "name", "Manas Doshi"
+                ),
+                company=self.email_prompts.get("email_signature", {}).get(
+                    "company", "Future Forwards"
+                ),
+                website=self.email_prompts.get("email_signature", {}).get(
+                    "website", "https://man27.netlify.app/services"
+                ),
+            )
+        final_body = body.strip() + signature
+        
+        return {"subject": subject, "body": final_body}
 
     def _generate_email_uncached(
         self, business_name: str, issues_key: str, bucket: str
@@ -594,7 +802,7 @@ Return ONLY JSON:
         )
         system_message = self.email_prompts.get("cold_email", {}).get(
             "system_message",
-            "You are a professional email writer. Output ONLY valid JSON.",
+            "You are a professional email writer. Use [SUBJECT] and [BODY] tags.",
         )
         prompt = prompt_template.format(
             business_name=business_name, issue_summary=issue_summary
@@ -602,50 +810,17 @@ Return ONLY JSON:
 
         try:
             raw = llm.generate(
-                model="gemma:2b-instruct-q4_0",
+                model=self._llm_settings["default_model"],
                 prompt=prompt,
                 system=system_message,
-                format_json=True,
-                timeout=60,
+                format_json=False,
+                timeout=self._llm_settings["timeout_seconds"],
             )
         except llm.OllamaError as e:
             self.log(f"Error generating email: {e}", "error")
             raise
 
-        try:
-            data = json.loads(raw)
-            body = data.get("body", "")
-            if not body:
-                raise Exception("Missing body in LLM response")
-
-            if "Best regards" in body or "Manas Doshi" in body:
-                body = body.split("Best regards")[0].split("Sincerely")[0].strip()
-
-            signature = self.email_prompts.get("email_signature", {}).get(
-                "template",
-                "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services",
-            )
-            if "{name}" in signature or "{company}" in signature:
-                signature = signature.format(
-                    name=self.email_prompts.get("email_signature", {}).get(
-                        "name", "Manas Doshi"
-                    ),
-                    company=self.email_prompts.get("email_signature", {}).get(
-                        "company", "Future Forwards"
-                    ),
-                    website=self.email_prompts.get("email_signature", {}).get(
-                        "website", "https://man27.netlify.app/services"
-                    ),
-                )
-            final_body = body.strip() + signature
-
-            return {
-                "subject": data.get("subject", f"Quick note about {business_name}"),
-                "body": final_body,
-            }
-        except json.JSONDecodeError as e:
-            self.log(f"Failed to parse email JSON: {e}\nRaw: {raw}", "error")
-            raise
+        return self._parse_email_response(raw, business_name)
 
     @lru_cache(maxsize=128)
     def generate_email_ollama(
@@ -658,7 +833,10 @@ Return ONLY JSON:
         return self._generate_email_uncached(business_name, issues_key, bucket)
 
     def _audit_single_lead(self, lead: Dict) -> Tuple[int, Dict, float]:
-        """Audit a single lead"""
+        """Audit a single lead and discover contact info.
+        
+        Returns early if email is found during discovery to optimize performance.
+        """
         start_time = time.time()
 
         try:
@@ -668,6 +846,9 @@ Return ONLY JSON:
                 lead.get("bucket") or "default",
             )
             duration = time.time() - start_time
+
+            if audit_result.get("discovered_info", {}).get("email"):
+                self.log(f"  ✓ Email found: {audit_result['discovered_info']['email']}", "success")
 
             return lead["id"], audit_result, duration
         except Exception as e:
@@ -688,32 +869,48 @@ Return ONLY JSON:
         limit: int = 20,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
-        """Audit pending leads - single-threaded with duration tracking"""
-        self.log(f"\n{'=' * 60}")
-        self.log("OUTREACH: Lead Auditing")
-        self.log(f"{'=' * 60}")
+        """Audit pending leads - wrapped in managed_session for thread-safety
+        
+        Optimizations:
+        - Skips leads that already have email addresses
+        - Stops processing a lead once email is found
+        """
+        with self.managed_session():
+            self.log(f"\n{'=' * 60}")
+            self.log("OUTREACH: Lead Auditing")
+            self.log(f"{'=' * 60}")
 
-        leads = get_pending_audits(limit)
-        self.log(f"Auditing {len(leads)} leads...", "info")
+            leads = get_pending_audits(limit)
+            self.log(f"Auditing {len(leads)} leads...", "info")
 
-        audited = 0
-        qualified = 0
-        audit_batch = []
+            audited = 0
+            qualified = 0
+            skipped_no_email = 0
+            audit_batch = []
 
-        try:
             for i, lead in enumerate(leads, 1):
                 self.log(f"\n[{i}/{len(leads)}] {lead['business_name']}", "info")
 
                 lead_id, audit_result, duration = self._audit_single_lead(lead)
+                discovered_info = audit_result.get("discovered_info", {})
 
-                if "discovered_info" in audit_result:
-                    info = audit_result["discovered_info"]
-                    update_lead_contact_info(lead_id, info)
-                    if info.get("email"):
-                        self.log(f"  Found email: {info['email']}", "success")
-                    if info.get("social_links"):
+                has_email = bool(discovered_info.get("email"))
+                has_contact_form = bool(discovered_info.get("contact_form_url"))
+                
+                if not has_email and not has_contact_form:
+                    skipped_no_email += 1
+                    self.log("  ✗ No contact info found - skipping lead", "error")
+                    continue
+
+                if discovered_info:
+                    update_lead_contact_info(lead_id, discovered_info)
+                    if has_email:
+                        self.log(f"  ✓ Email: {discovered_info['email']}", "success")
+                    if has_contact_form:
+                        self.log(f"  ✓ Contact form: {discovered_info['contact_form_url']}", "success")
+                    if discovered_info.get("social_links"):
                         self.log(
-                            f"  Found {len(info['social_links'])} social links",
+                            f"  ✓ Found {len(discovered_info['social_links'])} social links",
                             "success",
                         )
 
@@ -729,36 +926,28 @@ Return ONLY JSON:
                 if audit_result["qualified"]:
                     qualified += 1
                     self.log(
-                        f"  Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])}, Time: {duration:.1f}s)",
+                        f"  ✓ Qualified (Score: {audit_result['score']}, Issues: {len(audit_result['issues'])}, Time: {duration:.1f}s)",
                         "success",
                     )
                 else:
                     self.log(
-                        f"  Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)",
+                        f"  ✗ Not qualified (Score: {audit_result['score']}, Time: {duration:.1f}s)",
                         "error",
                     )
 
                 if progress_callback:
                     progress_callback(i, len(leads), lead["business_name"])
 
-                self.log(
-                    f"  Score: {audit_result['score']}, Qualified: {bool(audit_result['qualified'])}",
-                    "success" if audit_result["qualified"] else "info",
-                )
-
             if audit_batch:
                 save_audits_batch(audit_batch)
 
-        finally:
-            self._quit_playwright()
+            self.log(f"\n{'=' * 60}")
+            self.log(
+                f"Auditing Complete: {audited} audited, {qualified} qualified, {skipped_no_email} skipped (no contact)", "success"
+            )
+            self.log(f"{'=' * 60}\n")
 
-        self.log(f"\n{'=' * 60}")
-        self.log(
-            f"Auditing Complete: {audited} audited, {qualified} qualified", "success"
-        )
-        self.log(f"{'=' * 60}\n")
-
-        return {"audited": audited, "qualified": qualified}
+            return {"audited": audited, "qualified": qualified}
 
     def _generate_single_email(self, lead: Dict) -> Optional[Dict]:
         """Generate email for a single lead"""

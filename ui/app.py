@@ -24,10 +24,10 @@ from textual import work
 from core.discovery import PlaywrightScraper
 from core.email import EmailSender
 from core.db_peewee import (
-    init_db,
+    init_db, close_db,
     save_bucket, get_all_buckets,
     save_config, get_config, get_emails_needing_review,
-    update_email_status, update_email_content, delete_email, mark_email_sent,
+    update_email_content, delete_email, mark_email_sent,
 )
 from core.outreach import Outreach
 
@@ -44,6 +44,11 @@ class ReviewScreen(Screen):
         Binding("r", "refine_email", "AI Rewrite"),
         Binding("d", "delete_selected", "Delete"),
     ]
+
+    def __init__(self):
+        super().__init__()
+        self.selected_email = None
+        self.emails = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -80,47 +85,53 @@ class ReviewScreen(Screen):
                     (e for e in self.emails if e["id"] == self.selected_email["id"]),
                     None,
                 )
-                if new_data:
-                    self.selected_email = new_data
-                else:
-                    self.selected_email = self.emails[0]
-                    table.move_cursor(row=0)
+                self.selected_email = new_data if new_data else self.emails[0]
             else:
                 self.selected_email = self.emails[0]
-                table.move_cursor(row=0)
+            
+            for idx, email in enumerate(self.emails):
+                if email["id"] == self.selected_email["id"]:
+                    table.move_cursor(row=idx)
+                    break
+            
             self.update_detail_view()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected):
         if event.row_key.value is None:
             return
-        email_id = int(event.row_key.value)
-        self.selected_email = next(
-            (e for e in self.emails if e["id"] == email_id), None
-        )
-        if self.selected_email:
-            self.update_detail_view()
+        try:
+            email_id = int(event.row_key.value)
+            self.selected_email = next(
+                (e for e in self.emails if e["id"] == email_id), None
+            )
+            if self.selected_email:
+                self.update_detail_view()
+        except (ValueError, TypeError):
+            self.notify("Invalid row selection", severity="error")
 
     def update_detail_view(self):
-        if self.selected_email:
-            content = f"[b]To:[/b] {self.selected_email.get('email', 'N/A')}\n"
-            content += f"[b]Subject:[/b] {self.selected_email['subject']}\n\n"
+        if not self.selected_email:
+            self.query_one("#email-details").update("No email selected.")
+            return
+        content = f"[b]To:[/b] {self.selected_email.get('email', 'N/A')}\n"
+        content += f"[b]Subject:[/b] {self.selected_email['subject']}\n\n"
 
-            alt_comm = []
-            if self.selected_email.get("contact_form_url"):
-                alt_comm.append(
-                    f"[cyan]Form:[/cyan] {self.selected_email['contact_form_url']}"
-                )
+        alt_comm = []
+        if self.selected_email.get("contact_form_url"):
+            alt_comm.append(
+                f"[cyan]Form:[/cyan] {self.selected_email['contact_form_url']}"
+            )
 
-            social = self.selected_email.get("social_links", {})
-            for plat, link in social.items():
-                alt_comm.append(f"[cyan]{plat.capitalize()}:[/cyan] {link}")
+        social = self.selected_email.get("social_links", {})
+        for plat, link in social.items():
+            alt_comm.append(f"[cyan]{plat.capitalize()}:[/cyan] {link}")
 
-            if alt_comm:
-                content += "[b]Alt Communications:[/b]\n" + "\n".join(alt_comm) + "\n\n"
+        if alt_comm:
+            content += "[b]Alt Communications:[/b]\n" + "\n".join(alt_comm) + "\n\n"
 
-            content += "[b]Message:[/b]\n"
-            content += f"{self.selected_email['body']}"
-            self.query_one("#email-details").update(content)
+        content += "[b]Message:[/b]\n"
+        content += f"{self.selected_email['body']}"
+        self.query_one("#email-details").update(content)
 
     @work(exclusive=True, thread=True)
     async def action_approve_selected(self):
@@ -134,30 +145,29 @@ class ReviewScreen(Screen):
         body = self.selected_email["body"]
 
         if not to_email:
-            self.call_from_thread(self.notify, "No email address found for this lead!", severity="error")
+            self.app.call_from_thread(self.app.notify, "No email address found for this lead!", severity="error")
             return
 
-        self.call_from_thread(self.notify, f"Sending email to {self.selected_email['business_name']}...")
-
-        update_email_status(email_id, "pending")
+        self.app.call_from_thread(self.app.notify, f"Sending email to {self.selected_email['business_name']}...")
 
         success = self.app.email_sender.send_email(to_email, subject, body)
 
         if success:
             mark_email_sent(email_id, True)
-            self.call_from_thread(
-                self.notify,
+            self.app.call_from_thread(
+                self.app.notify,
                 f"Email sent to {self.selected_email['business_name']}",
                 severity="information",
             )
         else:
-            self.call_from_thread(
-                self.notify,
+            mark_email_sent(email_id, False, "SMTP send failed")
+            self.app.call_from_thread(
+                self.app.notify,
                 f"Failed to send email to {self.selected_email['business_name']}",
                 severity="error",
             )
 
-        self.call_from_thread(self.refresh_emails)
+        self.app.call_from_thread(self.refresh_emails)
 
     def action_delete_selected(self):
         if self.selected_email:
@@ -203,7 +213,7 @@ class ReviewScreen(Screen):
         instructions = await self.app.push_screen_wait(refine_modal)
 
         if instructions:
-            self.call_from_thread(self.notify, "AI is refining the email...")
+            self.app.call_from_thread(self.app.notify, "AI is refining the email...")
             result = self.app.outreach.refine_email_ollama(
                 self.selected_email["subject"], self.selected_email["body"], instructions
             )
@@ -212,12 +222,14 @@ class ReviewScreen(Screen):
                 update_email_content(
                     self.selected_email["id"], result["subject"], result["body"]
                 )
-                self.call_from_thread(self.notify, "AI refinement complete!")
-                self.call_from_thread(self.refresh_emails)
+                self.app.call_from_thread(self.app.notify, "AI refinement complete!")
+                self.app.call_from_thread(self.refresh_emails)
 
 
 class RefineEmailModal(ModalScreen):
     """Modal for entering AI refinement instructions"""
+    
+    MAX_INSTRUCTIONS_LENGTH = 500  
 
     def compose(self) -> ComposeResult:
         with Vertical(id="refine-container"):
@@ -225,7 +237,7 @@ class RefineEmailModal(ModalScreen):
             yield Label(
                 "e.g. 'Make it shorter', 'Mention my portfolio', 'Be more formal'"
             )
-            yield Input(placeholder="Enter instructions...", id="refine-input")
+            yield Input(placeholder="Enter instructions...", id="refine-input", max_length=self.MAX_INSTRUCTIONS_LENGTH)
             with Horizontal(id="refine-buttons"):
                 yield Button("Refine", variant="success", id="refine-btn")
                 yield Button("Cancel", variant="error", id="cancel-btn")
@@ -236,18 +248,24 @@ class RefineEmailModal(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "refine-btn":
             instructions = self.query_one("#refine-input", Input).value
-            if instructions:
-                self.dismiss(instructions)
+            if instructions and len(instructions.strip()) > 0:
+                if len(instructions) > self.MAX_INSTRUCTIONS_LENGTH:
+                    self.notify(f"Instructions too long (max {self.MAX_INSTRUCTIONS_LENGTH} chars)", severity="error")
+                    return
+                self.dismiss(instructions.strip())
             else:
-                self.dismiss(None)
+                self.notify("Please enter some instructions", severity="warning")
         else:
             self.dismiss(None)
 
     def on_input_submitted(self, event: Input.Submitted):
-        if event.value:
-            self.dismiss(event.value)
+        if event.value and len(event.value.strip()) > 0:
+            if len(event.value) > self.MAX_INSTRUCTIONS_LENGTH:
+                self.notify(f"Instructions too long (max {self.MAX_INSTRUCTIONS_LENGTH} chars)", severity="error")
+                return
+            self.dismiss(event.value.strip())
         else:
-            self.dismiss(None)
+            self.notify("Please enter some instructions", severity="warning")
 
 
 class MarketReviewScreen(Screen):
@@ -311,44 +329,53 @@ class MarketReviewScreen(Screen):
                 self.notify("Suggestion rejected.")
 
     def apply_suggestion(self, s: Dict):
-        if "new_categories" in s:
-            bucket_name = s.get("bucket_name")
-            buckets = get_all_buckets()
-            bucket = next((b for b in buckets if b["name"] == bucket_name), None)
-            if bucket:
-                new_cats = list(
-                    set(bucket.get("categories", []) + s.get("new_categories", []))
-                )
-                new_pats = list(
-                    set(bucket.get("search_patterns", []) + s.get("new_patterns", []))
-                )
-                bucket["categories"] = new_cats
-                bucket["search_patterns"] = new_pats
-
-                geo_focus = get_config("geographic_focus") or {}
-                if "expanded" not in geo_focus:
-                    geo_focus["expanded"] = {"cities": []}
-                geo_focus["expanded"]["cities"] = list(
-                    set(
-                        geo_focus["expanded"].get("cities", [])
-                        + s.get("new_cities", [])
+        try:
+            if "new_categories" in s:
+                bucket_name = s.get("bucket_name")
+                buckets = get_all_buckets()
+                bucket = next((b for b in buckets if b["name"] == bucket_name), None)
+                if bucket:
+                    new_cats = list(
+                        set(bucket.get("categories", []) + s.get("new_categories", []))
                     )
-                )
-                save_config("geographic_focus", geo_focus)
+                    new_pats = list(
+                        set(bucket.get("search_patterns", []) + s.get("new_patterns", []))
+                    )
+                    bucket["categories"] = new_cats
+                    bucket["search_patterns"] = new_pats
 
-                segments = bucket.get("geographic_segments", [])
-                if isinstance(segments, str):
-                    segments = json.loads(segments)
-                if "expanded" not in segments:
-                    segments.append("expanded")
-                    bucket["geographic_segments"] = segments
+                    geo_focus = get_config("geographic_focus") or {}
+                    if "expanded" not in geo_focus:
+                        geo_focus["expanded"] = {"cities": []}
+                    geo_focus["expanded"]["cities"] = list(
+                        set(
+                            geo_focus["expanded"].get("cities", [])
+                            + s.get("new_cities", [])
+                        )
+                    )
+                    save_config("geographic_focus", geo_focus)
 
-                save_bucket(bucket)
-        else:
-            s["geographic_segments"] = ["tier_1_metros"]
-            s["conversion_probability"] = 0.5
-            s["monthly_target"] = 100
-            save_bucket(s)
+                    segments = bucket.get("geographic_segments", [])
+                    if isinstance(segments, str):
+                        try:
+                            segments = json.loads(segments)
+                        except json.JSONDecodeError:
+                            self.notify("Invalid geographic_segments JSON, resetting", severity="error")
+                            segments = []
+                    if "expanded" not in segments:
+                        segments.append("expanded")
+                        bucket["geographic_segments"] = segments
+
+                    save_bucket(bucket)
+                    self.notify("Market expansion applied successfully", severity="information")
+            else:
+                s["geographic_segments"] = ["tier_1_metros"]
+                s["conversion_probability"] = 0.5
+                s["monthly_target"] = 100
+                save_bucket(s)
+                self.notify("New bucket created successfully", severity="information")
+        except Exception as e:
+            self.notify(f"Failed to apply suggestion: {type(e).__name__}", severity="error")
 
 
 class WebContractorTUI(App):
@@ -516,6 +543,13 @@ class WebContractorTUI(App):
             "info",
         )
 
+    def on_unmount(self) -> None:
+        """Cleanup resources on app exit"""
+        try:
+            close_db()
+        except Exception:
+            pass  
+
     def write_log(self, message: str, style: str = ""):
         """Write to activity log"""
         log_widget = self.query_one("#activity-log", RichLog)
@@ -585,7 +619,7 @@ class WebContractorTUI(App):
         """Run discovery pipeline (Stage 0 + Stage A)"""
         self.call_from_thread(self.update_status, "Running Discovery...")
         try:
-            self.discovery.run(max_queries=5)
+            self.discovery.run(max_queries=None)
         except Exception as e:
             self.call_from_thread(self.write_log, f"Discovery failed: {e}", "error")
         finally:

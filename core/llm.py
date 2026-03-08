@@ -9,8 +9,13 @@ Boundaries:
 Thread Safety:
 - Semaphore(1) ensures only 1 concurrent request to local Ollama
 - Thread-local sessions prevent shared state issues
+
+Configuration:
+- OLLAMA_URL: Set via environment variable (default: http://localhost:11434)
+- OLLAMA_TIMEOUT: Default timeout in seconds (default: 30)
 """
 
+import os
 import threading
 from typing import Any, Dict, Optional
 
@@ -19,7 +24,8 @@ import requests
 _semaphore = threading.Semaphore(1)
 _local = threading.local()
 
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+DEFAULT_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "30"))
 
 
 class OllamaError(Exception):
@@ -54,7 +60,7 @@ def generate(
     prompt: str,
     system: Optional[str] = None,
     format_json: bool = False,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> str:
     """Generate text from Ollama with rate limiting (no retries)
 
@@ -63,7 +69,7 @@ def generate(
         prompt: User prompt (will be compacted to max 1500 chars)
         system: Optional system message (will be compacted to max 100 chars)
         format_json: If True, request JSON output
-        timeout: Request timeout in seconds
+        timeout: Request timeout in seconds (default: from OLLAMA_TIMEOUT env var)
 
     Returns:
         Raw response text from model
@@ -94,6 +100,9 @@ def generate(
                 raw = data.get("response", "")
                 if not raw or raw.strip() == "":
                     raise OllamaError("Empty response from model")
+                
+                if format_json:
+                    return _extract_json(raw)
                 return raw
             else:
                 raise OllamaError(f"API error: {response.status_code}")
@@ -104,13 +113,28 @@ def generate(
             raise OllamaError(f"Connection error: {e}")
 
 
+def _extract_json(text: str) -> str:
+    """Extract JSON object from text that might contain filler."""
+    text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    
+    if start == -1 or end == -1:
+        start = text.find("[")
+        end = text.rfind("]")
+        
+    if start != -1 and end != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
 def generate_with_retry(
     model: str,
     prompt: str,
     system: Optional[str] = None,
     format_json: bool = False,
     max_retries: int = 3,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> str:
     """Generate with retry logic (for email operations only)"""
     import time as time_module

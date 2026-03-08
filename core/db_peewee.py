@@ -18,7 +18,12 @@ from peewee import (
     DateTimeField,
     ForeignKeyField,
     Check,
+    IntegrityError,
+    DatabaseError,
+    JOIN,
+    prefetch,
 )
+from playhouse.migrate import SqliteMigrator, migrate
 
 db = SqliteDatabase(
     'leads.db',
@@ -50,6 +55,9 @@ class Bucket(BaseModel):
     daily_email_count = IntegerField(default=0)
     last_reset_date = DateTimeField(default=lambda: datetime.now().date())
     daily_email_limit = IntegerField(default=500)
+    max_queries = IntegerField(default=5)
+    max_results = IntegerField(default=2)
+    priority = IntegerField(default=1)
 
     def to_dict(self) -> Dict:
         return {
@@ -63,6 +71,9 @@ class Bucket(BaseModel):
             'monthly_target': self.monthly_target,
             'daily_email_count': self.daily_email_count,
             'daily_email_limit': self.daily_email_limit,
+            'max_queries': self.max_queries,
+            'max_results': self.max_results,
+            'priority': self.priority,
         }
 
 
@@ -178,6 +189,33 @@ def init_db():
     """Initialize database and create tables"""
     db.connect(reuse_if_open=True)
     db.create_tables([Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig], safe=True)
+    _migrate_bucket_columns()
+
+
+def _migrate_bucket_columns():
+    """Add new columns to Bucket table if they don't exist using Peewee migrate."""
+    migrator = SqliteMigrator(db)
+    
+    try:
+        migrate(
+            migrator.add_column('bucket', 'max_queries', IntegerField(default=5)),
+        )
+    except Exception:
+        pass  
+    
+    try:
+        migrate(
+            migrator.add_column('bucket', 'max_results', IntegerField(default=2)),
+        )
+    except Exception:
+        pass  
+    
+    try:
+        migrate(
+            migrator.add_column('bucket', 'priority', IntegerField(default=1)),
+        )
+    except Exception:
+        pass  
 
 
 def close_db():
@@ -244,7 +282,7 @@ def save_lead(data: Dict) -> int:
             contact_form_url=data.get('contact_form_url'),
         )
         return lead.id
-    except Exception:
+    except (IntegrityError, DatabaseError):
         return -1
 
 
@@ -252,58 +290,57 @@ def save_leads_batch(leads: List[Dict]) -> int:
     """Save multiple leads in batch"""
     if not leads:
         return 0
-    
+
     bucket_map = {}
     bucket_names = {l.get('bucket') for l in leads if l.get('bucket')}
     for b in Bucket.select().where(Bucket.name.in_(bucket_names)):
         bucket_map[b.name] = b.id
 
-    saved = 0
-    with db.atomic():
-        for lead_data in leads:
-            try:
-                Lead.create(
-                    business_name=lead_data.get('business_name'),
-                    category=lead_data.get('category'),
-                    location=lead_data.get('location'),
-                    phone=lead_data.get('phone'),
-                    email=lead_data.get('email'),
-                    website=lead_data.get('website'),
-                    source=lead_data.get('source'),
-                    bucket_id=bucket_map.get(lead_data.get('bucket')),
-                    quality_score=lead_data.get('quality_score', 0.5),
-                    social_links=json.dumps(lead_data.get('social_links', {})),
-                    contact_form_url=lead_data.get('contact_form_url'),
-                )
-                saved += 1
-            except Exception:
-                continue
-    return saved
+    insert_data = []
+    for lead_data in leads:
+        insert_data.append({
+            'business_name': lead_data.get('business_name'),
+            'category': lead_data.get('category'),
+            'location': lead_data.get('location'),
+            'phone': lead_data.get('phone'),
+            'email': lead_data.get('email'),
+            'website': lead_data.get('website'),
+            'source': lead_data.get('source'),
+            'bucket_id': bucket_map.get(lead_data.get('bucket')),
+            'quality_score': lead_data.get('quality_score', 0.5),
+            'social_links': json.dumps(lead_data.get('social_links', {})),
+            'contact_form_url': lead_data.get('contact_form_url'),
+        })
+
+    try:
+        with db.atomic():
+            Lead.insert_many(insert_data).execute()
+        return len(insert_data)
+    except (IntegrityError, DatabaseError):
+        return 0
 
 
 def update_lead_contact_info(lead_id: int, info: Dict) -> None:
     """Update lead contact info"""
-    lead = Lead.get_or_none(lead_id)
-    if not lead:
-        return
+    update_data = {}
+    if 'email' in info and info['email']:
+        update_data['email'] = info['email']
+    if 'phone' in info and info['phone']:
+        update_data['phone'] = info['phone']
+    if 'social_links' in info:
+        update_data['social_links'] = json.dumps(info['social_links'])
+    if 'contact_form_url' in info:
+        update_data['contact_form_url'] = info['contact_form_url']
     
-    with db.atomic():
-        if 'email' in info and info['email']:
-            lead.email = info['email']
-        if 'phone' in info and info['phone']:
-            lead.phone = info['phone']
-        if 'social_links' in info:
-            lead.social_links = json.dumps(info['social_links'])
-        if 'contact_form_url' in info:
-            lead.contact_form_url = info['contact_form_url']
-        lead.save()
+    if update_data:
+        Lead.update(**update_data).where(Lead.id == lead_id).execute()
 
 
 def get_pending_audits(limit: int = 50) -> List[Dict]:
     """Get leads pending audit"""
     query = (Lead
              .select(Lead, Bucket)
-             .join(Bucket, join_type='left', on=(Lead.bucket == Bucket.id))
+             .join(Bucket, on=(Lead.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER)
              .where((Lead.status == 'pending_audit') & (Lead.website.is_null(False)))
              .limit(limit))
 
@@ -335,9 +372,7 @@ def save_audit(lead_id: int, data: Dict, duration: Optional[float] = None) -> No
                 description=issue.get('description', ''),
             )
         
-        lead = Lead.get_by_id(lead_id)
-        lead.status = 'qualified' if data.get('qualified') else 'unqualified'
-        lead.save()
+        Lead.update(status='qualified' if data.get('qualified') else 'unqualified').where(Lead.id == lead_id).execute()
 
 
 def save_audits_batch(audits: List[Dict]) -> int:
@@ -370,9 +405,7 @@ def save_audits_batch(audits: List[Dict]) -> int:
                         description=issue.get('description', ''),
                     )
                 
-                lead = Lead.get_by_id(lead_id)
-                lead.status = 'qualified' if data.get('qualified') else 'unqualified'
-                lead.save()
+                Lead.update(status='qualified' if data.get('qualified') else 'unqualified').where(Lead.id == lead_id).execute()
                 saved += 1
             except Exception:
                 continue
@@ -381,43 +414,52 @@ def save_audits_batch(audits: List[Dict]) -> int:
 
 def get_qualified_leads(limit: int = 50) -> List[Dict]:
     """Get qualified leads without emails"""
+    already_sent = EmailCampaign.select(EmailCampaign.lead_id)
     query = (Lead
-             .select(Lead, Bucket, Audit)
-             .join(Bucket, join_type='left', on=(Lead.bucket == Bucket.id))
-             .join(Audit, on=(Audit.lead == Lead.id))
+             .select(Lead, Bucket)
+             .join(Bucket, on=(Lead.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER)
              .where(
                  (Lead.status == 'qualified') &
-                 ~(Lead.id << EmailCampaign.select(EmailCampaign.lead_id))
+                 (Lead.id.not_in(already_sent))
              )
              .limit(limit))
+    
+    leads_with_audits = prefetch(query, Audit)
 
-    return [{
-        'id': l.id,
-        'business_name': l.business_name,
-        'website': l.website,
-        'bucket': l.bucket.name if l.bucket else None,
-        'issues_json': l.audits[0].issues_json if l.audits else '[]',
-    } for l in query]
+    result = []
+    for lead in leads_with_audits:
+        latest_audit = lead.audits[0] if lead.audits else None
+        result.append({
+            'id': lead.id,
+            'business_name': lead.business_name,
+            'website': lead.website,
+            'bucket': lead.bucket.name if lead.bucket else None,
+            'issues_json': latest_audit.issues_json if latest_audit and latest_audit.issues_json else '[]',
+        })
+    return result
 
 
 def stream_qualified_leads(batch_size: int = 100) -> Generator[Dict, None, None]:
     """Stream qualified leads"""
+    already_sent = EmailCampaign.select(EmailCampaign.lead_id)
     query = (Lead
-             .select(Lead, Bucket, Audit)
-             .join(Bucket, join_type='left', on=(Lead.bucket == Bucket.id))
-             .join(Audit, on=(Audit.lead == Lead.id))
+             .select(Lead, Bucket)
+             .join(Bucket, on=(Lead.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER)
              .where(
                  (Lead.status == 'qualified') &
-                 ~(Lead.id << EmailCampaign.select(EmailCampaign.lead_id))
+                 (Lead.id.not_in(already_sent))
              ))
+    
+    leads_with_audits = prefetch(query, Audit)
 
-    for lead in query:
+    for lead in leads_with_audits:
+        latest_audit = lead.audits[0] if lead.audits else None
         yield {
             'id': lead.id,
             'business_name': lead.business_name,
             'website': lead.website,
             'bucket': lead.bucket.name if lead.bucket else None,
-            'issues_json': lead.audits[0].issues_json if lead.audits else '[]',
+            'issues_json': latest_audit.issues_json if latest_audit and latest_audit.issues_json else '[]',
         }
 
 
@@ -456,22 +498,21 @@ def save_emails_batch(emails: List[Dict]) -> int:
 
 def get_pending_emails(limit: int = 20) -> List[Dict]:
     """Get pending emails to send"""
-    over_limit = Bucket.select().where(
+    over_limit_ids = [b.id for b in Bucket.select(Bucket.id).where(
         (Bucket.daily_email_count >= Bucket.daily_email_limit) &
         (Bucket.last_reset_date >= datetime.now().date())
-    )
-    
+    )]
+
     query = (EmailCampaign
              .select(EmailCampaign, Lead)
-             .join(Lead, on=(EmailCampaign.lead == Lead.id))
+             .join(Lead, on=(EmailCampaign.lead_id == Lead.id))
              .where((EmailCampaign.status == 'pending') & (Lead.email.is_null(False))))
-    
-    if over_limit.exists():
-        bucket_ids = [b.id for b in over_limit]
-        query = query.where(~(Lead.bucket_id.in_(bucket_ids)))
-    
+
+    if over_limit_ids:
+        query = query.where(Lead.bucket_id.not_in(over_limit_ids))
+
     query = query.limit(limit)
-    
+
     return [{
         'campaign_id': ec.id,
         'business_name': ec.lead.business_name,
@@ -486,10 +527,10 @@ def get_emails_for_review(limit: int = 50) -> List[Dict]:
     """Get emails needing review"""
     query = (EmailCampaign
              .select(EmailCampaign, Lead)
-             .join(Lead, on=(EmailCampaign.lead == Lead.id))
+             .join(Lead, on=(EmailCampaign.lead_id == Lead.id))
              .where(EmailCampaign.status == 'needs_review')
              .limit(limit))
-    
+
     return [{
         'id': ec.id,
         'business_name': ec.lead.business_name,
