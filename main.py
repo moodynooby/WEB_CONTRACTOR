@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from ui.app import WebContractorTUI
+from ui.app import WebContractorTUI  # noqa: E402
 
 
 def main():

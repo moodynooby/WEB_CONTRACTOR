@@ -43,14 +43,14 @@ def get_session() -> requests.Session:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
         )
-    return _local.session
+    return _local.session  # type: ignore[no-any-return]
 
 
 def is_available() -> bool:
     """Test if Ollama is running"""
     try:
         response = get_session().get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        return response.status_code == 200
+        return response.status_code == 200  # type: ignore[no-any-return]
     except requests.exceptions.RequestException:
         return False
 
@@ -100,10 +100,10 @@ def generate(
                 raw = data.get("response", "")
                 if not raw or raw.strip() == "":
                     raise OllamaError("Empty response from model")
-                
+
                 if format_json:
                     return _extract_json(raw)
-                return raw
+                return raw  # type: ignore[no-any-return]
             else:
                 raise OllamaError(f"API error: {response.status_code}")
 

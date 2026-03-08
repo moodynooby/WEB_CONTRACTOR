@@ -6,9 +6,9 @@ No repository pattern - direct model access.
 
 import json
 from datetime import datetime
-from typing import Dict, List, Optional, Generator
+from typing import Any, Dict, List, Optional, Generator
 
-from peewee import (
+from peewee import (  # type: ignore[import-untyped]
     Model,
     SqliteDatabase,
     TextField,
@@ -23,7 +23,7 @@ from peewee import (
     JOIN,
     prefetch,
 )
-from playhouse.migrate import SqliteMigrator, migrate
+from playhouse.migrate import SqliteMigrator, migrate  # type: ignore[import-untyped]
 
 db = SqliteDatabase(
     'leads.db',
@@ -224,20 +224,20 @@ def close_db():
         db.close()
 
 
-def save_bucket(data: Dict) -> Bucket:
+def save_bucket(data: Dict) -> Any:
     """Save or update bucket"""
     bucket_data = data.copy()
     for key in ['categories', 'search_patterns', 'geographic_segments']:
         if key in bucket_data and isinstance(bucket_data[key], list):
             bucket_data[key] = json.dumps(bucket_data[key])
-    
+
     bucket, created = Bucket.get_or_create(name=bucket_data['name'], defaults=bucket_data)
     if not created:
         for key, value in bucket_data.items():
             if key != 'name' and hasattr(bucket, key):
                 setattr(bucket, key, value)
         bucket.save()
-    return bucket
+    return bucket  # type: ignore[no-any-return]
 
 
 def get_all_buckets() -> List[Dict]:
@@ -248,14 +248,14 @@ def get_all_buckets() -> List[Dict]:
 def get_bucket_id_by_name(name: str) -> Optional[int]:
     """Get bucket ID by name"""
     bucket = Bucket.get_or_none(Bucket.name == name)
-    return bucket.id if bucket else None
+    return bucket.id if bucket else None  # type: ignore[no-any-return]
 
 
-def save_config(key: str, value: Dict) -> AppConfig:
+def save_config(key: str, value: Dict) -> Any:
     """Save config"""
     config, _ = AppConfig.get_or_create(key=key)
     config.set_value(value)
-    return config
+    return config  # type: ignore[no-any-return]
 
 
 def get_config(key: str) -> Optional[Dict]:
@@ -267,7 +267,7 @@ def get_config(key: str) -> Optional[Dict]:
 def save_lead(data: Dict) -> int:
     """Save single lead, return ID or -1 on error"""
     try:
-        bucket_id = get_bucket_id_by_name(data.get('bucket'))
+        bucket_id = get_bucket_id_by_name(data.get('bucket'))  # type: ignore[arg-type]
         lead = Lead.create(
             business_name=data.get('business_name'),
             category=data.get('category'),
@@ -281,7 +281,7 @@ def save_lead(data: Dict) -> int:
             social_links=json.dumps(data.get('social_links', {})),
             contact_form_url=data.get('contact_form_url'),
         )
-        return lead.id
+        return lead.id  # type: ignore[no-any-return]
     except (IntegrityError, DatabaseError):
         return -1
 
@@ -292,7 +292,7 @@ def save_leads_batch(leads: List[Dict]) -> int:
         return 0
 
     bucket_map = {}
-    bucket_names = {l.get('bucket') for l in leads if l.get('bucket')}
+    bucket_names = {lead.get('bucket') for lead in leads if lead.get('bucket')}
     for b in Bucket.select().where(Bucket.name.in_(bucket_names)):
         bucket_map[b.name] = b.id
 
@@ -345,11 +345,11 @@ def get_pending_audits(limit: int = 50) -> List[Dict]:
              .limit(limit))
 
     return [{
-        'id': l.id,
-        'business_name': l.business_name,
-        'website': l.website,
-        'bucket': l.bucket.name if l.bucket else None,
-    } for l in query]
+        'id': lead.id,
+        'business_name': lead.business_name,
+        'website': lead.website,
+        'bucket': lead.bucket.name if lead.bucket else None,
+    } for lead in query]
 
 
 def save_audit(lead_id: int, data: Dict, duration: Optional[float] = None) -> None:

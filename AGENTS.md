@@ -23,7 +23,7 @@
 - **llm.py**: Ollama API wrapper with retry logic, JSON format support.
 
 **UI Layer** (`ui/app.py`):
-Single Textual TUI. Screens: discovery, audit review, email review, settings. Workers use `@work(exclusive=True)` for sequential execution.
+Single Textual TUI. Screens: discovery, audit review, email review, settings. Workers use ` @work(exclusive=True, thread=True)` for sequential execution.
 
 **Data Flow**:
 1. User triggers discovery → Stage 0 generates queries → Stage A scrapes → saves to `Lead`
@@ -33,41 +33,22 @@ Single Textual TUI. Screens: discovery, audit review, email review, settings. Wo
 
 **Entry Point**: `main.py` loads env, initializes DB, launches TUI.
 
+## Dev Tools
+Ruff , uncomment , mypy ,uv
 ## Commands
 
 ```bash
 # Setup
 uv sync
-source .venv/bin/activate
-
-# Quality
-uv run ruff check .          # lint
-uv run ruff check --fix .    # auto-fix
-uv run ruff format .         # format
-uv run uncomment .   # Uneccesory comments remover
 # Run
 uv run python main.py
 ```
 
 ## Database (Peewee)
 
-```python
-from core.db_peewee import Lead, Bucket, db, save_lead
+## Scraping (Playwright in sync mode)
 
-# Operations
-lead = Lead.get_or_none(Lead.id == lead_id)
-lead_id = save_lead({'business_name': 'Acme', 'bucket': 'Designers'})
-
-# Transactions
-with db.atomic():
-    bucket = Bucket.create(name='New')
-    Lead.create(business_name='Test', bucket=bucket)
-
-# Batch
-with db.atomic():
-    for lead_data in leads:
-        Lead.create(**lead_data)
-```
+## UI (TEXTUAL)
 
 ## Error Handling
 
@@ -79,16 +60,10 @@ with db.atomic():
 ## Concurrency
 
 - Single-threaded design for simplicity and reliability
-- Workers use `@work(exclusive=True)` for sequential execution
-- Playwright browser context is reused across operations
+- Workers use ` @work(exclusive=True, thread=True)` for sequential execution
+- Playwright browser context is not reused across operations as it is not thread safe
 - No shared state issues - each operation runs to completion before next starts
 
-## Textual TUI
-
-- Define shortcuts in `BINDINGS` class attribute
-- Use `app.pop_screen()` to dismiss modals
-- Use `@work` decorator for background tasks
-- Manage focus and selection state properly
 
 ## Security
 
@@ -104,10 +79,8 @@ with db.atomic():
 
 ## Workflow
 
-1. Run `uv run ruff check .` before changes
-2. Make focused, minimal changes
-3. Test locally: `uv run python main.py`
-4. Run `uv run ruff check --fix .`
-5. Run ` uv run uncomment .   `
-6. Commit with descriptive messages
+1. Make focused, minimal changes
+2. Test locally: `uv run python main.py`
+3. Run `uv run ruff check --fix . &&  uv run uncomment .  && uv run mypy .`
+4. Commit with descriptive messages
 

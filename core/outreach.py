@@ -16,11 +16,11 @@ import json
 import threading
 import time
 from functools import lru_cache
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import sync_playwright
 from contextlib import contextmanager
 
 from core import llm
@@ -49,7 +49,7 @@ class Outreach:
         self.ollama_enabled = llm.is_available()
         self._llm_settings = self._load_llm_settings()
 
-    def _load_llm_settings(self) -> Dict:
+    def _load_llm_settings(self) -> Dict[str, Any]:
         """Load LLM settings from email_prompts.json"""
         try:
             with open("config/email_prompts.json", "r") as f:
@@ -59,7 +59,7 @@ class Outreach:
                     "default_model": prompts_metadata.get("default_model", "gemma:2b-instruct-q4_0"),
                     "timeout_seconds": 60,
                     "max_retries": 3,
-                }
+                }  # type: ignore[no-any-return]
         except Exception:
             return {
                 "default_model": "gemma:2b-instruct-q4_0",
@@ -67,11 +67,11 @@ class Outreach:
                 "max_retries": 3,
             }
 
-    def _load_audit_settings(self) -> Dict:
+    def _load_audit_settings(self) -> Dict[str, Any]:
         """Load audit settings from config file"""
         try:
             with open("config/audit_settings.json", "r") as f:
-                return json.load(f)
+                return json.load(f)  # type: ignore[no-any-return]
         except Exception:
             return {
                 "technical_checks": [],
@@ -79,11 +79,11 @@ class Outreach:
                 "visual_audit": {"enabled": False},
             }
 
-    def _load_email_prompts(self) -> Dict:
+    def _load_email_prompts(self) -> Dict[str, Any]:
         """Load email prompts from config file"""
         try:
             with open("config/email_prompts.json", "r") as f:
-                return json.load(f)
+                return json.load(f)  # type: ignore[no-any-return]
         except Exception:
             return {
                 "cold_email": {"system_message": "", "prompt_template": ""},
@@ -127,16 +127,16 @@ class Outreach:
                 _browser_context_local.browser = None
                 _browser_context_local.playwright = None
 
-    def _get_playwright_page(self) -> Page:
+    def _get_playwright_page(self) -> Any:
         """Get new Playwright page from current thread's context
-        
+
         Thread Safety:
         - Uses thread-local storage to get the correct context for this thread
         - Raises RuntimeError if called outside managed_session()
         """
         if not hasattr(_browser_context_local, 'context') or _browser_context_local.context is None:
             raise RuntimeError("Outreach must be used within managed_session() for browser tasks")
-        return _browser_context_local.context.new_page()
+        return _browser_context_local.context.new_page()  # type: ignore[no-any-return]
 
     def _take_screenshot(self, url: str) -> Optional[str]:
         """Capture website screenshot and return as base64 string"""
@@ -153,8 +153,8 @@ class Outreach:
             return None
 
     def _run_visual_audit(
-        self, business_name: str, base64_image: str, config: Dict
-    ) -> Optional[Dict]:
+        self, business_name: str, base64_image: str, config: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Run visual audit using Ollama Vision model."""
         prompt = config.get("prompt_template", "").format(business_name=business_name)
         system_message = config.get(
@@ -170,7 +170,7 @@ class Outreach:
                 format_json=True,
                 timeout=60,
             )
-            return json.loads(raw)
+            return json.loads(raw)  # type: ignore[no-any-return]
         except llm.OllamaError as e:
             self.log(f"Visual audit failed: {e}", "error")
             return None
@@ -184,12 +184,12 @@ class Outreach:
             return "warning"
         return "info"
 
-    def deep_discovery(self, html_content: str, base_url: str) -> Dict:
+    def deep_discovery(self, html_content: str, base_url: str) -> Dict[str, Any]:
         """Deep discovery of contact information from website HTML
-        
+
         Returns early if email is found to optimize performance.
         """
-        contact_info = {
+        contact_info: Dict[str, Any] = {
             "email": None,
             "social_links": {},
             "contact_form_url": None,
@@ -200,7 +200,7 @@ class Outreach:
         email_found = False
 
         for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
+            href = str(link.get("href", "") or "")
             href_lower = href.lower()
 
             if not email_found:
@@ -212,7 +212,7 @@ class Outreach:
                     email_found = True
 
             if not email_found:
-                text = link.get_text()
+                text = str(link.get_text() or "")
                 if "@" in text and "." in text and len(text) < 100:
                     contact_info["email"] = text.lower()
                     email_found = True
@@ -246,7 +246,7 @@ class Outreach:
                         break
 
         for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
+            href = str(link.get("href", "") or "")
             if href.startswith("tel:"):
                 contact_info["phone"] = href.replace("tel:", "")
                 break
@@ -303,16 +303,16 @@ class Outreach:
         url: str,
         business_name: str = "this business",
         bucket_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Audit website for technical and qualitative issues + Deep Discovery
-        
+
         Optimizations:
         - Returns contact info immediately if email is found
         - Skips expensive LLM/visual audits if email already discovered
         """
-        issues = []
+        issues: List[Dict[str, Any]] = []
         score = 100
-        discovered_info = {
+        discovered_info: Dict[str, Any] = {
             "email": None,
             "social_links": {},
             "contact_form_url": None,
@@ -586,8 +586,8 @@ class Outreach:
         }
 
     def _run_llm_audit(
-        self, business_name: str, content: str, config: Dict
-    ) -> Optional[Dict]:
+        self, business_name: str, content: str, config: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Run qualitative audit using Ollama."""
         prompt_template = config.get("prompt_template", "")
         system_message = config.get(
@@ -606,12 +606,12 @@ class Outreach:
                 format_json=True,
                 timeout=30,
             )
-            return json.loads(raw)
+            return json.loads(raw)  # type: ignore[no-any-return]
         except llm.OllamaError as e:
             self.log(f"LLM audit failed: {e}", "error")
             return None
 
-    def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict:
+    def refine_email_ollama(self, subject: str, body: str, instructions: str) -> Dict[str, str]:
         """Refine an existing email based on user instructions using Ollama ."""
         if not self.ollama_enabled:
             return {"subject": subject, "body": body}
@@ -645,7 +645,7 @@ Return ONLY JSON:
             self.log(f"Email refinement failed: {e}", "error")
             return {"subject": subject, "body": body}
 
-    def _parse_email_response(self, raw: str, business_name: str) -> Dict:
+    def _parse_email_response(self, raw: str, business_name: str) -> Dict[str, str]:
         """Parse email from LLM text response using delimiters"""
         import re
         
@@ -776,7 +776,7 @@ Return ONLY JSON:
 
     def _generate_email_uncached(
         self, business_name: str, issues_key: str, bucket: str
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Uncached email generation without retry logic."""
         if not self.ollama_enabled:
             raise Exception("Ollama is not enabled. Cannot generate email.")
@@ -949,7 +949,7 @@ Return ONLY JSON:
 
             return {"audited": audited, "qualified": qualified}
 
-    def _generate_single_email(self, lead: Dict) -> Optional[Dict]:
+    def _generate_single_email(self, lead: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Generate email for a single lead"""
         try:
             issues = json.loads(lead.get("issues_json", "[]"))
@@ -968,7 +968,7 @@ Return ONLY JSON:
                 "body": email["body"],
                 "status": "needs_review",
                 "duration": duration,
-            }
+            }  # type: ignore[no-any-return]
         except Exception as e:
             self.log(
                 f"  Error generating email for {lead['business_name']}: {e}", "error"

@@ -717,6 +717,27 @@ wheels = [
 ]
 
 [[package]]
+name = "types-peewee"
+version = "4.0.0.20260223"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/f6/6006506f35813719d269e761000d7250d651dd19d3db3cc2694a29c37b9b/types_peewee-4.0.0.20260223.tar.gz", hash = "sha256:67e3c67f181d697fe38912d910812b7306d39f62adf17ca8b8c187873c5102ef", size = 22012, upload-time = "2026-02-23T04:11:36.431Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d8/d6/e098745c89bdfe8d263fe07b2e2c35e8048dca1317bf6871719c53a3552a/types_peewee-4.0.0.20260223-py3-none-any.whl", hash = "sha256:8f90db80ea7568e4b44c6558b26d9790ed2e15bf48f799e46b27cb5ec0446dcc", size = 19971, upload-time = "2026-02-23T04:11:35.435Z" },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.32.4.20260107"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/f3/a0663907082280664d745929205a89d41dffb29e89a50f753af7d57d0a96/types_requests-2.32.4.20260107.tar.gz", hash = "sha256:018a11ac158f801bfa84857ddec1650750e393df8a004a8a9ae2a9bec6fcb24f", size = 23165, upload-time = "2026-01-07T03:20:54.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/12/709ea261f2bf91ef0a26a9eed20f2623227a8ed85610c1e54c5805692ecb/types_requests-2.32.4.20260107-py3-none-any.whl", hash = "sha256:b703fe72f8ce5b31ef031264fe9395cac8f46a04661a79f7ed31a80fb308730d", size = 20676, upload-time = "2026-01-07T03:20:52.929Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -775,6 +796,8 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "types-peewee" },
+    { name = "types-requests" },
     { name = "uncomment" },
 ]
 
@@ -795,5 +818,7 @@ dev = [
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "ruff", specifier = ">=0.15.0" },
+    { name = "types-peewee", specifier = ">=4.0.0.20260223" },
+    { name = "types-requests", specifier = ">=2.32.4.20260107" },
     { name = "uncomment", specifier = ">=2.11.0" },
 ]

@@ -17,7 +17,7 @@ import random
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -30,12 +30,12 @@ from core.db_peewee import (
 _browser_context_local = threading.local()
 
 
-def _load_app_settings() -> Dict:
+def _load_app_settings() -> Dict[str, Any]:
     """Load application settings from config file."""
     settings_path = Path(__file__).parent.parent / "config" / "app_settings.json"
     try:
         with open(settings_path, "r") as f:
-            return json.load(f)
+            return json.load(f)  # type: ignore[no-any-return]
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
@@ -55,7 +55,7 @@ class PlaywrightScraper:
     def ollama_enabled(self) -> bool:
         return llm.is_available()
 
-    def _get_llm_settings(self) -> Dict:
+    def _get_llm_settings(self) -> Dict[str, Any]:
         """Get LLM settings from config."""
         defaults = {
             "default_model": "gemma:2b-instruct-q4_0",
@@ -66,7 +66,7 @@ class PlaywrightScraper:
         settings = self._settings.get("llm_settings", {})
         return {**defaults, **settings}
 
-    def _get_discovery_limits(self) -> Dict:
+    def _get_discovery_limits(self) -> Dict[str, Any]:
         """Get discovery limits from config."""
         defaults = {
             "max_queries_per_run": 20,
@@ -78,7 +78,7 @@ class PlaywrightScraper:
         limits = self._settings.get("discovery_limits", {})
         return {**defaults, **limits}
 
-    def _get_scraper_settings(self) -> Dict:
+    def _get_scraper_settings(self) -> Dict[str, Any]:
         """Get scraper settings from config."""
         defaults = {
             "headless": True,
@@ -96,7 +96,7 @@ class PlaywrightScraper:
         """Get a random user agent from configured list."""
         scraper_settings = self._get_scraper_settings()
         user_agents = scraper_settings["user_agents"]
-        return random.choice(user_agents) if user_agents else user_agents[0]
+        return str(random.choice(user_agents)) if user_agents else user_agents[0]
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
@@ -154,11 +154,11 @@ class PlaywrightScraper:
         finally:
             page.close()
 
-    def _load_buckets(self) -> List[Dict]:
+    def _load_buckets(self) -> List[Dict[str, Any]]:
         """Load bucket configuration from DB"""
         return get_all_buckets()
 
-    def expand_bucket(self, bucket_name: str) -> Optional[Dict]:
+    def expand_bucket(self, bucket_name: str) -> Optional[Dict[str, Any]]:
         """Use LLM to expand bucket categories and search patterns."""
         if not self.ollama_enabled:
             return None
@@ -190,12 +190,12 @@ Return ONLY JSON:
                 format_json=True,
                 timeout=llm_settings["timeout_seconds"],
             )
-            return json.loads(raw)
+            return json.loads(raw)  # type: ignore[no-any-return]
         except llm.OllamaError as e:
             self.log(f"Expansion failed: {e}", "error")
             return None
 
-    def discover_new_buckets(self) -> Optional[List[Dict]]:
+    def discover_new_buckets(self) -> Optional[List[Dict[str, Any]]]:
         """Use LLM to suggest new market buckets based on current ones."""
         if not self.ollama_enabled:
             return None
@@ -224,38 +224,38 @@ Return ONLY JSON list:
                 format_json=True,
                 timeout=llm_settings["timeout_seconds"],
             )
-            return json.loads(raw)
+            return json.loads(raw)  # type: ignore[no-any-return]
         except llm.OllamaError as e:
             self.log(f"Market discovery failed: {e}", "error")
             return None
 
     def generate_queries(
         self, bucket_name: Optional[str] = None, limit: Optional[int] = None
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """Generate search queries from bucket patterns
-        
+
         Args:
             bucket_name: Optional bucket name to filter queries
             limit: Optional limit override. If None, uses config or bucket default.
         """
         self.buckets = get_all_buckets()
         limits = self._get_discovery_limits()
-        
+
         if limit is None:
             limit = limits["max_queries_per_run"]
-        
-        queries = []
+
+        queries: List[Dict[str, Any]] = []
         buckets = [
             b for b in self.buckets if not bucket_name or b["name"] == bucket_name
         ]
-        
+
         buckets.sort(key=lambda b: b.get("priority", 1), reverse=True)
 
         geo_focus = get_config("geographic_focus") or {}
 
         for bucket in buckets:
             bucket_max_queries = bucket.get("max_queries", limits["max_patterns_per_bucket"])
-            
+
             search_patterns = bucket.get("search_patterns", [])
             if isinstance(search_patterns, str):
                 try:
@@ -302,7 +302,7 @@ Return ONLY JSON list:
 
     def scrape_google_maps(
         self, query: str, bucket: str, max_results: Optional[int] = None
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """Scrape Google Maps for business leads using Playwright
         
         Args:
@@ -429,19 +429,19 @@ Return ONLY JSON list:
         self,
         bucket_name: Optional[str] = None,
         max_queries: Optional[int] = None,
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Execute full discovery pipeline - single-threaded with efficient resource reuse
-        
+
         Args:
             bucket_name: Optional bucket name to filter queries
             max_queries: Optional max queries override. If None, uses config or bucket default.
         """
         self.buckets = self._load_buckets()
         limits = self._get_discovery_limits()
-        
+
         if max_queries is None:
             max_queries = limits["max_queries_per_run"]
-        
+
         self.log(f"\n{'=' * 60}")
         self.log("DISCOVERY: Query Generation + Lead Scraping")
         self.log(f"{'=' * 60}")

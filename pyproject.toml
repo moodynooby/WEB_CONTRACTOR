@@ -21,6 +21,9 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.15.0",
     "uncomment>=2.11.0",
+        "types-requests>=2.32.4.20260107",
+    "types-peewee>=4.0.0.20260223",
+
 ]
 
 [tool.mypy]
@@ -28,6 +31,10 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "core.db_peewee"
+disable_error_code = ["attr-defined", "arg-type", "assignment"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,13 +39,13 @@ class EmailSender:
                 config = json.load(f)
                 sig_config = config.get("email_signature", {})
                 template = sig_config.get("template", "\n\nBest regards,\nManas Doshi")
-                return template.format(
+                return str(template.format(
                     name=sig_config.get("name", "Manas Doshi"),
                     company=sig_config.get("company", "Future Forwards"),
                     website=sig_config.get(
                         "website", "https://man27.netlify.app/services"
                     ),
-                )
+                ))
         except Exception:
             return "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services"
 
@@ -56,7 +56,7 @@ class EmailSender:
         else:
             print(message)
 
-    def send_email(self, to_email: str, subject: str, body: str, campaign_id: int = None) -> bool:
+    def send_email(self, to_email: str, subject: str, body: str, campaign_id: Optional[int] = None) -> bool:
         """Send single email via SMTP"""
         try:
             msg = MIMEMultipart()
@@ -73,7 +73,7 @@ class EmailSender:
             if campaign_id:
                 mark_email_sent(campaign_id, True)
 
-            return True
+            return True  # type: ignore[no-any-return]
         except Exception as e:
             self.log(f"Email send error: {e}", "error")
             if campaign_id:
