@@ -7,9 +7,9 @@ import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Callable, Optional
+from typing import Callable
 
-from core.db_peewee import mark_email_sent
+from core.db_repository import mark_email_sent
 
 
 class EmailSender:
@@ -17,11 +17,11 @@ class EmailSender:
 
     def __init__(
         self,
-        logger: Optional[Callable] = None,
+        logger: Callable | None = None,
         smtp_server: str = "smtp.gmail.com",
         smtp_port: int = 587,
-        email: Optional[str] = None,
-        password: Optional[str] = None,
+        email: str | None = None,
+        password: str | None = None,
     ):
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port
@@ -54,7 +54,7 @@ class EmailSender:
         else:
             print(message)
 
-    def send_email(self, to_email: str, subject: str, body: str, campaign_id: Optional[int] = None) -> bool:
+    def send_email(self, to_email: str, subject: str, body: str, campaign_id: int | None = None) -> bool:
         """Send single email via SMTP"""
         try:
             msg = MIMEMultipart()

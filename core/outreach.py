@@ -18,11 +18,22 @@ from playwright.sync_api import sync_playwright
 from contextlib import contextmanager
 
 from core import llm
-from core.db_peewee import (
+from core.db_repository import (
     update_lead_contact_info,
     get_pending_audits, save_audits_batch,
     get_qualified_leads, save_emails_batch,
 )
+
+
+def _load_json_config(filename: str) -> dict:
+    """Load JSON config file (shared helper)."""
+    from pathlib import Path
+    settings_path = Path(__file__).parent.parent / "config" / filename
+    try:
+        with open(settings_path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 class Outreach:
@@ -30,54 +41,13 @@ class Outreach:
 
     def __init__(
         self,
-        logger: Optional[Callable] = None,
+        logger: Callable | None = None,
     ):
         self.logger = logger
-        self.audit_settings = self._load_audit_settings()
-        self.email_prompts = self._load_email_prompts()
+        self.audit_settings = _load_json_config("audit_settings.json")
+        self.email_prompts = _load_json_config("email_prompts.json")
         self.ollama_enabled = llm.is_available()
-        self._llm_settings = self._load_llm_settings()
-
-    def _load_llm_settings(self) -> Dict[str, Any]:
-        """Load LLM settings from email_prompts.json"""
-        try:
-            with open("config/email_prompts.json", "r") as f:
-                config = json.load(f)
-                prompts_metadata = config.get("prompts_metadata", {})
-                return {
-                    "default_model": prompts_metadata.get("default_model", "gemma:2b-instruct-q4_0"),
-                    "timeout_seconds": 60,
-                    "max_retries": 3,
-                }  # type: ignore[no-any-return]
-        except Exception:
-            return {
-                "default_model": "gemma:2b-instruct-q4_0",
-                "timeout_seconds": 60,
-                "max_retries": 3,
-            }
-
-    def _load_audit_settings(self) -> Dict[str, Any]:
-        """Load audit settings from config file"""
-        try:
-            with open("config/audit_settings.json", "r") as f:
-                return json.load(f)  # type: ignore[no-any-return]
-        except Exception:
-            return {
-                "technical_checks": [],
-                "llm_audit": {"enabled": False},
-                "visual_audit": {"enabled": False},
-            }
-
-    def _load_email_prompts(self) -> Dict[str, Any]:
-        """Load email prompts from config file"""
-        try:
-            with open("config/email_prompts.json", "r") as f:
-                return json.load(f)  # type: ignore[no-any-return]
-        except Exception:
-            return {
-                "cold_email": {"system_message": "", "prompt_template": ""},
-                "email_signature": {},
-            }
+        self._llm_settings = _load_json_config("app_settings.json").get("llm_settings", {})
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""
@@ -110,7 +80,7 @@ class Outreach:
             raise RuntimeError("Outreach must be used within managed_session() for browser tasks")
         return self._context.new_page()  # type: ignore[no-any-return]
 
-    def _take_screenshot(self, url: str) -> Optional[str]:
+    def _take_screenshot(self, url: str) -> str | None:
         """Capture website screenshot and return as base64 string"""
         try:
             page = self._get_playwright_page()
@@ -125,7 +95,7 @@ class Outreach:
             return None
 
     def _run_visual_audit(
-        self, business_name: str, base64_image: str, config: Dict[str, Any]
+        self, business_name: str, base64_image: str, config: dict
     ) -> Optional[Dict[str, Any]]:
         """Run visual audit using Ollama Vision model."""
         prompt = config.get("prompt_template", "").format(business_name=business_name)
@@ -156,12 +126,12 @@ class Outreach:
             return "warning"
         return "info"
 
-    def deep_discovery(self, html_content: str, base_url: str) -> Dict[str, Any]:
+    def deep_discovery(self, html_content: str, base_url: str) -> dict:
         """Deep discovery of contact information from website HTML
 
         Returns early if email is found to optimize performance.
         """
-        contact_info: Dict[str, Any] = {
+        contact_info: dict = {
             "email": None,
             "social_links": {},
             "contact_form_url": None,
@@ -225,7 +195,7 @@ class Outreach:
 
         return contact_info
 
-    def _query_selector(self, html: str, selector: str) -> Optional[str]:
+    def _query_selector(self, html: str, selector: str) -> str | None:
         """Query a single CSS selector from HTML content"""
         soup = BeautifulSoup(html, "html.parser")
         elem = soup.select_one(selector)
@@ -242,7 +212,7 @@ class Outreach:
         tag: str,
         attr: Optional[str] = None,
         attr_value: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list:
         """Find all tags with optional attribute filter"""
         soup = BeautifulSoup(html, "html.parser")
         results = []
@@ -275,7 +245,7 @@ class Outreach:
         url: str,
         business_name: str = "this business",
         bucket_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict:
         """Audit website for technical and qualitative issues + Deep Discovery
 
         Optimizations:
@@ -284,7 +254,7 @@ class Outreach:
         """
         issues: List[Dict[str, Any]] = []
         score = 100
-        discovered_info: Dict[str, Any] = {
+        discovered_info: dict = {
             "email": None,
             "social_links": {},
             "contact_form_url": None,
@@ -558,7 +528,7 @@ class Outreach:
         }
 
     def _run_llm_audit(
-        self, business_name: str, content: str, config: Dict[str, Any]
+        self, business_name: str, content: str, config: dict
     ) -> Optional[Dict[str, Any]]:
         """Run qualitative audit using Ollama."""
         prompt_template = config.get("prompt_template", "")
@@ -748,7 +718,7 @@ Return ONLY JSON:
 
     def _generate_email_uncached(
         self, business_name: str, issues_key: str, bucket: str
-    ) -> Dict[str, Any]:
+    ) -> dict:
         """Uncached email generation without retry logic."""
         if not self.ollama_enabled:
             raise Exception("Ollama is not enabled. Cannot generate email.")
@@ -921,7 +891,7 @@ Return ONLY JSON:
 
             return {"audited": audited, "qualified": qualified}
 
-    def _generate_single_email(self, lead: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _generate_single_email(self, lead: dict) -> Optional[Dict[str, Any]]:
         """Generate email for a single lead"""
         try:
             issues = json.loads(lead.get("issues_json", "[]"))

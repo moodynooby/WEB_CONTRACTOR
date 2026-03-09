@@ -4,9 +4,12 @@ from core.discovery import PlaywrightScraper
 from core.outreach import Outreach
 from core.email import EmailSender
 from core.llm import is_available, generate, generate_with_retry, OllamaError
-from core.db_peewee import (
-    db, init_db, close_db,
-    Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig,
+from core.app_core import WebContractorApp, Config
+from core.db_models import (
+    db, Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig, QueryPerformance,
+)
+from core.db_repository import (
+    init_db, close_db,
     save_bucket, get_all_buckets, get_bucket_id_by_name,
     save_config, get_config,
     save_lead, save_leads_batch, update_lead_contact_info,
@@ -18,6 +21,8 @@ from core.db_peewee import (
 )
 
 __all__ = [
+    "WebContractorApp",
+    "Config",
     "PlaywrightScraper",
     "Outreach",
     "EmailSender",
@@ -34,6 +39,7 @@ __all__ = [
     "AuditIssue",
     "EmailCampaign",
     "AppConfig",
+    "QueryPerformance",
     "save_bucket",
     "get_all_buckets",
     "get_bucket_id_by_name",

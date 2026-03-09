@@ -17,7 +17,6 @@ Configuration:
 
 import os
 import threading
-from typing import Any, Dict, Optional
 
 import requests
 
@@ -58,7 +57,7 @@ def is_available() -> bool:
 def generate(
     model: str,
     prompt: str,
-    system: Optional[str] = None,
+    system: str | None = None,
     format_json: bool = False,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> str:
@@ -77,7 +76,7 @@ def generate(
     Raises:
         OllamaError: On failure
     """
-    payload: Dict[str, Any] = {
+    payload: dict = {
         "model": model,
         "prompt": _compact_prompt(prompt),
         "stream": False,
@@ -131,7 +130,7 @@ def _extract_json(text: str) -> str:
 def generate_with_retry(
     model: str,
     prompt: str,
-    system: Optional[str] = None,
+    system: str | None = None,
     format_json: bool = False,
     max_retries: int = 3,
     timeout: int = DEFAULT_TIMEOUT,

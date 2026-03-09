@@ -16,14 +16,25 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from playwright.sync_api import Page, sync_playwright
 
 from core import llm
-from core.db_peewee import (
+from core.db_repository import (
     get_all_buckets, get_config, get_bucket_id_by_name,
     save_leads_batch, get_or_create_query_performance, update_query_performance,
     mark_query_as_stale, get_stale_queries,
 )
 
 
-def _load_app_settings() -> Dict[str, Any]:
+def _load_json_config(filename: str) -> dict:
+    """Load JSON config file (shared helper)."""
+    from pathlib import Path
+    settings_path = Path(__file__).parent.parent / "config" / filename
+    try:
+        with open(settings_path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _load_app_settings() -> dict:
     """Load application settings from config file."""
     settings_path = Path(__file__).parent.parent / "config" / "app_settings.json"
     try:
@@ -38,17 +49,17 @@ class PlaywrightScraper:
 
     def __init__(
         self,
-        logger: Optional[Callable] = None,
+        logger: Callable | None = None,
     ):
         self.buckets = get_all_buckets()
         self.logger = logger
-        self._settings = _load_app_settings()
+        self._settings = _load_json_config("app_settings.json")
 
     @property
     def ollama_enabled(self) -> bool:
         return llm.is_available()
 
-    def _get_llm_settings(self) -> Dict[str, Any]:
+    def _get_llm_settings(self) -> dict:
         """Get LLM settings from config."""
         defaults = {
             "default_model": "gemma:2b-instruct-q4_0",
@@ -59,7 +70,7 @@ class PlaywrightScraper:
         settings = self._settings.get("llm_settings", {})
         return {**defaults, **settings}
 
-    def _get_discovery_limits(self) -> Dict[str, Any]:
+    def _get_discovery_limits(self) -> dict:
         """Get discovery limits from config."""
         defaults = {
             "max_queries_per_run": 20,
@@ -71,7 +82,7 @@ class PlaywrightScraper:
         limits = self._settings.get("discovery_limits", {})
         return {**defaults, **limits}
 
-    def _get_scraper_settings(self) -> Dict[str, Any]:
+    def _get_scraper_settings(self) -> dict:
         """Get scraper settings from config."""
         defaults = {
             "headless": True,
@@ -303,7 +314,7 @@ Return ONLY JSON list:
             bucket: Bucket name
             max_results: Optional max results override. If None, uses config.
         """
-        leads: List[Dict] = []
+        leads: list = []
         scraper_settings = self._get_scraper_settings()
         limits = self._get_discovery_limits()
         
@@ -417,7 +428,7 @@ Return ONLY JSON list:
         bucket = query_data["bucket"]
         city = query_data.get("city", "")
         pattern = query_data.get("pattern", query)
-        query_leads: List[Dict] = []
+        query_leads: list = []
 
         bucket_data = next((b for b in self.buckets if b["name"] == bucket), None)
         max_results = bucket_data.get("max_results") if bucket_data else None
@@ -435,7 +446,7 @@ Return ONLY JSON list:
         self,
         bucket_name: Optional[str] = None,
         max_queries: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict:
         """Execute full discovery pipeline - single-threaded with efficient resource reuse
 
         Args:
