@@ -5,6 +5,7 @@ from typing import Dict
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
+from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
@@ -14,11 +15,10 @@ from textual.widgets import (
     Static,
 )
 
-from ui.screens.base import BaseScreen
-from core.db_repository import get_all_buckets, save_config, save_bucket ,get_config
+from core.db_repository import get_all_buckets, save_config, save_bucket, get_config
 
 
-class MarketReviewScreen(BaseScreen):
+class MarketReviewScreen(Screen):
     """Screen for reviewing market expansion suggestions."""
     
     BINDINGS = [

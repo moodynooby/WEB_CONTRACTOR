@@ -4,21 +4,21 @@ from typing import Optional
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
 from textual.widgets import DataTable, Header, Footer, Select, Static
 
-from ui.screens.base import BaseScreen
 from core.db_repository import get_all_buckets
 from core.db_models import Lead, Audit, EmailCampaign, QueryPerformance
 
 
-def _safe_truncate(value: Optional[str], max_length: int) -> str:
+def safe_truncate(value: Optional[str], max_length: int) -> str:
     """Safely truncate a string value, handling None gracefully."""
     if value is None:
         return "N/A"
     return str(value)[:max_length]
 
 
-class DatabaseScreen(BaseScreen):
+class DatabaseScreen(Screen):
     """Screen for browsing database tables."""
     
     BINDINGS = [
@@ -134,10 +134,10 @@ class DatabaseScreen(BaseScreen):
             status_style = "green" if status == 'qualified' else "yellow" if status == 'pending_audit' else "default"
             table.add_row(
                 str(lead_dict.get('id', 'N/A')),
-                _safe_truncate(lead_dict.get('business_name'), 25),
-                _safe_truncate(lead_dict.get('category'), 15),
-                _safe_truncate(lead_dict.get('location'), 15),
-                _safe_truncate(lead_dict.get('email'), 20),
+                safe_truncate(lead_dict.get('business_name'), 25),
+                safe_truncate(lead_dict.get('category'), 15),
+                safe_truncate(lead_dict.get('location'), 15),
+                safe_truncate(lead_dict.get('email'), 20),
                 f"[{status_style}]{status}[/{status_style}]",
                 f"{lead_dict.get('quality_score', 0):.2f}",
             )
@@ -157,8 +157,8 @@ class DatabaseScreen(BaseScreen):
             status_style = "green" if email.status == 'sent' else "yellow" if email.status == 'pending' else "red"
             table.add_row(
                 str(email.id),
-                _safe_truncate(business_name, 25),
-                _safe_truncate(email.subject, 30),
+                safe_truncate(business_name, 25),
+                safe_truncate(email.subject, 30),
                 f"[{status_style}]{email.status}[/{status_style}]",
                 sent_at,
             )
@@ -172,7 +172,7 @@ class DatabaseScreen(BaseScreen):
             qualified_str = "[green]✓[/green]" if audit.qualified else "[red]✗[/red]"
             table.add_row(
                 str(audit.id),
-                _safe_truncate(business_name, 25),
+                safe_truncate(business_name, 25),
                 str(audit.score),
                 qualified_str,
                 str(issues_count),
@@ -189,9 +189,9 @@ class DatabaseScreen(BaseScreen):
             active_str = "[green]✓[/green]" if qp.is_active else "[red]✗[/red]"
             table.add_row(
                 str(qp_dict.get('id', 'N/A')),
-                _safe_truncate(qp_dict.get('bucket'), 12),
-                _safe_truncate(qp_dict.get('query_pattern'), 20),
-                _safe_truncate(qp_dict.get('city'), 12),
+                safe_truncate(qp_dict.get('bucket'), 12),
+                safe_truncate(qp_dict.get('query_pattern'), 20),
+                safe_truncate(qp_dict.get('city'), 12),
                 active_str,
                 str(qp_dict.get('total_executions', 0)),
                 f"[green]{success_rate:.1f}%[/green]" if success_rate > 50 else f"[red]{success_rate:.1f}%[/red]",

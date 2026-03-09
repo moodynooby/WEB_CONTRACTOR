@@ -4,7 +4,7 @@ from typing import Dict, Optional
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     DataTable,
@@ -15,7 +15,6 @@ from textual.widgets import (
     Static,
 )
 
-from ui.screens.base import BaseScreen
 from core.db_repository import (
     get_emails_for_review,
     update_email_content,
@@ -24,14 +23,7 @@ from core.db_repository import (
 )
 
 
-def _safe_truncate(value: Optional[str], max_length: int) -> str:
-    """Safely truncate a string value, handling None gracefully."""
-    if value is None:
-        return "N/A"
-    return str(value)[:max_length]
-
-
-class ReviewScreen(BaseScreen):
+class ReviewScreen(Screen):
     """Screen for reviewing and managing generated emails."""
     
     BINDINGS = [
@@ -214,18 +206,15 @@ class ReviewScreen(BaseScreen):
 
         self.notify(f"Sending to {self.selected_email['business_name']}...")
 
-        # Run email sending in background
         self._send_email_and_callback(email_id, to_email, subject, body)
 
     def _send_email_and_callback(self, email_id: int, to_email: str, subject: str, body: str) -> None:
         """Send email in background and update UI."""
         def send_task():
             success = self.app.app_core.send_email(to_email, subject, body)
-            
-            # Thread-safe database update
-            from textual import call_after_refresh
-            call_after_refresh(self, lambda: self._on_email_sent(email_id, success))
-        
+
+            self.call_after_refresh(lambda: self._on_email_sent(email_id, success))
+
         self.run_worker(send_task, exclusive=True, thread=True)
 
     def _on_email_sent(self, email_id: int, success: bool) -> None:
@@ -272,13 +261,12 @@ class ReviewScreen(BaseScreen):
         if not self.selected_email:
             return
 
-        # Show modal to get instructions
         self._show_refine_modal()
 
     def _show_refine_modal(self) -> None:
         """Show refine modal and handle result."""
         def on_modal_close(result):
-            if result:  # User provided instructions
+            if result:  
                 self._refine_email(result)
         
         self.app.push_screen(RefineEmailModal(), on_modal_close)
@@ -293,11 +281,9 @@ class ReviewScreen(BaseScreen):
                 self.selected_email["body"],
                 instructions
             )
-            
-            # Thread-safe UI update
-            from textual import call_after_refresh
-            call_after_refresh(self, lambda: self._on_email_refined(result))
-        
+
+            self.call_after_refresh(lambda: self._on_email_refined(result))
+
         self.run_worker(refine_task, exclusive=True, thread=True)
 
     def _on_email_refined(self, result: dict) -> None:

@@ -3,6 +3,7 @@
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
@@ -13,7 +14,6 @@ from textual.widgets import (
     Static,
 )
 
-from ui.screens.base import BaseScreen
 from core.db_repository import (
     get_query_performance_stats,
     get_overall_efficiency_metrics,
@@ -22,37 +22,8 @@ from core.db_repository import (
 )
 
 
-class LogsScreen(BaseScreen):
-    """Screen for viewing activity logs."""
-    
-    BINDINGS = [
-        Binding("escape", "dismiss", "Back"),
-        Binding("c", "clear_logs", "Clear"),
-    ]
-    
-    def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical(id="logs-container"):
-            yield Label("[bold]📋 Activity Logs[/bold]")
-            yield RichLog(id="activity-log", markup=True, highlight=True)
-            with Horizontal(id="logs-actions"):
-                yield Button("Clear", variant="error", id="clear-btn")
-                yield Button("Done", variant="primary", id="done-btn")
-        yield Footer()
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "done-btn":
-            self.dismiss()
-        elif event.button.id == "clear-btn":
-            self.action_clear_logs()
-    
-    def action_clear_logs(self) -> None:
-        log_widget = self.query_one("#activity-log", RichLog)
-        log_widget.clear()
-        self.notify("Logs cleared")
 
-
-class QueryPerformanceScreen(BaseScreen):
+class QueryPerformanceScreen(Screen):
     """Screen for viewing query performance metrics."""
     
     BINDINGS = [

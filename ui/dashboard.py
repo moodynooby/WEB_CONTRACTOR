@@ -53,7 +53,6 @@ class DashboardManager:
 
             yield Static(self.get_quick_stats(), id="quick-stats")
 
-            # Activity Log Panel
             with Vertical(id="log-section"):
                 yield Static("[bold]📋 Activity Log[/bold]", id="log-title")
                 yield RichLog(id="activity-log", markup=True, highlight=True, max_lines=100)
@@ -74,7 +73,7 @@ class DashboardManager:
         elif button_id == "review-btn":
             self.app.action_review_emails()
         elif button_id == "send-btn":
-            self.app.action_review_emails()  # Send also goes to review
+            self.app.action_review_emails()  
     
     def get_pipeline_visual(self) -> str:
         """Generate visual pipeline showing current operation state."""
@@ -128,30 +127,3 @@ class DashboardManager:
         except Exception:
             pass  
     
-    def update_status(
-        self, 
-        status: str = "Idle", 
-        operation: Optional[str] = None, 
-        progress: Optional[int] = None,
-    ) -> None:
-        """
-        Update operation status.
-        
-        Args:
-            status: Status text (deprecated, kept for compatibility)
-            operation: Current operation name
-            progress: Progress percentage (0-100)
-        """
-        self.app.current_operation = operation
-        self.app.operation_progress = progress
-        
-        try:
-            self.app.query_one("#status-bar", Static).update(self.get_status_bar())
-            self.app.query_one("#pipeline-visual", Static).update(self.get_pipeline_visual())
-            
-            if operation:
-                self.app.sub_title = f"{operation.title()}..."
-            else:
-                self.app.sub_title = "Lead Discovery & Outreach Automation"
-        except Exception:
-            pass  

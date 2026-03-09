@@ -15,7 +15,6 @@ from textual.widgets import RichLog
 
 from core.app_core import WebContractorApp
 from ui.dashboard import DashboardManager
-from ui.controllers import NavigationController
 from ui.screens import (
     DatabaseScreen,
     ReviewScreen,
@@ -128,10 +127,8 @@ class WebContractorTUI(App):
         self.current_operation: Optional[str] = None
         self.operation_progress: Optional[int] = None
 
-        # Initialize managers immediately for compose()
         self.dashboard = DashboardManager(self)
-        self.navigation = NavigationController(self, self.SCREENS, self.app_core)
-    
+
     def compose(self) -> ComposeResult:
         """Compose main dashboard UI."""
         yield from self.dashboard.compose_dashboard()
@@ -141,10 +138,8 @@ class WebContractorTUI(App):
         self.title = "Web Contractor"
         self.sub_title = "Lead Discovery & Outreach Automation"
 
-        # Initialize core services
         self.app_core.initialize()
 
-        # Refresh dashboard to show initial state
         self.dashboard.refresh_dashboard()
 
         self.write_log(
@@ -191,7 +186,7 @@ class WebContractorTUI(App):
             else:
                 log_widget.write(message)
         except Exception:
-            pass  # Dashboard may not be ready yet  
+            pass  
     
     def action_refresh(self) -> None:
         """Refresh dashboard."""
@@ -226,17 +221,14 @@ class WebContractorTUI(App):
     def action_query_performance(self) -> None:
         """Navigate to performance screen."""
         self.push_screen(QueryPerformanceScreen())
-    
+
     def show_market_review(self, suggestions: list) -> None:
         """Show market expansion suggestions."""
         self.push_screen(MarketReviewScreen(suggestions))
 
     def get_system_commands(self, screen: Screen) -> list:
         """Get system commands for command palette."""
-        # Get default system commands from parent
         commands = list(super().get_system_commands(screen))
-
-        # Add our custom commands
         commands.extend([
             ("Run Discovery", "Execute discovery pipeline", self.action_run_discovery),
             ("Run Audit", "Audit leads for quality", self.action_run_audit),
@@ -246,7 +238,6 @@ class WebContractorTUI(App):
             ("Query Performance", "View performance stats", lambda: self.push_screen(QueryPerformanceScreen())),
             ("Refresh Dashboard", "Refresh dashboard stats", self.dashboard.refresh_dashboard),
         ])
-
         return commands
 
 

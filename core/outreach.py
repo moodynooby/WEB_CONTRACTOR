@@ -18,22 +18,12 @@ from playwright.sync_api import sync_playwright
 from contextlib import contextmanager
 
 from core import llm
+from core.utils import load_json_config
 from core.db_repository import (
     update_lead_contact_info,
     get_pending_audits, save_audits_batch,
     get_qualified_leads, save_emails_batch,
 )
-
-
-def _load_json_config(filename: str) -> dict:
-    """Load JSON config file (shared helper)."""
-    from pathlib import Path
-    settings_path = Path(__file__).parent.parent / "config" / filename
-    try:
-        with open(settings_path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
 
 
 class Outreach:
@@ -44,10 +34,10 @@ class Outreach:
         logger: Callable | None = None,
     ):
         self.logger = logger
-        self.audit_settings = _load_json_config("audit_settings.json")
-        self.email_prompts = _load_json_config("email_prompts.json")
+        self.audit_settings = load_json_config("audit_settings.json")
+        self.email_prompts = load_json_config("email_prompts.json")
         self.ollama_enabled = llm.is_available()
-        self._llm_settings = _load_json_config("app_settings.json").get("llm_settings", {})
+        self._llm_settings = load_json_config("app_settings.json").get("llm_settings", {})
 
     def log(self, message: str, style: str = "") -> None:
         """Log message to provided logger or print"""

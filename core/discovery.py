@@ -10,12 +10,12 @@ Efficient resource management with per-operation browser contexts:
 import json
 import random
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from playwright.sync_api import Page, sync_playwright
 
 from core import llm
+from core.utils import load_json_config
 from core.db_repository import (
     get_all_buckets, get_config, get_bucket_id_by_name,
     save_leads_batch, get_or_create_query_performance, update_query_performance,
@@ -23,25 +23,9 @@ from core.db_repository import (
 )
 
 
-def _load_json_config(filename: str) -> dict:
-    """Load JSON config file (shared helper)."""
-    from pathlib import Path
-    settings_path = Path(__file__).parent.parent / "config" / filename
-    try:
-        with open(settings_path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
 def _load_app_settings() -> dict:
     """Load application settings from config file."""
-    settings_path = Path(__file__).parent.parent / "config" / "app_settings.json"
-    try:
-        with open(settings_path, "r") as f:
-            return json.load(f)  # type: ignore[no-any-return]
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return load_json_config("app_settings.json")
 
 
 class PlaywrightScraper:
@@ -53,7 +37,7 @@ class PlaywrightScraper:
     ):
         self.buckets = get_all_buckets()
         self.logger = logger
-        self._settings = _load_json_config("app_settings.json")
+        self._settings = load_json_config("app_settings.json")
 
     @property
     def ollama_enabled(self) -> bool:

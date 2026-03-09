@@ -8,7 +8,6 @@ from ui.screens import (
     RefineEmailModal,
     MarketReviewScreen,
     QueryPerformanceScreen,
-    LogsScreen,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "RefineEmailModal",
     "MarketReviewScreen",
     "QueryPerformanceScreen",
-    "LogsScreen",
 ]

@@ -19,8 +19,10 @@ from core.db_repository import (
     get_emails_for_review,
     update_email_content, delete_email, mark_email_sent,
 )
+from core.utils import load_json_config
 
 __all__ = [
+    "load_json_config",
     "WebContractorApp",
     "Config",
     "PlaywrightScraper",

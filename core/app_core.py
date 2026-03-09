@@ -196,33 +196,3 @@ class WebContractorApp:
         except Exception as e:
             self.logger(f"Email send error: {e}", "error")
             raise
-    
-    def get_pending_audits(self, limit: int = 50) -> list:
-        """Get leads pending audit."""
-        from core.db_repository import get_pending_audits
-        return get_pending_audits(limit)
-    
-    def get_qualified_leads(self, limit: int = 50) -> list:
-        """Get qualified leads without emails."""
-        from core.db_repository import get_qualified_leads
-        return get_qualified_leads(limit)
-    
-    def get_emails_for_review(self, limit: int = 50) -> list:
-        """Get emails needing review."""
-        from core.db_repository import get_emails_for_review
-        return get_emails_for_review(limit)
-    
-    def get_all_buckets(self) -> list:
-        """Get all buckets."""
-        from core.db_repository import get_all_buckets
-        return get_all_buckets()
-    
-    def get_config(self, key: str) -> dict | None:
-        """Get config by key."""
-        from core.db_repository import get_config
-        return get_config(key)
-    
-    def save_config(self, key: str, value: Dict) -> Any:
-        """Save config."""
-        from core.db_repository import save_config
-        return save_config(key, value)
