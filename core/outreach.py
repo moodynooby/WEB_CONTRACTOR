@@ -1,19 +1,13 @@
 """Outreach Module: Lead Auditing + Email Generation (Stage B + Stage C)
 
-Single-threaded design with efficient resource management:
-- Browser context reused across audit operations
+Efficient resource management with per-operation browser contexts:
+- Fresh browser context created for each audit operation
 - LRU caching for email generation
 - HTTP session reuse
 - Proper Playwright lifecycle management
-
-Thread Safety:
-- Playwright browser context is created per-thread using threading.local()
-- Each audit operation gets its own isolated browser context
-- Context manager ensures proper cleanup even on exceptions
 """
 
 import json
-import threading
 import time
 from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -29,11 +23,6 @@ from core.db_peewee import (
     get_pending_audits, save_audits_batch,
     get_qualified_leads, save_emails_batch,
 )
-
-_browser_context_local = threading.local()
-_audit_lock = threading.Lock()
-
-
 
 
 class Outreach:
@@ -99,44 +88,27 @@ class Outreach:
 
     @contextmanager
     def managed_session(self):
-        """Context manager for audit session - creates thread-local browser context
-        
-        Thread Safety:
-        - Each thread gets its own browser context via threading.local()
-        - Browser is launched once per thread and reused for all operations in that thread
-        - Proper cleanup ensures no resource leaks
+        """Context manager for audit session - creates fresh browser context per operation
+
+        Always creates a new browser context for reliability and proper cleanup.
         """
-        if hasattr(_browser_context_local, 'context') and _browser_context_local.context is not None:
-            yield self
-            return
-        
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
-            
-            _browser_context_local.playwright = p
-            _browser_context_local.browser = browser
-            _browser_context_local.context = context
-            
+            self._context = context
+
             try:
                 yield self
             finally:
                 context.close()
                 browser.close()
-                _browser_context_local.context = None
-                _browser_context_local.browser = None
-                _browser_context_local.playwright = None
+                self._context = None
 
     def _get_playwright_page(self) -> Any:
-        """Get new Playwright page from current thread's context
-
-        Thread Safety:
-        - Uses thread-local storage to get the correct context for this thread
-        - Raises RuntimeError if called outside managed_session()
-        """
-        if not hasattr(_browser_context_local, 'context') or _browser_context_local.context is None:
+        """Get new Playwright page from current context"""
+        if not hasattr(self, '_context') or self._context is None:
             raise RuntimeError("Outreach must be used within managed_session() for browser tasks")
-        return _browser_context_local.context.new_page()  # type: ignore[no-any-return]
+        return self._context.new_page()  # type: ignore[no-any-return]
 
     def _take_screenshot(self, url: str) -> Optional[str]:
         """Capture website screenshot and return as base64 string"""

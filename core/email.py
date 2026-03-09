@@ -9,7 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Callable, Optional
 
-from core.db_peewee import init_db, mark_email_sent
+from core.db_peewee import mark_email_sent
 
 
 class EmailSender:
@@ -29,8 +29,6 @@ class EmailSender:
         self.password = password or __import__("os").getenv("GMAIL_PASSWORD")
         self.logger = logger
         self.email_signature = self._load_email_signature()
-
-        init_db()
 
     def _load_email_signature(self) -> str:
         """Load email signature from config file"""

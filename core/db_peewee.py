@@ -6,7 +6,7 @@ No repository pattern - direct model access.
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Generator
+from typing import Any, Dict, List, Optional
 
 from peewee import (  # type: ignore[import-untyped]
     Model,
@@ -184,11 +184,50 @@ class AppConfig(BaseModel):
         self.save()
 
 
+class QueryPerformance(BaseModel):
+    """Track query performance to identify and disable stale queries"""
+    bucket = ForeignKeyField(Bucket, backref='query_performances', on_delete='CASCADE')
+    query_pattern = TextField()  
+    city = TextField()
+    is_active = BooleanField(default=True)
+    total_executions = IntegerField(default=0)
+    total_leads_found = IntegerField(default=0)
+    total_leads_saved = IntegerField(default=0)
+    total_qualified = IntegerField(default=0)
+    consecutive_failures = IntegerField(default=0)
+    last_executed_at = DateTimeField(null=True)
+    created_at = DateTimeField(default=datetime.now)
+    
+    class Meta:
+        indexes = (
+            (('bucket_id', 'query_pattern', 'city'), True),  
+            (('is_active',), False),
+            (('consecutive_failures',), False),
+        )
+    
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'bucket': self.bucket.name if self.bucket else None,
+            'bucket_id': self.bucket_id,
+            'query_pattern': self.query_pattern,
+            'city': self.city,
+            'is_active': self.is_active,
+            'total_executions': self.total_executions,
+            'total_leads_found': self.total_leads_found,
+            'total_leads_saved': self.total_leads_saved,
+            'total_qualified': self.total_qualified,
+            'consecutive_failures': self.consecutive_failures,
+            'last_executed_at': self.last_executed_at.isoformat() if self.last_executed_at else None,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
 
 def init_db():
     """Initialize database and create tables"""
     db.connect(reuse_if_open=True)
-    db.create_tables([Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig], safe=True)
+    db.create_tables([Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig, QueryPerformance], safe=True)
     _migrate_bucket_columns()
 
 
@@ -352,29 +391,6 @@ def get_pending_audits(limit: int = 50) -> List[Dict]:
     } for lead in query]
 
 
-def save_audit(lead_id: int, data: Dict, duration: Optional[float] = None) -> None:
-    """Save audit results"""
-    with db.atomic():
-        audit = Audit.create(
-            lead_id=lead_id,
-            url=data.get('url'),
-            score=data.get('score', 0),
-            issues_json=json.dumps(data.get('issues', [])),
-            qualified=bool(data.get('qualified', 0)),
-            duration=duration,
-        )
-        
-        for issue in data.get('issues', []):
-            AuditIssue.create(
-                audit_id=audit.id,
-                issue_type=issue.get('type', 'unknown'),
-                severity=issue.get('severity', 'info'),
-                description=issue.get('description', ''),
-            )
-        
-        Lead.update(status='qualified' if data.get('qualified') else 'unqualified').where(Lead.id == lead_id).execute()
-
-
 def save_audits_batch(audits: List[Dict]) -> int:
     """Save multiple audits"""
     if not audits:
@@ -439,41 +455,6 @@ def get_qualified_leads(limit: int = 50) -> List[Dict]:
     return result
 
 
-def stream_qualified_leads(batch_size: int = 100) -> Generator[Dict, None, None]:
-    """Stream qualified leads"""
-    already_sent = EmailCampaign.select(EmailCampaign.lead_id)
-    query = (Lead
-             .select(Lead, Bucket)
-             .join(Bucket, on=(Lead.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER)
-             .where(
-                 (Lead.status == 'qualified') &
-                 (Lead.id.not_in(already_sent))
-             ))
-    
-    leads_with_audits = prefetch(query, Audit)
-
-    for lead in leads_with_audits:
-        latest_audit = lead.audits[0] if lead.audits else None
-        yield {
-            'id': lead.id,
-            'business_name': lead.business_name,
-            'website': lead.website,
-            'bucket': lead.bucket.name if lead.bucket else None,
-            'issues_json': latest_audit.issues_json if latest_audit and latest_audit.issues_json else '[]',
-        }
-
-
-def save_email(lead_id: int, subject: str, body: str, status: str = 'needs_review', duration: Optional[float] = None) -> None:
-    """Save generated email"""
-    EmailCampaign.create(
-        lead_id=lead_id,
-        subject=subject,
-        body=body,
-        status=status,
-        duration=duration,
-    )
-
-
 def save_emails_batch(emails: List[Dict]) -> int:
     """Save multiple emails"""
     if not emails:
@@ -496,33 +477,6 @@ def save_emails_batch(emails: List[Dict]) -> int:
     return saved
 
 
-def get_pending_emails(limit: int = 20) -> List[Dict]:
-    """Get pending emails to send"""
-    over_limit_ids = [b.id for b in Bucket.select(Bucket.id).where(
-        (Bucket.daily_email_count >= Bucket.daily_email_limit) &
-        (Bucket.last_reset_date >= datetime.now().date())
-    )]
-
-    query = (EmailCampaign
-             .select(EmailCampaign, Lead)
-             .join(Lead, on=(EmailCampaign.lead_id == Lead.id))
-             .where((EmailCampaign.status == 'pending') & (Lead.email.is_null(False))))
-
-    if over_limit_ids:
-        query = query.where(Lead.bucket_id.not_in(over_limit_ids))
-
-    query = query.limit(limit)
-
-    return [{
-        'campaign_id': ec.id,
-        'business_name': ec.lead.business_name,
-        'email': ec.lead.email,
-        'subject': ec.subject,
-        'body': ec.body,
-        'lead_id': ec.lead_id,
-    } for ec in query]
-
-
 def get_emails_for_review(limit: int = 50) -> List[Dict]:
     """Get emails needing review"""
     query = (EmailCampaign
@@ -541,16 +495,6 @@ def get_emails_for_review(limit: int = 50) -> List[Dict]:
         'social_links': json.loads(ec.lead.social_links) if ec.lead.social_links else {},
         'contact_form_url': ec.lead.contact_form_url,
     } for ec in query]
-
-
-def get_emails_needing_review(limit: int = 50) -> List[Dict]:
-    """Alias for get_emails_for_review"""
-    return get_emails_for_review(limit)
-
-
-def update_email_status(campaign_id: int, status: str) -> None:
-    """Update email status"""
-    EmailCampaign.update(status=status).where(EmailCampaign.id == campaign_id).execute()
 
 
 def update_email_content(campaign_id: int, subject: str, body: str) -> None:
@@ -593,10 +537,174 @@ def mark_email_sent(campaign_id: int, success: bool, error: Optional[str] = None
                 (EmailCampaign.id == campaign_id) &
                 (EmailCampaign.retry_count < EmailCampaign.max_retries)
             ).execute()
-            
+
             EmailCampaign.update(
                 status='permanently_failed'
             ).where(
                 (EmailCampaign.id == campaign_id) &
                 (EmailCampaign.retry_count >= EmailCampaign.max_retries)
             ).execute()
+
+
+
+def get_or_create_query_performance(bucket_id: int, query_pattern: str, city: str) -> QueryPerformance:
+    """Get or create query performance tracking record"""
+    try:
+        qp, created = QueryPerformance.get_or_create(
+            bucket_id=bucket_id,
+            query_pattern=query_pattern,
+            city=city,
+            defaults={'is_active': True}
+        )
+        return qp  # type: ignore[no-any-return]
+    except Exception:
+        return QueryPerformance.create(
+            bucket_id=bucket_id,
+            query_pattern=query_pattern,
+            city=city,
+            is_active=True
+        )
+
+
+def update_query_performance(
+    query_perf: QueryPerformance,
+    leads_found: int,
+    leads_saved: int,
+    qualified_count: int = 0,
+    success: bool = True
+) -> None:
+    """Update query performance metrics after execution"""
+    with db.atomic():
+        query_perf.total_executions += 1
+        query_perf.total_leads_found += leads_found
+        query_perf.total_leads_saved += leads_saved
+        query_perf.total_qualified += qualified_count
+        query_perf.last_executed_at = datetime.now()
+        
+        if success and leads_found > 0:
+            query_perf.consecutive_failures = 0
+        else:
+            query_perf.consecutive_failures += 1
+        
+        query_perf.save()
+
+
+def mark_query_as_stale(query_perf: QueryPerformance) -> None:
+    """Mark a query as stale (inactive)"""
+    QueryPerformance.update(is_active=False).where(
+        QueryPerformance.id == query_perf.id
+    ).execute()
+
+
+def get_stale_queries(max_failures: int = 3, bucket_id: Optional[int] = None) -> List[Dict]:
+    """Get queries that have exceeded the failure threshold"""
+    query = QueryPerformance.select(QueryPerformance, Bucket).join(
+        Bucket, on=(QueryPerformance.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER
+    ).where(
+        QueryPerformance.is_active &
+        (QueryPerformance.consecutive_failures >= max_failures)
+    )
+
+    if bucket_id:
+        query = query.where(QueryPerformance.bucket_id == bucket_id)
+
+    return [qp.to_dict() for qp in query]
+
+
+def get_query_performance_stats(bucket_id: Optional[int] = None) -> Dict:
+    """Get overall query performance statistics"""
+    query = QueryPerformance.select()
+    if bucket_id:
+        query = query.where(QueryPerformance.bucket_id == bucket_id)
+
+    total_queries = query.count()
+    active_queries = query.where(QueryPerformance.is_active).count()
+    stale_queries = query.where(
+        QueryPerformance.is_active & (QueryPerformance.consecutive_failures >= 3)
+    ).count()
+    
+    total_executions = sum(qp.total_executions for qp in query)
+    total_leads = sum(qp.total_leads_found for qp in query)
+    total_qualified = sum(qp.total_qualified for qp in query)
+    
+    avg_success_rate = (total_leads / total_executions * 100) if total_executions > 0 else 0
+    
+    return {
+        'total_queries': total_queries,
+        'active_queries': active_queries,
+        'stale_queries': stale_queries,
+        'total_executions': total_executions,
+        'total_leads_found': total_leads,
+        'total_qualified': total_qualified,
+        'average_success_rate': round(avg_success_rate, 2),
+    }
+
+
+def get_top_performing_queries(limit: int = 5, min_executions: int = 3) -> List[Dict]:
+    """Get top performing queries by success rate (minimum executions required)"""
+    query = (QueryPerformance
+             .select(QueryPerformance, Bucket)
+             .join(Bucket, on=(QueryPerformance.bucket_id == Bucket.id))
+             .where(QueryPerformance.total_executions >= min_executions)
+             .order_by((QueryPerformance.total_leads_found / QueryPerformance.total_executions).desc())
+             .limit(limit))
+    
+    results = []
+    for qp in query:
+        success_rate = (qp.total_leads_found / qp.total_executions * 100) if qp.total_executions > 0 else 0
+        results.append({
+            'bucket': qp.bucket.name if qp.bucket else 'Unknown',
+            'query_pattern': qp.query_pattern,
+            'city': qp.city,
+            'total_executions': qp.total_executions,
+            'total_leads_found': qp.total_leads_found,
+            'success_rate': round(success_rate, 2),
+        })
+    return results
+
+
+def get_worst_performing_queries(limit: int = 5, min_executions: int = 3) -> List[Dict]:
+    """Get worst performing queries by success rate (minimum executions required)"""
+    query = (QueryPerformance
+             .select(QueryPerformance, Bucket)
+             .join(Bucket, on=(QueryPerformance.bucket_id == Bucket.id))
+             .where(QueryPerformance.total_executions >= min_executions)
+             .order_by((QueryPerformance.total_leads_found / QueryPerformance.total_executions).asc())
+             .limit(limit))
+    
+    results = []
+    for qp in query:
+        success_rate = (qp.total_leads_found / qp.total_executions * 100) if qp.total_executions > 0 else 0
+        results.append({
+            'bucket': qp.bucket.name if qp.bucket else 'Unknown',
+            'query_pattern': qp.query_pattern,
+            'city': qp.city,
+            'total_executions': qp.total_executions,
+            'total_leads_found': qp.total_leads_found,
+            'success_rate': round(success_rate, 2),
+        })
+    return results
+
+
+def get_overall_efficiency_metrics() -> Dict:
+    """Get overall efficiency metrics for query performance"""
+    query = QueryPerformance.select()
+    
+    total_executions = sum(qp.total_executions for qp in query)
+    total_leads_found = sum(qp.total_leads_found for qp in query)
+    total_leads_saved = sum(qp.total_leads_saved for qp in query)
+    total_qualified = sum(qp.total_qualified for qp in query)
+    
+    leads_per_execution = (total_leads_found / total_executions) if total_executions > 0 else 0
+    save_rate = (total_leads_saved / total_leads_found * 100) if total_leads_found > 0 else 0
+    qualification_rate = (total_qualified / total_leads_found * 100) if total_leads_found > 0 else 0
+    
+    return {
+        'total_executions': total_executions,
+        'total_leads_found': total_leads_found,
+        'total_leads_saved': total_leads_saved,
+        'total_qualified': total_qualified,
+        'leads_per_execution': round(leads_per_execution, 2),
+        'save_rate': round(save_rate, 2),
+        'qualification_rate': round(qualification_rate, 2),
+    }

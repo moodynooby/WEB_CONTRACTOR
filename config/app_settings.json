@@ -61,5 +61,12 @@
     "page_load_timeout_ms": 5000,
     "search_wait_timeout_ms": 10000,
     "result_click_delay_ms": 2000
+  },
+  "stale_query_threshold": 3,
+  "query_performance": {
+    "enabled": true,
+    "max_consecutive_failures": 3,
+    "auto_disable_stale": true,
+    "review_stale_interval_days": 7
   }
 }

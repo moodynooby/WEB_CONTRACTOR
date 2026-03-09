@@ -81,6 +81,7 @@ uv run python main.py
 
 1. Make focused, minimal changes
 2. Test locally: `uv run python main.py`
-3. Run `uv run ruff check --fix . &&  uv run uncomment .  && uv run mypy .`
+3. Run 
+`uv run ruff check --fix . &&  uv run uncomment .  && uv run mypy .`
 4. Commit with descriptive messages
 
