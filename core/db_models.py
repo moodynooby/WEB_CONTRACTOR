@@ -4,7 +4,7 @@ Pure model definitions only - no business logic.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from peewee import (
     BooleanField,
@@ -164,22 +164,6 @@ class EmailCampaign(BaseModel):
             (("status",), False),
             (("lead_id", "status"), False),
         )
-
-
-class AppConfig(BaseModel):
-    """Application configuration storage."""
-
-    key = TextField(primary_key=True)
-    value = JSONField(null=True)
-
-    def get_value(self) -> Optional[Dict[str, Any]]:
-        """Get config value as dictionary."""
-        return self.value
-
-    def set_value(self, value: Dict[str, Any]) -> None:
-        """Set config value."""
-        self.value = value
-        self.save()
 
 
 class QueryPerformance(BaseModel):

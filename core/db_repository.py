@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 from peewee import DatabaseError, IntegrityError, JOIN, prefetch
 
 from core.db_models import (
-    AppConfig,
     Audit,
     Bucket,
     EmailCampaign,
@@ -23,7 +22,7 @@ def init_db() -> None:
     """Initialize database and create tables."""
     db.connect(reuse_if_open=True)
     db.create_tables(
-        [Bucket, Lead, Audit, EmailCampaign, AppConfig, QueryPerformance], safe=True
+        [Bucket, Lead, Audit, EmailCampaign, QueryPerformance], safe=True
     )
 
 
@@ -83,38 +82,6 @@ def get_bucket_id_by_name(name: str) -> Optional[int]:
     """
     bucket = Bucket.get_or_none(Bucket.name == name)
     return bucket.id if bucket else None
-
-
-
-
-def save_config(key: str, value: Dict[str, Any]) -> AppConfig:
-    """Save application config.
-
-    Args:
-        key: Config key.
-        value: Config value dictionary.
-
-    Returns:
-        Saved AppConfig instance.
-    """
-    config, _ = AppConfig.get_or_create(key=key)
-    config.set_value(value)
-    return config
-
-
-def get_config(key: str) -> Optional[Dict[str, Any]]:
-    """Get application config.
-
-    Args:
-        key: Config key.
-
-    Returns:
-        Config value dictionary or None.
-    """
-    config = AppConfig.get_or_none(key=key)
-    return config.get_value() if config else None
-
-
 
 
 def save_lead(data: Dict[str, Any]) -> int:

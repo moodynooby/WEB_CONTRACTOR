@@ -1,9 +1,71 @@
 {
   "audit_metadata": {
-    "version": "2.0",
-    "description": "Website audit configuration with technical, content, and visual checks",
+    "version": "3.0",
+    "description": "Multi-agent audit system with specialized agents for different audit aspects",
     "default_qualification_threshold": 60,
     "critical_failure_threshold": 25
+  },
+  "agents": {
+    "execution_order": ["technical", "contact", "content", "business", "visual"],
+    "technical": {
+      "enabled": true,
+      "weight": 1.0,
+      "timeout": 10,
+      "early_exit_rules": {
+        "min_score": 20,
+        "max_critical_issues": 3
+      },
+      "disabled_for_buckets": []
+    },
+    "contact": {
+      "enabled": true,
+      "weight": 1.0,
+      "timeout": 15,
+      "early_exit_rules": {
+        "min_score": 40
+      },
+      "disabled_for_buckets": []
+    },
+    "content": {
+      "enabled": true,
+      "weight": 1.0,
+      "timeout": 30,
+      "model": "gemma:2b-instruct-q4_0",
+      "system_message": "You are a professional content auditor. Analyze website copy for clarity, CTAs, value proposition, and trust signals. Output ONLY valid JSON.",
+      "prompt_template": "Analyze website content for '{business_name}' (industry: {bucket}).\n\nContent:\n{content}\n\nEvaluate:\n1. Value Proposition: Clear within 3 seconds?\n2. Call-to-Actions: Visible, specific, and compelling?\n3. Professional Tone: Appropriate for industry?\n4. Trust Signals: Testimonials, badges, credentials?\n5. Content Quality: Well-written, no errors?\n\nReturn ONLY JSON:\n{{\n  \"content_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"value_proposition|cta|tone|trust|content_quality\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}",
+      "early_exit_rules": {},
+      "disabled_for_buckets": []
+    },
+    "business": {
+      "enabled": true,
+      "weight": 1.0,
+      "timeout": 30,
+      "llm_business_audit": {
+        "enabled": true,
+        "model": "gemma:2b-instruct-q4_0",
+        "system_message": "You are a business strategy expert. Evaluate industry-specific requirements. Output ONLY valid JSON.",
+        "prompt_template": "Evaluate {bucket} business website for '{business_name}'.\n\nContent:\n{content}\n\nCheck industry-specific requirements:\n1. Service Clarity: What they offer is clear?\n2. Target Audience: Clear who they serve?\n3. Differentiation: What makes them unique?\n4. Industry Standards: Meeting expectations?\n\nReturn ONLY JSON:\n{{\n  \"observations\": [\n    {{\n      \"type\": \"service_clarity|target_audience|differentiation|standards\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}"
+      },
+      "early_exit_rules": {},
+      "disabled_for_buckets": []
+    },
+    "visual": {
+      "enabled": false,
+      "weight": 1.0,
+      "timeout": 60,
+      "model": "richardyoung/smolvlm2-2.2b-instruct",
+      "system_message": "You are a visual UX design expert. Analyze website screenshots for design quality, usability, and professionalism. Output ONLY valid JSON.",
+      "prompt_template": "Analyze website screenshot for '{business_name}' (industry: {bucket}).\n\nEvaluate:\n1. Design Quality: Colors, fonts, visual hierarchy\n2. Usability: Navigation clarity, button visibility\n3. Mobile-Friendliness: Readable text, proper spacing\n4. Professionalism: Trustworthy appearance\n5. Modern Standards: Contemporary design patterns\n\nReturn ONLY JSON:\n{{\n  \"visual_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"category\": \"design|usability|mobile|professionalism|modern\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}",
+      "early_exit_rules": {},
+      "disabled_for_buckets": ["Developers", "Marketing Agencies"]
+    }
+  },
+  "agent_weights": {
+    "technical": 0.30,
+    "content": 0.25,
+    "visual": 0.20,
+    "business": 0.15,
+    "contact": 0.10
   },
   "technical_checks": [
     {
@@ -149,7 +211,7 @@
   "qualification_rules": {
     "target_score_min": 0,
     "target_score_max": 84,
-    "min_issues_required": 3,
+    "min_issues_required": 2,
     "weighted_calculation": true,
     "bonus_points": {
       "has_contact_info": 5,
@@ -210,6 +272,33 @@
           "remediation": "Publish detailed case studies with metrics and client results"
         }
       ]
+    }
+  },
+  "email_generation": {
+    "enabled": true,
+    "model": "gemma:2b-instruct-q4_0",
+    "timeout": 30,
+    "system_message": "You are a professional cold email writer. Write personalized, concise outreach emails. Output ONLY valid JSON with subject and body.",
+    "prompt_template": "Write a cold outreach email for a web development contractor.\n\nTarget: {business_name} ({bucket})\nWebsite: {url}\n\nIssues Found:\n{issues}\n\nWrite a personalized email that:\n1. Mentions their business specifically\n2. Points out 1-2 key issues (not all)\n3. Offers a solution without being pushy\n4. Has a clear, low-pressure CTA\n5. Keeps it under 150 words\n\nReturn ONLY JSON:\n{{\n  \"subject\": \"<subject line under 50 chars>\",\n  \"body\": \"<email body with greeting and signature>\"\n}}",
+    "signature": {
+      "closing": "Best regards,",
+      "name": "[Your Name]",
+      "company": "[Your Company]",
+      "contact": "[Your Email/Phone]"
+    },
+    "bucket_templates": {
+      "Interior Designers": {
+        "angle": "Focus on portfolio presentation and visual appeal",
+        "cta": "Offer free website audit + portfolio optimization"
+      },
+      "Developers": {
+        "angle": "Emphasize technical excellence and performance",
+        "cta": "Offer code review + performance optimization"
+      },
+      "Marketing Agencies": {
+        "angle": "Highlight credibility and client trust signals",
+        "cta": "Offer conversion-focused redesign"
+      }
     }
   }
 }

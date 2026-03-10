@@ -45,8 +45,7 @@ class DashboardManager:
 
                 with Horizontal(id="pipeline-actions"):
                     yield Button("🔍 Discovery", variant="primary", id="discovery-btn")
-                    yield Button("📊 Audit", variant="primary", id="audit-btn")
-                    yield Button("📧 Generate", variant="primary", id="generate-btn")
+                    yield Button("🚀 Audit", variant="success", id="pipeline-btn")
                     yield Button("✅ Review", variant="success", id="review-btn")
                     yield Button("🚀 Send", variant="warning", id="send-btn")
 
@@ -62,35 +61,32 @@ class DashboardManager:
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle dashboard button clicks."""
         button_id = event.button.id
-        
+
         if button_id == "discovery-btn":
             self.app.action_run_discovery()
-        elif button_id == "audit-btn":
-            self.app.action_run_audit()
-        elif button_id == "generate-btn":
-            self.app.action_generate_emails()
+        elif button_id == "pipeline-btn":
+            self.app.action_run_unified_pipeline()
         elif button_id == "review-btn":
             self.app.action_review_emails()
         elif button_id == "send-btn":
-            self.app.action_review_emails()  
+            self.app.action_review_emails()
     
     def get_pipeline_visual(self) -> str:
         """Generate visual pipeline showing current operation state."""
         stages = [
             ("🔍", "Discovery", self.app.current_operation == "discovery"),
-            ("📊", "Audit", self.app.current_operation == "audit"),
-            ("📧", "Generate", self.app.current_operation == "generate"),
+            ("🚀", "Audit", self.app.current_operation == "pipeline"),
             ("✅", "Review", self.app.current_operation == "review"),
             ("🚀", "Send", self.app.current_operation == "send"),
         ]
-        
+
         parts = []
         for icon, name, active in stages:
             if active:
                 parts.append(f"[bold accent]{icon} {name}[/bold accent]")
             else:
                 parts.append(f"[dim]{icon} {name}[/dim]")
-        
+
         progress_str = f" ({self.app.operation_progress}%)" if self.app.operation_progress else ""
         return " → ".join(parts) + progress_str
     

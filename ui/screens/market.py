@@ -15,7 +15,8 @@ from textual.widgets import (
     Static,
 )
 
-from core.db_repository import get_all_buckets, save_config, save_bucket, get_config
+from core.db_repository import get_all_buckets, save_bucket
+from core.utils import load_json_config
 
 
 class MarketReviewScreen(Screen):
@@ -117,15 +118,15 @@ class MarketReviewScreen(Screen):
                     new_pats = list(set(bucket.get("search_patterns", []) + suggestion.get("new_patterns", [])))
                     bucket["categories"] = new_cats
                     bucket["search_patterns"] = new_pats
-                    
-                    geo_focus = get_config("geographic_focus") or {}
+
+                    app_settings = load_json_config("app_settings.json")
+                    geo_focus = app_settings.get("geographic_focus") or {}
                     if "expanded" not in geo_focus:
                         geo_focus["expanded"] = {"cities": []}
                     geo_focus["expanded"]["cities"] = list(
                         set(geo_focus["expanded"].get("cities", []) + suggestion.get("new_cities", []))
                     )
-                    save_config("geographic_focus", geo_focus)
-                    
+
                     segments = bucket.get("geographic_segments", [])
                     if isinstance(segments, str):
                         try:
@@ -135,7 +136,7 @@ class MarketReviewScreen(Screen):
                     if "expanded" not in segments:
                         segments.append("expanded")
                         bucket["geographic_segments"] = segments
-                    
+
                     save_bucket(bucket)
                     return True
             else:

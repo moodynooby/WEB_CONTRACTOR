@@ -99,12 +99,11 @@ class WebContractorTUI(App):
         Binding("q", "quit", "Quit", show=True, priority=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("d", "run_discovery", "Discovery", show=True),
-        Binding("a", "run_audit", "Audit", show=True),
-        Binding("g", "generate_emails", "Generate", show=True),
+        Binding("a", "run_pipeline", "Audit", show=True),
         Binding("e", "expand_markets", "Expand", show=False),
         Binding("v", "review_emails", "Review", show=True),
         Binding("b", "database_browser", "Database", show=True),
-        Binding("p", "query_performance", "Perf", show=True),
+        Binding("x", "query_performance", "Perf", show=True),
     ]
 
     SCREENS: Dict[str, type] = {
@@ -202,6 +201,16 @@ class WebContractorTUI(App):
         """Run audit pipeline."""
         self.run_worker(self.app_core.run_audit, exclusive=True, thread=True)
 
+    def action_run_unified_pipeline(self) -> None:
+        """Run unified audit + email generation pipeline."""
+        self.current_operation = "pipeline"
+        self.dashboard.refresh_dashboard()
+        self.run_worker(self.app_core.run_unified_pipeline, exclusive=True, thread=True)
+
+    def action_run_pipeline(self) -> None:
+        """Alias for action_run_unified_pipeline (keyboard shortcut)."""
+        self.action_run_unified_pipeline()
+
     def action_generate_emails(self) -> None:
         """Generate emails."""
         self.run_worker(self.app_core.generate_emails, exclusive=True, thread=True)
@@ -231,8 +240,7 @@ class WebContractorTUI(App):
         commands = list(super().get_system_commands(screen))
         commands.extend([
             ("Run Discovery", "Execute discovery pipeline", self.action_run_discovery),
-            ("Run Audit", "Audit leads for quality", self.action_run_audit),
-            ("Generate Emails", "Generate outreach emails", self.action_generate_emails),
+            ("Run Audit", "Audit + generate emails in one flow", self.action_run_unified_pipeline),
             ("Review Emails", "Review generated emails", lambda: self.push_screen(ReviewScreen())),
             ("Database Browser", "Browse all data", lambda: self.push_screen(DatabaseScreen())),
             ("Query Performance", "View performance stats", lambda: self.push_screen(QueryPerformanceScreen())),

@@ -274,9 +274,9 @@ class ReviewScreen(Screen):
     def _refine_email(self, instructions: str) -> None:
         """Refine email using LLM in background."""
         self.notify("AI refining...")
-        
+
         def refine_task():
-            result = self.app.app_core.outreach.refine_email_ollama(
+            result = self.app.app_core.orchestrator.refine_email(
                 self.selected_email["subject"],
                 self.selected_email["body"],
                 instructions

@@ -11,21 +11,21 @@ from typing import Any, Callable, Dict, Optional
 from core.db_repository import init_db, close_db
 from core.discovery import PlaywrightScraper
 from core.email import EmailSender
-from core.outreach import Outreach
+from core.orchestrator import AuditOrchestrator
 
 
 class Config:
     """Centralized configuration management."""
-    
+
     def __init__(self, config_path: str = "config"):
         self.config_path = Path(config_path)
         self._cache: Dict[str, Dict] = {}
-    
+
     def load(self, filename: str) -> Dict:
         """Load config file, using cache if available."""
         if filename in self._cache:
             return self._cache[filename]
-        
+
         filepath = self.config_path / filename
         try:
             with open(filepath, "r") as f:
@@ -34,7 +34,7 @@ class Config:
                 return data  # type: ignore[return-value]
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+
     def get(self, filename: str, key: str, default: Any = None) -> Any:
         """Get specific key from config file."""
         data = self.load(filename)
@@ -64,21 +64,21 @@ class WebContractorApp:
         self.logger = logger or (lambda msg, style="": print(f"[{style}] {msg}"))
         
         self._scraper: Optional[PlaywrightScraper] = None
-        self._outreach: Optional[Outreach] = None
         self._email_sender: Optional[EmailSender] = None
+        self._orchestrator: Optional[AuditOrchestrator] = None
         self._initialized = False
-    
+
     def initialize(self) -> None:
         """Initialize database and services."""
         if self._initialized:
             return
-        
+
         self.logger("Initializing database...", "info")
         init_db()
-        
+
         self.logger("Initializing services...", "info")
         self._scraper = PlaywrightScraper(logger=self._log_wrapper("discovery"))
-        self._outreach = Outreach(logger=self._log_wrapper("outreach"))
+        self._orchestrator = AuditOrchestrator(logger=self._log_wrapper("audit"))
         self._email_sender = EmailSender(logger=self._log_wrapper("email"))
         
         self._initialized = True
@@ -106,14 +106,14 @@ class WebContractorApp:
         if not self._initialized:
             self.initialize()
         return self._scraper  # type: ignore[return-value]
-    
+
     @property
-    def outreach(self) -> Outreach:
-        """Get outreach service, initializing if needed."""
+    def orchestrator(self) -> AuditOrchestrator:
+        """Get audit orchestrator service, initializing if needed."""
         if not self._initialized:
             self.initialize()
-        return self._outreach  # type: ignore[return-value]
-    
+        return self._orchestrator  # type: ignore[return-value]
+
     @property
     def email_sender(self) -> EmailSender:
         """Get email sender service, initializing if needed."""
@@ -142,10 +142,10 @@ class WebContractorApp:
         limit: int = 20,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
-        """Run lead audit pipeline."""
-        self.logger("Starting audit...", "info")
+        """Run lead audit pipeline using multi-agent orchestrator."""
+        self.logger("Starting multi-agent audit...", "info")
         try:
-            result = self.outreach.audit_leads(
+            result = self.orchestrator.audit_leads(
                 limit=limit,
                 progress_callback=progress_callback,
             )
@@ -160,10 +160,13 @@ class WebContractorApp:
         limit: int = 20,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
-        """Generate outreach emails."""
+        """Generate outreach emails for qualified leads.
+        
+        Note: For unified audit + email generation, use run_unified_pipeline() instead.
+        """
         self.logger("Starting email generation...", "info")
         try:
-            result = self.outreach.generate_emails(
+            result = self.orchestrator.generate_emails(
                 limit=limit,
                 progress_callback=progress_callback,
             )
@@ -172,7 +175,30 @@ class WebContractorApp:
         except Exception as e:
             self.logger(f"Email generation failed: {e}", "error")
             raise
-    
+
+    def run_unified_pipeline(
+        self,
+        limit: int = 20,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Dict:
+        """Run unified audit + email generation pipeline."""
+        self.logger("Starting unified pipeline...", "info")
+        try:
+            result = self.orchestrator.run_unified_pipeline(
+                limit=limit,
+                progress_callback=progress_callback,
+            )
+            self.logger(
+                f"Pipeline complete: {result.get('processed', 0)} processed, "
+                f"{result.get('qualified', 0)} qualified, "
+                f"{result.get('emails_generated', 0)} emails generated",
+                "success",
+            )
+            return result
+        except Exception as e:
+            self.logger(f"Pipeline failed: {e}", "error")
+            raise
+
     def send_email(
         self,
         to_email: str,

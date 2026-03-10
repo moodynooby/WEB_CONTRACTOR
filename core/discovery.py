@@ -7,6 +7,7 @@ Efficient resource management with per-operation browser contexts:
 - Dynamic configuration from app_settings.json and database
 """
 
+import asyncio
 import json
 import random
 from contextlib import contextmanager
@@ -17,7 +18,7 @@ from playwright.sync_api import Page, sync_playwright
 from core import llm
 from core.utils import load_json_config
 from core.db_repository import (
-    get_all_buckets, get_config, get_bucket_id_by_name,
+    get_all_buckets, get_bucket_id_by_name,
     save_leads_batch, get_or_create_query_performance, update_query_performance,
     mark_query_as_stale, get_stale_queries,
 )
@@ -98,7 +99,13 @@ class PlaywrightScraper:
         """Context manager for scraping session - creates fresh browser context per operation
 
         Always creates a new browser context for reliability and proper cleanup.
+        Sets up event loop for Playwright sync API when running in threads.
         """
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
         scraper_settings = self._get_scraper_settings()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=scraper_settings["headless"])
@@ -223,8 +230,9 @@ Return ONLY JSON list:
 
         buckets.sort(key=lambda b: b.get("priority", 1), reverse=True)
 
-        geo_focus = get_config("geographic_focus") or {}
-        
+        app_settings = load_json_config("app_settings.json")
+        geo_focus = app_settings.get("geographic_focus") or {}
+
         stale_query_set = set()
         for bucket in buckets:
             bucket_id = get_bucket_id_by_name(bucket["name"])
@@ -278,7 +286,7 @@ Return ONLY JSON list:
                             "warning",
                         )
                         continue
-                    
+
                     query = pattern.replace("{city}", city)
                     queries.append(
                         {"query": query, "bucket": bucket["name"], "city": city, "pattern": pattern}
@@ -292,7 +300,7 @@ Return ONLY JSON list:
         self, query: str, bucket: str, max_results: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Scrape Google Maps for business leads using Playwright
-        
+
         Args:
             query: Search query
             bucket: Bucket name
@@ -301,7 +309,7 @@ Return ONLY JSON list:
         leads: list = []
         scraper_settings = self._get_scraper_settings()
         limits = self._get_discovery_limits()
-        
+
         if max_results is None:
             max_results = limits["max_results_per_query"]
 
@@ -315,7 +323,7 @@ Return ONLY JSON list:
 
                 try:
                     page.wait_for_selector(
-                        "a[href*='/maps/place/']", 
+                        "a[href*='/maps/place/']",
                         timeout=scraper_settings["search_wait_timeout_ms"]
                     )
                 except Exception:
@@ -404,7 +412,7 @@ Return ONLY JSON list:
         """Scrape a single query across all sources sequentially to ensure thread-safety.
 
         Also tracks query performance for stale query detection.
-        
+
         Returns:
             Tuple of (leads_list, query_perf_object or None)
         """
@@ -449,7 +457,7 @@ Return ONLY JSON list:
 
         queries = self.generate_queries(bucket_name, max_queries)
         self.log(f"Generated {len(queries)} search queries", "info")
-        
+
         stale_threshold = self._settings.get("stale_query_threshold", 3)
         all_stale = get_stale_queries(max_failures=stale_threshold)
         if all_stale:
@@ -467,7 +475,7 @@ Return ONLY JSON list:
                 if query_leads:
                     saved = save_leads_batch(query_leads)
                     duplicates = len(query_leads) - saved
-                    
+
                     if query_perf:
                         leads_found = len(query_leads)
                         success = saved > 0
@@ -477,7 +485,7 @@ Return ONLY JSON list:
                             leads_saved=saved,
                             success=success
                         )
-                        
+
                         if query_perf.consecutive_failures >= stale_threshold:
                             mark_query_as_stale(query_perf)
                             self.log(
@@ -485,10 +493,10 @@ Return ONLY JSON list:
                                 f"({query_perf.consecutive_failures} consecutive failures)",
                                 "error",
                             )
-                    
+
                     total_saved += saved
                     total_leads += len(query_leads)
-                    
+
                     if duplicates > 0:
                         self.log(
                             f"  Found {len(query_leads)} leads, saved {saved} ({duplicates} duplicates - website exists)",
@@ -507,7 +515,7 @@ Return ONLY JSON list:
                             leads_saved=0,
                             success=False
                         )
-                        
+
                         if query_perf.consecutive_failures >= stale_threshold:
                             mark_query_as_stale(query_perf)
                             self.log(
@@ -515,7 +523,7 @@ Return ONLY JSON list:
                                 f"({query_perf.consecutive_failures} consecutive failures)",
                                 "error",
                             )
-                    
+
                     self.log("  No leads found", "error")
 
         self.log(f"\n{'=' * 60}")
