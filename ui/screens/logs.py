@@ -10,7 +10,6 @@ from textual.widgets import (
     Footer,
     Header,
     Label,
-    RichLog,
     Static,
 )
 

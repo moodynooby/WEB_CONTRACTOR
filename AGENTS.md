@@ -1,7 +1,6 @@
 # Web Contractor - Agent Guidelines
 
-## Architecture Overview
-
+Naming convention PEP 8 (find docs at agent_contexts/agents_validator.md)
 ### Layered Architecture
 
 ```

@@ -3,7 +3,6 @@
 Handles dashboard composition, stats display, and pipeline visualization.
 """
 
-from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
