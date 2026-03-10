@@ -6,7 +6,7 @@ from core.email import EmailSender
 from core.llm import is_available, generate, generate_with_retry, OllamaError
 from core.app_core import WebContractorApp, Config
 from core.db_models import (
-    db, Bucket, Lead, Audit, AuditIssue, EmailCampaign, AppConfig, QueryPerformance,
+    db, Bucket, Lead, Audit,  EmailCampaign, AppConfig, QueryPerformance,
 )
 from core.db_repository import (
     init_db, close_db,
@@ -38,7 +38,6 @@ __all__ = [
     "Bucket",
     "Lead",
     "Audit",
-    "AuditIssue",
     "EmailCampaign",
     "AppConfig",
     "QueryPerformance",
