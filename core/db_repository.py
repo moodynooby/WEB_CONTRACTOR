@@ -21,17 +21,13 @@ from core.db_models import (
 def init_db() -> None:
     """Initialize database and create tables."""
     db.connect(reuse_if_open=True)
-    db.create_tables(
-        [Bucket, Lead, Audit, EmailCampaign, QueryPerformance], safe=True
-    )
+    db.create_tables([Bucket, Lead, Audit, EmailCampaign, QueryPerformance], safe=True)
 
 
 def close_db() -> None:
     """Close database connection."""
     if not db.is_closed():
         db.close()
-
-
 
 
 def save_bucket(data: Dict[str, Any]) -> Bucket:
@@ -226,9 +222,7 @@ def get_qualified_leads(limit: int = 50) -> List[Dict[str, Any]]:
     query = (
         Lead.select(Lead, Bucket)
         .join(Bucket, on=(Lead.bucket_id == Bucket.id), join_type=JOIN.LEFT_OUTER)
-        .where(
-            (Lead.status == "qualified") & (Lead.id.not_in(already_sent))
-        )
+        .where((Lead.status == "qualified") & (Lead.id.not_in(already_sent)))
         .limit(limit)
     )
 
@@ -249,8 +243,6 @@ def get_qualified_leads(limit: int = 50) -> List[Dict[str, Any]]:
             }
         )
     return result
-
-
 
 
 def save_audits_batch(audits: List[Dict[str, Any]]) -> int:
@@ -292,8 +284,6 @@ def save_audits_batch(audits: List[Dict[str, Any]]) -> int:
                 continue
 
     return saved
-
-
 
 
 def save_emails_batch(emails: List[Dict[str, Any]]) -> int:
@@ -405,9 +395,9 @@ def mark_email_sent(
             lead = Lead.get_by_id(campaign.lead_id)
 
             if lead.bucket_id:
-                Bucket.update(
-                    daily_email_count=Bucket.daily_email_count + 1
-                ).where(Bucket.id == lead.bucket_id).execute()
+                Bucket.update(daily_email_count=Bucket.daily_email_count + 1).where(
+                    Bucket.id == lead.bucket_id
+                ).execute()
         else:
             EmailCampaign.update(
                 status="failed",
@@ -422,8 +412,6 @@ def mark_email_sent(
                 (EmailCampaign.id == campaign_id)
                 & (EmailCampaign.retry_count >= EmailCampaign.max_retries)
             ).execute()
-
-
 
 
 def get_or_create_query_performance(
@@ -510,18 +498,52 @@ def get_stale_queries(
     Returns:
         List of stale query dictionaries.
     """
-    query = QueryPerformance.select(QueryPerformance, Bucket).join(
-        Bucket,
-        on=(QueryPerformance.bucket_id == Bucket.id),
-        join_type=JOIN.LEFT_OUTER,
-    ).where(
-        QueryPerformance.is_active & (QueryPerformance.consecutive_failures >= max_failures)
+    query = (
+        QueryPerformance.select(QueryPerformance, Bucket)
+        .join(
+            Bucket,
+            on=(QueryPerformance.bucket_id == Bucket.id),
+            join_type=JOIN.LEFT_OUTER,
+        )
+        .where(
+            QueryPerformance.is_active
+            & (QueryPerformance.consecutive_failures >= max_failures)
+        )
     )
 
     if bucket_id:
         query = query.where(QueryPerformance.bucket_id == bucket_id)
 
     return [qp.to_dict() for qp in query]
+
+
+def cleanup_stale_queries(days_threshold: int = 30) -> int:
+    """Clean up very old stale queries to free up database space.
+
+    Removes queries that have been inactive for more than the specified days.
+    This helps prevent the database from growing too large with old stale queries.
+
+    Args:
+        days_threshold: Number of days after which stale queries are cleaned up.
+
+    Returns:
+        Number of queries cleaned up.
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_date = datetime.now() - timedelta(days=days_threshold)
+
+    stale_old = QueryPerformance.select().where(
+        not QueryPerformance.is_active,
+        QueryPerformance.last_executed_at < cutoff_date,
+    )
+
+    count = 0
+    for qp in stale_old:
+        qp.delete_instance()
+        count += 1
+
+    return count
 
 
 def get_query_performance_stats(
@@ -581,7 +603,9 @@ def get_top_performing_queries(
         .join(Bucket, on=(QueryPerformance.bucket_id == Bucket.id))
         .where(QueryPerformance.total_executions >= min_executions)
         .order_by(
-            (QueryPerformance.total_leads_found / QueryPerformance.total_executions).desc()
+            (
+                QueryPerformance.total_leads_found / QueryPerformance.total_executions
+            ).desc()
         )
         .limit(limit)
     )
@@ -623,7 +647,9 @@ def get_worst_performing_queries(
         .join(Bucket, on=(QueryPerformance.bucket_id == Bucket.id))
         .where(QueryPerformance.total_executions >= min_executions)
         .order_by(
-            (QueryPerformance.total_leads_found / QueryPerformance.total_executions).asc()
+            (
+                QueryPerformance.total_leads_found / QueryPerformance.total_executions
+            ).asc()
         )
         .limit(limit)
     )

@@ -29,13 +29,48 @@
       "google_maps": {
         "enabled": true,
         "priority": 1,
-        "max_results": 2,
+        "max_results": 5,
         "regions": ["global"],
         "description": "Google Maps business listings"
+      },
+      "justdial": {
+        "enabled": true,
+        "priority": 2,
+        "max_results": 10,
+        "regions": ["india"],
+        "description": "JustDial Indian business directory"
+      },
+      "sulekha": {
+        "enabled": false,
+        "priority": 3,
+        "max_results": 10,
+        "regions": ["india"],
+        "description": "Sulekha Indian community network"
+      },
+      "indiabizclub": {
+        "enabled": false,
+        "priority": 4,
+        "max_results": 10,
+        "regions": ["india"],
+        "description": "Indiabizclub B2B directory"
+      },
+      "yellowpages": {
+        "enabled": false,
+        "priority": 5,
+        "max_results": 10,
+        "regions": ["india"],
+        "description": "YellowPages India"
+      },
+      "allindiasearch": {
+        "enabled": false,
+        "priority": 6,
+        "max_results": 10,
+        "regions": ["india"],
+        "description": "AllIndiaSearch meta-search"
       }
     },
     "fallback_strategy": "priority",
-    "max_total_results": 3,
+    "max_total_results": 10,
     "test_results": {}
   },
   "llm_settings": {
@@ -63,6 +98,7 @@
     "result_click_delay_ms": 2000
   },
   "stale_query_threshold": 3,
+  "stale_query_cleanup_days": 30,
   "query_performance": {
     "enabled": true,
     "max_consecutive_failures": 3,

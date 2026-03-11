@@ -18,10 +18,16 @@ from playwright.sync_api import Page, sync_playwright
 from core import llm
 from core.utils import load_json_config
 from core.db_repository import (
-    get_all_buckets, get_bucket_id_by_name,
-    save_leads_batch, get_or_create_query_performance, update_query_performance,
-    mark_query_as_stale, get_stale_queries,
+    get_all_buckets,
+    get_bucket_id_by_name,
+    save_leads_batch,
+    get_or_create_query_performance,
+    update_query_performance,
+    mark_query_as_stale,
+    get_stale_queries,
+    cleanup_stale_queries,
 )
+from core.sources import get_all_enabled_sources
 
 
 def _load_app_settings() -> dict:
@@ -109,9 +115,7 @@ class PlaywrightScraper:
         scraper_settings = self._get_scraper_settings()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=scraper_settings["headless"])
-            context = browser.new_context(
-                user_agent=self._get_random_user_agent()
-            )
+            context = browser.new_context(user_agent=self._get_random_user_agent())
             self._context = context
 
             try:
@@ -124,7 +128,7 @@ class PlaywrightScraper:
     @contextmanager
     def get_page(self) -> Generator[Page, None, None]:
         """Context manager for page - creates new page from current context"""
-        if not hasattr(self, '_context') or self._context is None:
+        if not hasattr(self, "_context") or self._context is None:
             raise RuntimeError("Scraper must be used within managed_session()")
         page = self._context.new_page()
         try:
@@ -237,12 +241,16 @@ Return ONLY JSON list:
         for bucket in buckets:
             bucket_id = get_bucket_id_by_name(bucket["name"])
             if bucket_id:
-                stale_queries = get_stale_queries(max_failures=stale_threshold, bucket_id=bucket_id)
+                stale_queries = get_stale_queries(
+                    max_failures=stale_threshold, bucket_id=bucket_id
+                )
                 for sq in stale_queries:
                     stale_query_set.add((sq["query_pattern"], sq["city"]))
 
         for bucket in buckets:
-            bucket_max_queries = bucket.get("max_queries", limits["max_patterns_per_bucket"])
+            bucket_max_queries = bucket.get(
+                "max_queries", limits["max_patterns_per_bucket"]
+            )
 
             search_patterns = bucket.get("search_patterns", [])
             if isinstance(search_patterns, str):
@@ -268,7 +276,9 @@ Return ONLY JSON list:
                 for seg_name in segments:
                     if seg_name in geo_focus:
                         max_cities = limits["max_cities_per_segment"]
-                        cities.extend(geo_focus[seg_name].get("cities", [])[:max_cities])
+                        cities.extend(
+                            geo_focus[seg_name].get("cities", [])[:max_cities]
+                        )
 
                 if not cities:
                     self.log(
@@ -289,7 +299,12 @@ Return ONLY JSON list:
 
                     query = pattern.replace("{city}", city)
                     queries.append(
-                        {"query": query, "bucket": bucket["name"], "city": city, "pattern": pattern}
+                        {
+                            "query": query,
+                            "bucket": bucket["name"],
+                            "city": city,
+                            "pattern": pattern,
+                        }
                     )
                     if len(queries) >= limit:
                         return queries
@@ -324,7 +339,7 @@ Return ONLY JSON list:
                 try:
                     page.wait_for_selector(
                         "a[href*='/maps/place/']",
-                        timeout=scraper_settings["search_wait_timeout_ms"]
+                        timeout=scraper_settings["search_wait_timeout_ms"],
                     )
                 except Exception:
                     self.log(
@@ -409,7 +424,7 @@ Return ONLY JSON list:
         return leads
 
     def _scrape_query(self, query_data: Dict) -> Tuple[List[Dict], Optional[Any]]:
-        """Scrape a single query across all sources sequentially to ensure thread-safety.
+        """Scrape a single query across all enabled sources sequentially to ensure thread-safety.
 
         Also tracks query performance for stale query detection.
 
@@ -423,14 +438,39 @@ Return ONLY JSON list:
         query_leads: list = []
 
         bucket_data = next((b for b in self.buckets if b["name"] == bucket), None)
-        max_results = bucket_data.get("max_results") if bucket_data else None
+        bucket_max_results = bucket_data.get("max_results") if bucket_data else None
 
         bucket_id = get_bucket_id_by_name(bucket)
         query_perf = None
         if bucket_id:
             query_perf = get_or_create_query_performance(bucket_id, pattern, city)
 
-        query_leads.extend(self.scrape_google_maps(query, bucket, max_results=max_results))
+        enabled_sources = get_all_enabled_sources(self._settings)
+
+        sources_scrape_settings = self._settings.get("scraper_settings", {})
+
+        for scraper in enabled_sources:
+            try:
+                scraper.logger = self.log
+                scraper.settings = {
+                    **scraper.settings,
+                    **sources_scrape_settings,
+                }
+                max_results = scraper.get_max_results()
+                if bucket_max_results and bucket_max_results < max_results:
+                    max_results = bucket_max_results
+
+                with self.get_page() as page:
+                    leads = scraper.search(query, page, max_results=max_results)
+                    if leads:
+                        query_leads.extend(leads)
+                        self.log(
+                            f"  [{scraper.SOURCE_NAME}] Found {len(leads)} leads",
+                            "success",
+                        )
+            except Exception as e:
+                self.log(f"  [{scraper.SOURCE_NAME}] Error: {e}", "error")
+                continue
 
         return query_leads, query_perf
 
@@ -448,6 +488,11 @@ Return ONLY JSON list:
         self.buckets = self._load_buckets()
         limits = self._get_discovery_limits()
 
+        cleanup_days = self._settings.get("stale_query_cleanup_days", 30)
+        cleaned = cleanup_stale_queries(days_threshold=cleanup_days)
+        if cleaned > 0:
+            self.log(f"Cleaned up {cleaned} old stale queries", "info")
+
         if max_queries is None:
             max_queries = limits["max_queries_per_run"]
 
@@ -461,7 +506,10 @@ Return ONLY JSON list:
         stale_threshold = self._settings.get("stale_query_threshold", 3)
         all_stale = get_stale_queries(max_failures=stale_threshold)
         if all_stale:
-            self.log(f"\n{len(all_stale)} stale queries disabled (≥{stale_threshold} consecutive failures)", "warning")
+            self.log(
+                f"\n{len(all_stale)} stale queries disabled (≥{stale_threshold} consecutive failures)",
+                "warning",
+            )
 
         total_leads = 0
         total_saved = 0
@@ -483,7 +531,7 @@ Return ONLY JSON list:
                             query_perf=query_perf,
                             leads_found=leads_found,
                             leads_saved=saved,
-                            success=success
+                            success=success,
                         )
 
                         if query_perf.consecutive_failures >= stale_threshold:
@@ -513,7 +561,7 @@ Return ONLY JSON list:
                             query_perf=query_perf,
                             leads_found=0,
                             leads_saved=0,
-                            success=False
+                            success=False,
                         )
 
                         if query_perf.consecutive_failures >= stale_threshold:
