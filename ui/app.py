@@ -147,8 +147,9 @@ class WebContractorTUI(App):
         """Cleanup on unmount."""
         try:
             self.app_core.shutdown()
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"Shutdown error: {e}", file=sys.stderr)
 
     def write_log(self, message: str, style: str = "") -> None:
         """
@@ -189,8 +190,8 @@ class WebContractorTUI(App):
         try:
             with open(log_file_path, "a") as f:
                 f.write(f"{full_timestamp} | {level} | {message}\n")
-        except Exception:
-            pass  # Silently ignore file logging errors
+        except Exception as e:
+            print(f"Log file write error: {e}", file=sys.stderr)
 
         # UI output
         try:

@@ -758,8 +758,8 @@ class ContactAgent(BaseAgent):
                     discovered_info["email"] = c_info["email"]
                 if c_info["phone"] and not discovered_info["phone"]:
                     discovered_info["phone"] = c_info["phone"]
-            except Exception:
-                pass
+            except Exception as e:
+                self.log(f"Error fetching contact page: {e}", "error")
 
         score = 100
         issues = []

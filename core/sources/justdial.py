@@ -137,8 +137,8 @@ class JustDialScraper(BaseScraper):
             name_elem_alt = card.query_selector(self.SELECTORS["business_name_alt"])
             if name_elem_alt:
                 return name_elem_alt.inner_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting business name: {e}", "error")
         return "Unknown Business"
 
     def _extract_phone(self, card: Any) -> str | None:
@@ -155,8 +155,8 @@ class JustDialScraper(BaseScraper):
                 phone_class = phone_elem.get_attribute("class")
                 if phone_class:
                     return phone_class
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting phone: {e}", "error")
 
         try:
             phone_link = card.query_selector("a[href*='tel:']")
@@ -164,8 +164,8 @@ class JustDialScraper(BaseScraper):
                 href = phone_link.get_attribute("href")
                 if href:
                     return href.replace("tel:", "").strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting phone from tel link: {e}", "error")
 
         return None
 
@@ -175,8 +175,8 @@ class JustDialScraper(BaseScraper):
             addr_elem = card.query_selector(self.SELECTORS["address"])
             if addr_elem:
                 return addr_elem.inner_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting address: {e}", "error")
         return None
 
     def _extract_website(self, card: Any) -> str | None:
@@ -190,8 +190,8 @@ class JustDialScraper(BaseScraper):
                         return href
                     if href.startswith("/"):
                         return f"{self.BASE_URL}{href}"
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting website: {e}", "error")
         return None
 
     def _extract_listing_url(self, card: Any) -> str | None:
@@ -205,8 +205,8 @@ class JustDialScraper(BaseScraper):
                         return href
                     if href.startswith("/"):
                         return f"{self.BASE_URL}{href}"
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting listing URL: {e}", "error")
         return None
 
 

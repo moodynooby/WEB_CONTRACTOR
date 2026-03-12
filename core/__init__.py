@@ -11,15 +11,6 @@ from core.llm import (
     ProviderError,
     get_provider_info,
 )
-from core.local_models import (
-    generate_embedding,
-    compute_similarity,
-    analyze_sentiment,
-    compute_text_quality_score,
-    find_duplicates,
-    get_model_info as get_local_model_info,
-    is_available as local_models_available,
-)
 from core.app_core import WebContractorApp, Config
 from core.db_models import (
     db,
@@ -63,13 +54,6 @@ __all__ = [
     "LLMError",
     "ProviderError",
     "get_provider_info",
-    "generate_embedding",
-    "compute_similarity",
-    "analyze_sentiment",
-    "compute_text_quality_score",
-    "find_duplicates",
-    "get_local_model_info",
-    "local_models_available",
     "db",
     "init_db",
     "close_db",

@@ -131,5 +131,6 @@ class DashboardManager:
             self.app.query_one("#pipeline-visual", Static).update(
                 self.get_pipeline_visual()
             )
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"Dashboard refresh error: {e}", file=sys.stderr)

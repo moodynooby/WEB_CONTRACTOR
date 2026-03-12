@@ -145,6 +145,6 @@ class MarketReviewScreen(Screen):
                 suggestion["monthly_target"] = 100
                 save_bucket(suggestion)
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            self.notify(f"Error applying suggestion: {e}", severity="error")
         return False

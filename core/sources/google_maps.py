@@ -117,8 +117,8 @@ class GoogleMapsScraper(BaseScraper):
             name_elem = page.query_selector(self.SELECTORS["business_name"])
             if name_elem:
                 return name_elem.inner_text()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting business name: {e}", "error")
         return "Unknown Business"
 
     def _extract_website(self, page: Page) -> str | None:
@@ -149,8 +149,8 @@ class GoogleMapsScraper(BaseScraper):
                 aria_label = phone_elem.get_attribute("aria-label")
                 if aria_label:
                     return aria_label.replace("Phone: ", "").strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting phone: {e}", "error")
         return None
 
     def _extract_address(self, page: Page) -> str | None:
@@ -161,8 +161,8 @@ class GoogleMapsScraper(BaseScraper):
                 aria_label = address_elem.get_attribute("aria-label")
                 if aria_label:
                     return aria_label.replace("Address: ", "").strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting address: {e}", "error")
         return None
 
 

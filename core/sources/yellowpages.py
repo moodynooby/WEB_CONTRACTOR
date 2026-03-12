@@ -106,8 +106,8 @@ class YellowPagesIndiaScraper(BaseScraper):
             name_elem = card.query_selector(self.SELECTORS["business_name"])
             if name_elem:
                 return name_elem.inner_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting business name: {e}", "error")
         return "Unknown Business"
 
     def _extract_phone(self, card: Any) -> str | None:
@@ -116,8 +116,8 @@ class YellowPagesIndiaScraper(BaseScraper):
             phone_elem = card.query_selector(self.SELECTORS["phone"])
             if phone_elem:
                 return phone_elem.inner_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting phone: {e}", "error")
         return None
 
     def _extract_address(self, card: Any) -> str | None:
@@ -126,8 +126,8 @@ class YellowPagesIndiaScraper(BaseScraper):
             addr_elem = card.query_selector(self.SELECTORS["address"])
             if addr_elem:
                 return addr_elem.inner_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting address: {e}", "error")
         return None
 
     def _extract_website(self, card: Any) -> str | None:
@@ -138,8 +138,8 @@ class YellowPagesIndiaScraper(BaseScraper):
                 href = web_elem.get_attribute("href")
                 if href and href.startswith("http"):
                     return href
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error extracting website: {e}", "error")
         return None
 
 

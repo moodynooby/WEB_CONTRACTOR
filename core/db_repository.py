@@ -148,7 +148,7 @@ def save_leads_batch(leads: List[Dict[str, Any]]) -> int:
 
     try:
         with db.atomic():
-            Lead.insert_many(insert_data).execute()
+            Lead.insert_many(insert_data).on_conflict_ignore().execute()
         return len(insert_data)
     except (IntegrityError, DatabaseError) as e:
         print(f"Error saving leads batch: {e}")

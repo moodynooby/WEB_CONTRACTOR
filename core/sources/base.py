@@ -159,8 +159,8 @@ class BaseScraper(ABC):
             parsed = urlparse(url)
             if parsed.netloc:
                 return url
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Error normalizing URL: {e}", "error")
         return None
 
     def _extract_category_from_query(self, query: str) -> str:
@@ -174,7 +174,8 @@ class BaseScraper(ABC):
         try:
             content = page.content()
             return EmailExtractor.extract_from_html(content)
-        except Exception:
+        except Exception as e:
+            self.log(f"Error extracting emails from page: {e}", "error")
             return []
 
     def _extract_phones_from_page(self, page: Page) -> List[str]:
@@ -182,7 +183,8 @@ class BaseScraper(ABC):
         try:
             content = page.content()
             return PhoneExtractor.extract_from_text(content)
-        except Exception:
+        except Exception as e:
+            self.log(f"Error extracting phones from page: {e}", "error")
             return []
 
     def get_source_config(self) -> Dict[str, Any]:

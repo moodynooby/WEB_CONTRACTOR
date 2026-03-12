@@ -11,7 +11,7 @@ import smtplib
 import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Callable
+from typing import Any, Callable
 
 from core import llm
 from core.db_repository import get_qualified_leads, mark_email_sent, save_emails_batch
@@ -113,7 +113,12 @@ class EmailGenerator:
         if audit_result:
             issues = audit_result.get("issues", [])
         elif lead.get("issues_json"):
-            issues = json.loads(lead.get("issues_json", "[]"))
+            issues_json: Any = lead.get("issues_json")
+            issues = (
+                issues_json
+                if isinstance(issues_json, list)
+                else json.loads(issues_json)
+            )
 
         critical_issues = [i for i in issues if i.get("severity") == "critical"]
         warning_issues = [i for i in issues if i.get("severity") == "warning"]
@@ -194,7 +199,13 @@ class EmailGenerator:
         for i, lead in enumerate(leads, 1):
             self.log(f"  [{i}/{len(leads)}] {lead['business_name']}", "info")
 
-            audit_result = {"issues": json.loads(lead.get("issues_json", "[]"))}
+            issues_json = lead.get("issues_json", [])
+            issues = (
+                issues_json
+                if isinstance(issues_json, list)
+                else json.loads(issues_json)
+            )
+            audit_result = {"issues": issues}
 
             email_start = time.time()
             email_data = self.generate_for_lead(lead, audit_result)
