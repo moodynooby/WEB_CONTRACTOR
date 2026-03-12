@@ -50,9 +50,9 @@ class PhoneExtractor:
     """Utility class for extracting phone numbers from text/HTML."""
 
     PHONE_PATTERNS = [
-        re.compile(r"\+?91[\s\-]?[6-9]\d{9}"),  # Indian mobile
-        re.compile(r"\+?\d{1,3}[\s\-]?\d{6,12}"),  # International
-        re.compile(r"\(?\d{2,5}\)?[\s\-]?\d{4,8}"),  # Landline/mobile
+        re.compile(r"\+?91[\s\-]?[6-9]\d{9}"),  
+        re.compile(r"\+?\d{1,3}[\s\-]?\d{6,12}"),  
+        re.compile(r"\(?\d{2,5}\)?[\s\-]?\d{4,8}"),  
     ]
 
     @classmethod

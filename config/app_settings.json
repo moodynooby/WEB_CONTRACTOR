@@ -2,80 +2,109 @@
   "geographic_focus": {
     "tier_1_metros": {
       "tier": "Tier-1",
-      "cities": ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"],
+      "cities": [
+        "Mumbai",
+        "Delhi",
+        "Bangalore",
+        "Chennai",
+        "Kolkata",
+        "Hyderabad",
+        "Pune"
+      ],
       "priority": 1
     },
     "tier_2_cities": {
       "tier": "Tier-2",
-      "cities": ["Ahmedabad", "Jaipur", "Lucknow", "Indore", "Surat", "Nagpur", "Bhopal"],
+      "cities": [
+        "Ahmedabad",
+        "Jaipur",
+        "Lucknow",
+        "Indore",
+        "Surat",
+        "Nagpur",
+        "Bhopal"
+      ],
       "priority": 2
     },
     "gujarat_state": {
       "tier": "State-wide",
-      "cities": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Gandhinagar"],
+      "cities": [
+        "Ahmedabad",
+        "Surat",
+        "Vadodara",
+        "Rajkot",
+        "Gandhinagar"
+      ],
       "priority": 3
     },
     "business_districts": {
       "tier": "Business Districts",
-      "cities": ["Bandra-Mumbai", "Connaught Place-Delhi", "MG Road-Bangalore", "Banjara Hills-Hyderabad"],
+      "cities": [
+        "Bandra-Mumbai",
+        "Connaught Place-Delhi",
+        "MG Road-Bangalore",
+        "Banjara Hills-Hyderabad"
+      ],
       "priority": 1
-    },
-    "expanded": {
-      "cities": ["Chennai", "Bengaluru", "Mumbai", "Bangalore"]
     }
   },
   "discovery_sources": {
     "sources": {
       "google_maps": {
         "enabled": true,
-        "priority": 1,
-        "max_results": 5,
-        "regions": ["global"],
+        "priority": 2,
+        "max_results": 50,
+        "regions": [
+          "global"
+        ],
         "description": "Google Maps business listings"
+      },
+      "google_search": {
+        "enabled": true,
+        "priority": 1,
+        "max_results": 50,
+        "regions": [
+          "global"
+        ],
+        "description": "Google Search for blog/platform websites"
       },
       "justdial": {
         "enabled": true,
-        "priority": 2,
-        "max_results": 10,
-        "regions": ["india"],
+        "priority": 3,
+        "max_results": 50,
+        "regions": [
+          "india"
+        ],
         "description": "JustDial Indian business directory"
       },
       "sulekha": {
-        "enabled": false,
-        "priority": 3,
-        "max_results": 10,
-        "regions": ["india"],
+        "enabled": true,
+        "priority": 5,
+        "max_results": 50,
+        "regions": [
+          "india"
+        ],
         "description": "Sulekha Indian community network"
       },
-      "indiabizclub": {
-        "enabled": false,
-        "priority": 4,
-        "max_results": 10,
-        "regions": ["india"],
-        "description": "Indiabizclub B2B directory"
-      },
       "yellowpages": {
-        "enabled": false,
-        "priority": 5,
-        "max_results": 10,
-        "regions": ["india"],
+        "enabled": true,
+        "priority": 4,
+        "max_results": 50,
+        "regions": [
+          "india"
+        ],
         "description": "YellowPages India"
-      },
-      "allindiasearch": {
-        "enabled": false,
-        "priority": 6,
-        "max_results": 10,
-        "regions": ["india"],
-        "description": "AllIndiaSearch meta-search"
       }
     },
     "fallback_strategy": "priority",
-    "max_total_results": 10,
+    "max_total_results": 50,
     "test_results": {}
   },
   "llm_settings": {
-    "default_model": "gemma:2b-instruct-q4_0",
-    "expansion_model": "gemma:2b-instruct-q4_0",
+    "provider": "groq",
+    "default_model": "llama-3.1-8b-instant",
+    "fallback_provider": "openrouter",
+    "fallback_model": "google/gemma-2-2b-it:free",
     "timeout_seconds": 30,
     "max_retries": 2
   },
@@ -96,6 +125,43 @@
     "page_load_timeout_ms": 5000,
     "search_wait_timeout_ms": 10000,
     "result_click_delay_ms": 2000
+  },
+  "anti_detection": {
+    "enable_proxies": false,
+    "proxy_rotation": "per_request",
+    "proxy_list": [],
+    "enable_throttling": true,
+    "throttle_config": {
+      "min_delay_ms": 1000,
+      "max_delay_ms": 3000,
+      "delay_between_queries_ms": 2000
+    },
+    "enable_captcha_detection": true,
+    "block_patterns": [
+      "captcha",
+      "verify you are human",
+      "access denied",
+      "blocked",
+      "unusual traffic",
+      "rate limit exceeded"
+    ]
+  },
+  "parallel_scraping": {
+    "max_workers": 3,
+    "timeout_per_source_seconds": 30
+  },
+  "query_scoring": {
+    "enabled": true,
+    "min_score_threshold": 0.3,
+    "llm_scoring": true,
+    "historical_weight": 0.6,
+    "llm_weight": 0.4,
+    "factors": {
+      "specificity": 0.3,
+      "commercial_intent": 0.3,
+      "location_specific": 0.2,
+      "competition_level": 0.2
+    }
   },
   "stale_query_threshold": 3,
   "stale_query_cleanup_days": 30,

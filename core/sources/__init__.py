@@ -5,11 +5,10 @@ from typing import Any, Dict, List, Optional
 from core.sources.base import BaseScraper, ScraperRegistry
 from core.sources import (
     google_maps,
+    google_search,
     justdial,
     sulekha,
-    indiabizclub,
     yellowpages,
-    allindiasearch,
 )
 
 
@@ -31,11 +30,14 @@ def get_scraper(
     return None
 
 
-def get_all_enabled_sources(settings: Dict[str, Any]) -> List[BaseScraper]:
-    """Get all enabled scraper sources sorted by priority.
+def get_all_enabled_sources(
+    settings: Dict[str, Any], region: str = "india"
+) -> List[BaseScraper]:
+    """Get all enabled scraper sources sorted by priority, filtered by region.
 
     Args:
         settings: Full application settings dict
+        region: Target region to filter sources (e.g., 'india', 'global')
 
     Returns:
         List of enabled scraper instances sorted by priority
@@ -47,7 +49,14 @@ def get_all_enabled_sources(settings: Dict[str, Any]) -> List[BaseScraper]:
     enabled_sources = []
     for source_name, source_class in all_source_classes.items():
         source_config = sources_config.get(source_name, {})
-        if source_config.get("enabled", True):
+
+        # Check if enabled and supports the region
+        is_enabled = source_config.get("enabled", True)
+        supported_regions = source_config.get("regions", ["india"])
+
+        region_matches = "global" in supported_regions or region in supported_regions
+
+        if is_enabled and region_matches:
             instance = source_class(settings=source_config)
             enabled_sources.append((instance, source_config.get("priority", 99)))
 
@@ -76,9 +85,8 @@ __all__ = [
     "get_all_enabled_sources",
     "get_source_config",
     "google_maps",
+    "google_search",
     "justdial",
     "sulekha",
-    "indiabizclub",
     "yellowpages",
-    "allindiasearch",
 ]

@@ -29,3 +29,5 @@ ollama.log
 .DS_Store
 Thumbs.db
 
+logs.txt
+*.excalidraw

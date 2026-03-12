@@ -10,12 +10,12 @@ Efficient resource management with per-operation browser contexts:
 import asyncio
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from playwright.sync_api import Page, sync_playwright
 
-from core import llm
 from core.utils import load_json_config
 from core.db_repository import (
     get_all_buckets,
@@ -45,10 +45,6 @@ class PlaywrightScraper:
         self.buckets = get_all_buckets()
         self.logger = logger
         self._settings = load_json_config("app_settings.json")
-
-    @property
-    def ollama_enabled(self) -> bool:
-        return llm.is_available()
 
     def _get_llm_settings(self) -> dict:
         """Get LLM settings from config."""
@@ -115,7 +111,9 @@ class PlaywrightScraper:
         scraper_settings = self._get_scraper_settings()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=scraper_settings["headless"])
-            context = browser.new_context(user_agent=self._get_random_user_agent())
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
             self._context = context
 
             try:
@@ -139,77 +137,6 @@ class PlaywrightScraper:
     def _load_buckets(self) -> List[Dict[str, Any]]:
         """Load bucket configuration from DB"""
         return get_all_buckets()
-
-    def expand_bucket(self, bucket_name: str) -> Optional[Dict[str, Any]]:
-        """Use LLM to expand bucket categories and search patterns."""
-        if not self.ollama_enabled:
-            return None
-
-        bucket = next((b for b in self.buckets if b["name"] == bucket_name), None)
-        if not bucket:
-            return None
-
-        self.log(f"Expanding bucket: {bucket_name} using LLM...", "info")
-
-        prompt = f"""Bucket: {bucket_name}
-Cats: {bucket.get("categories", [])}
-Patterns: {bucket.get("search_patterns", [])}
-
-Suggest:
-1. 3 new categories
-2. 3 new search patterns with '{{city}}'
-3. 2 new target cities in India
-
-Return ONLY JSON:
-{{"new_categories": ["c1", "c2"], "new_patterns": ["p1 {{city}}"], "new_cities": ["City1"]}}"""
-
-        try:
-            llm_settings = self._get_llm_settings()
-            raw = llm.generate(
-                model=llm_settings["expansion_model"],
-                prompt=prompt,
-                system="Output ONLY valid JSON. Market research assistant.",
-                format_json=True,
-                timeout=llm_settings["timeout_seconds"],
-            )
-            return json.loads(raw)  # type: ignore[no-any-return]
-        except llm.OllamaError as e:
-            self.log(f"Expansion failed: {e}", "error")
-            return None
-
-    def discover_new_buckets(self) -> Optional[List[Dict[str, Any]]]:
-        """Use LLM to suggest new market buckets based on current ones."""
-        if not self.ollama_enabled:
-            return None
-
-        self.log("Discovering new market opportunities using LLM...", "info")
-
-        current_buckets = [b["name"] for b in self.buckets]
-
-        prompt = f"""Current Buckets: {current_buckets}
-
-Suggest 2 new industries for web dev services.
-Provide:
-- Name
-- 2 categories
-- 2 patterns with '{{city}}'
-
-Return ONLY JSON list:
-[{{"name": "Market", "categories": ["c1", "c2"], "search_patterns": ["p1 {{city}}"]}}]"""
-
-        try:
-            llm_settings = self._get_llm_settings()
-            raw = llm.generate(
-                model=llm_settings["expansion_model"],
-                prompt=prompt,
-                system="Output ONLY valid JSON. Business strategist.",
-                format_json=True,
-                timeout=llm_settings["timeout_seconds"],
-            )
-            return json.loads(raw)  # type: ignore[no-any-return]
-        except llm.OllamaError as e:
-            self.log(f"Market discovery failed: {e}", "error")
-            return None
 
     def generate_queries(
         self, bucket_name: Optional[str] = None, limit: Optional[int] = None
@@ -311,179 +238,111 @@ Return ONLY JSON list:
 
         return queries[:limit]
 
-    def scrape_google_maps(
-        self, query: str, bucket: str, max_results: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """Scrape Google Maps for business leads using Playwright
+    def score_query(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Minimal query scoring logic."""
+        return {"final_score": 1.0, "recommendation": "run"}
 
-        Args:
-            query: Search query
-            bucket: Bucket name
-            max_results: Optional max results override. If None, uses config.
-        """
-        leads: list = []
-        scraper_settings = self._get_scraper_settings()
-        limits = self._get_discovery_limits()
+    def _scrape_sources(
+        self,
+        query_data: Dict,
+        bucket_max_results: Optional[int],
+        query_perf: Optional[Any],
+    ) -> Tuple[List[Dict], Optional[Any]]:
+        """Scrape a query across all enabled sources in parallel.
 
-        if max_results is None:
-            max_results = limits["max_results_per_query"]
-
-        with self.get_page() as page:
-            try:
-                search_url = (
-                    f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
-                )
-                page.goto(search_url)
-                page.wait_for_timeout(scraper_settings["page_load_timeout_ms"])
-
-                try:
-                    page.wait_for_selector(
-                        "a[href*='/maps/place/']",
-                        timeout=scraper_settings["search_wait_timeout_ms"],
-                    )
-                except Exception:
-                    self.log(
-                        f"Google Maps search results not loaded for query '{query}'",
-                        "error",
-                    )
-                    return leads
-
-                business_elements = page.query_selector_all("a[href*='/maps/place/']")
-                business_elements = business_elements[:max_results]
-
-                for element in business_elements:
-                    try:
-                        element.click()
-                        page.wait_for_timeout(scraper_settings["result_click_delay_ms"])
-
-                        try:
-                            name_elem = page.query_selector("h1.DUwDvf")
-                            name = (
-                                name_elem.inner_text()
-                                if name_elem
-                                else "Unknown Business"
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Unexpected error finding business name: {e}", "error"
-                            )
-                            name = "Unknown Business"
-
-                        website = None
-                        try:
-                            website_elem = page.query_selector(
-                                "a[data-item-id*='authority']"
-                            )
-                            website = (
-                                website_elem.get_attribute("href")
-                                if website_elem
-                                else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting website from Google Maps: {e}",
-                                "error",
-                            )
-
-                        phone = None
-                        try:
-                            phone_elem = page.query_selector(
-                                "button[data-item-id*='phone']"
-                            )
-                            phone = (
-                                phone_elem.get_attribute("aria-label")
-                                if phone_elem
-                                else None
-                            )
-                        except Exception as e:
-                            self.log(
-                                f"Error extracting phone from Google Maps: {e}", "error"
-                            )
-
-                        if name:
-                            leads.append(
-                                {
-                                    "business_name": name,
-                                    "website": website,
-                                    "phone": phone,
-                                    "source": "google_maps",
-                                    "bucket": bucket,
-                                    "category": query.split()[0],
-                                    "location": query.split()[-1]
-                                    if " " in query
-                                    else "Unknown",
-                                }
-                            )
-
-                    except Exception:
-                        continue
-
-            except Exception as e:
-                self.log(f"Error scraping Google Maps: {e}", "error")
-
-        return leads
-
-    def _scrape_query(self, query_data: Dict) -> Tuple[List[Dict], Optional[Any]]:
-        """Scrape a single query across all enabled sources sequentially to ensure thread-safety.
-
-        Also tracks query performance for stale query detection.
-
-        Returns:
-            Tuple of (leads_list, query_perf_object or None)
+        Uses ThreadPoolExecutor to run multiple scrapers concurrently.
+        Each source gets its own isolated browser context for thread safety.
         """
         query = query_data["query"]
         bucket = query_data["bucket"]
-        city = query_data.get("city", "")
-        pattern = query_data.get("pattern", query)
         query_leads: list = []
 
-        bucket_data = next((b for b in self.buckets if b["name"] == bucket), None)
-        bucket_max_results = bucket_data.get("max_results") if bucket_data else None
+        region = "India"
+        enabled_sources = get_all_enabled_sources(self._settings, region=region)
 
-        bucket_id = get_bucket_id_by_name(bucket)
-        query_perf = None
-        if bucket_id:
-            query_perf = get_or_create_query_performance(bucket_id, pattern, city)
-
-        enabled_sources = get_all_enabled_sources(self._settings)
+        if not enabled_sources:
+            self.log(f"  No enabled sources found for region: {region}", "warning")
+            return query_leads, query_perf
 
         sources_scrape_settings = self._settings.get("scraper_settings", {})
+        parallel_config = self._settings.get("parallel_scraping", {})
 
-        for scraper in enabled_sources:
+        max_workers = parallel_config.get("max_workers", 3)
+        timeout_seconds = parallel_config.get("timeout_per_source_seconds", 30)
+
+        self.log(
+            f"  Scraping {len(enabled_sources)} sources ({region}) in parallel...",
+            "info",
+        )
+
+        def worker(scraper):
+            """Worker function for single source scraping."""
             try:
-                scraper.logger = self.log
-                scraper.settings = {
-                    **scraper.settings,
-                    **sources_scrape_settings,
-                }
-                max_results = scraper.get_max_results()
-                if bucket_max_results and bucket_max_results < max_results:
-                    max_results = bucket_max_results
+                # Each thread needs its own playwright instance for sync_api thread safety
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(
+                        headless=sources_scrape_settings.get("headless", True)
+                    )
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    )
+                    page = context.new_page()
 
-                with self.get_page() as page:
+                    max_results = scraper.get_max_results()
+                    if bucket_max_results and bucket_max_results < max_results:
+                        max_results = bucket_max_results
+
                     leads = scraper.search(query, page, max_results=max_results)
-                    if leads:
-                        query_leads.extend(leads)
-                        self.log(
-                            f"  [{scraper.SOURCE_NAME}] Found {len(leads)} leads",
-                            "success",
-                        )
-            except Exception as e:
-                self.log(f"  [{scraper.SOURCE_NAME}] Error: {e}", "error")
-                continue
 
+                    browser.close()
+                    return leads
+            except Exception as e:
+                self.log(f"  [{scraper.SOURCE_NAME}] Worker failed: {e}", "error")
+                return []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_source = {
+                executor.submit(worker, s): s.SOURCE_NAME for s in enabled_sources
+            }
+
+            from concurrent.futures import as_completed
+
+            for future in as_completed(
+                future_to_source, timeout=timeout_seconds * len(enabled_sources)
+            ):
+                source_name = future_to_source[future]
+                try:
+                    leads = future.result(timeout=timeout_seconds)
+                    if leads:
+                        # Normalize leads
+                        scraper_instance = next(
+                            s for s in enabled_sources if s.SOURCE_NAME == source_name
+                        )
+                        normalized = [
+                            scraper_instance.normalize_lead(
+                                lead, bucket=bucket, query=query
+                            )
+                            for lead in leads
+                        ]
+                        query_leads.extend(normalized)
+                except Exception as e:
+                    self.log(f"  [{source_name}] Failed: {e}", "error")
+
+        self.log(f"  Total: {len(query_leads)} leads from all sources", "success")
         return query_leads, query_perf
 
     def run(
         self,
         bucket_name: Optional[str] = None,
         max_queries: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> dict:
         """Execute full discovery pipeline - single-threaded with efficient resource reuse
 
         Args:
             bucket_name: Optional bucket name to filter queries
             max_queries: Optional max queries override. If None, uses config or bucket default.
+            progress_callback: Optional callback(current, total, message)
         """
         self.buckets = self._load_buckets()
         limits = self._get_discovery_limits()
@@ -516,9 +375,29 @@ Return ONLY JSON list:
 
         with self.managed_session():
             for i, q in enumerate(queries, 1):
+                msg = f"Processing query: {q['query']}"
                 self.log(f"\n[{i}/{len(queries)}] {q['query']}", "info")
 
-                query_leads, query_perf = self._scrape_query(q)
+                if progress_callback:
+                    progress_callback(i, len(queries), msg)
+
+                bucket_data = next(
+                    (b for b in self.buckets if b["name"] == q["bucket"]), None
+                )
+                bucket_max_results = (
+                    bucket_data.get("max_results") if bucket_data else None
+                )
+
+                bucket_id = get_bucket_id_by_name(q["bucket"])
+                query_perf = None
+                if bucket_id:
+                    query_perf = get_or_create_query_performance(
+                        bucket_id, q["pattern"], q["city"]
+                    )
+
+                query_leads, query_perf = self._scrape_sources(
+                    q, bucket_max_results, query_perf
+                )
 
                 if query_leads:
                     saved = save_leads_batch(query_leads)

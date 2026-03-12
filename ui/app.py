@@ -2,7 +2,7 @@
 
 Simplified composition-only app class. All logic extracted to:
 - ui.dashboard - Dashboard composition and updates
-- ui.controllers - Action handlers and navigation  
+- ui.controllers - Action handlers and navigation
 - ui.screens.* - Individual screen implementations
 - ui.components - Reusable UI components
 """
@@ -99,8 +99,8 @@ class WebContractorTUI(App):
         Binding("q", "quit", "Quit", show=True, priority=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("d", "run_discovery", "Discovery", show=True),
-        Binding("a", "run_pipeline", "Audit", show=True),
-        Binding("e", "expand_markets", "Expand", show=False),
+        Binding("a", "run_audit", "Audit", show=True),
+        Binding("e", "generate_emails", "Generate", show=True),
         Binding("v", "review_emails", "Review", show=True),
         Binding("b", "database_browser", "Database", show=True),
         Binding("x", "query_performance", "Perf", show=True),
@@ -111,7 +111,7 @@ class WebContractorTUI(App):
         "review": ReviewScreen,
         "performance": QueryPerformanceScreen,
     }
-    
+
     def __init__(self, app_core: Optional[WebContractorApp] = None):
         """
         Initialize TUI application.
@@ -131,7 +131,7 @@ class WebContractorTUI(App):
     def compose(self) -> ComposeResult:
         """Compose main dashboard UI."""
         yield from self.dashboard.compose_dashboard()
-    
+
     def on_mount(self) -> None:
         """Initialize application on mount."""
         self.title = "Web Contractor"
@@ -141,30 +141,40 @@ class WebContractorTUI(App):
 
         self.dashboard.refresh_dashboard()
 
-        self.write_log(
-            "Initialized"
-        )
-    
+        self.write_log("Initialized")
+
     def on_unmount(self) -> None:
         """Cleanup on unmount."""
         try:
             self.app_core.shutdown()
         except Exception:
             pass
-    
+
     def write_log(self, message: str, style: str = "") -> None:
         """
-        Write log message to console and logs screen if active.
-        
+        Write log message to console, logs screen, and log file if active.
+
         Args:
             message: Log message
             style: Optional style (success, error, info)
         """
         import sys
         from datetime import datetime
-        
+
         timestamp = datetime.now().strftime("%H:%M:%S")
-        
+        full_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Determine log level for file output
+        if style == "error":
+            level = "ERROR"
+        elif style == "success":
+            level = "SUCCESS"
+        elif style == "info":
+            level = "INFO"
+        else:
+            level = "INFO"
+
+        # Console output
         if style == "success":
             print(f"\033[92m[{timestamp}] ✓ {message}\033[0m", file=sys.stderr)
         elif style == "error":
@@ -173,7 +183,16 @@ class WebContractorTUI(App):
             print(f"\033[96m[{timestamp}] ℹ {message}\033[0m", file=sys.stderr)
         else:
             print(f"[{timestamp}] {message}", file=sys.stderr)
-        
+
+        # File output
+        log_file_path = "logs.txt"
+        try:
+            with open(log_file_path, "a") as f:
+                f.write(f"{full_timestamp} | {level} | {message}\n")
+        except Exception:
+            pass  # Silently ignore file logging errors
+
+        # UI output
         try:
             log_widget = self.query_one("#activity-log", RichLog)
             if style == "success":
@@ -185,48 +204,74 @@ class WebContractorTUI(App):
             else:
                 log_widget.write(message)
         except Exception:
-            pass  
-    
+            pass
+
     def action_refresh(self) -> None:
         """Refresh dashboard."""
         if self.dashboard:
             self.dashboard.refresh_dashboard()
             self.notify("Dashboard refreshed")
-    
+
     def action_run_discovery(self) -> None:
-        """Run discovery pipeline."""
-        self.run_worker(self.app_core.run_discovery, exclusive=True, thread=True)
+        """Run discovery pipeline with real-time progress monitoring."""
+        self.current_operation = "discovery"
+        self.operation_progress = 0
+        self.dashboard.refresh_dashboard()
+
+        def update_progress(current: int, total: int, message: str) -> None:
+            self.operation_progress = int((current / total) * 100)
+            self.call_from_thread(self.dashboard.refresh_dashboard)
+            self.write_log(message, "info")
+
+        def on_complete(result: dict) -> None:
+            self.current_operation = None
+            self.operation_progress = None
+            self.call_from_thread(self.dashboard.refresh_dashboard)
+            self.notify(f"Discovery complete: {result.get('leads_saved', 0)} new leads")
+
+        worker = self.run_worker(
+            lambda: self.app_core.run_discovery(progress_callback=update_progress),
+            exclusive=True,
+            thread=True,
+        )
+        worker.on_finish = on_complete
 
     def action_run_audit(self) -> None:
-        """Run audit pipeline."""
-        self.run_worker(self.app_core.run_audit, exclusive=True, thread=True)
-
-    def action_run_unified_pipeline(self) -> None:
-        """Run unified audit + email generation pipeline."""
-        self.current_operation = "pipeline"
+        """Run audit pipeline with real-time progress monitoring."""
+        self.current_operation = "audit"
+        self.operation_progress = 0
         self.dashboard.refresh_dashboard()
-        self.run_worker(self.app_core.run_unified_pipeline, exclusive=True, thread=True)
 
-    def action_run_pipeline(self) -> None:
-        """Alias for action_run_unified_pipeline (keyboard shortcut)."""
-        self.action_run_unified_pipeline()
+        def update_progress(current: int, total: int, message: str) -> None:
+            self.operation_progress = int((current / total) * 100)
+            self.call_from_thread(self.dashboard.refresh_dashboard)
+            self.write_log(message, "info")
+
+        def on_complete(result: dict) -> None:
+            self.current_operation = None
+            self.operation_progress = None
+            self.call_from_thread(self.dashboard.refresh_dashboard)
+            self.notify(f"Audit complete: {result.get('audited', 0)} leads audited")
+
+        worker = self.run_worker(
+            lambda: self.app_core.run_audit(progress_callback=update_progress),
+            exclusive=True,
+            thread=True,
+        )
+        worker.on_finish = on_complete
 
     def action_generate_emails(self) -> None:
         """Generate emails."""
         self.run_worker(self.app_core.generate_emails, exclusive=True, thread=True)
 
-    def action_expand_markets(self) -> None:
-        """Expand markets."""
-        self.run_worker(self.app_core.scraper.discover_new_buckets, exclusive=True, thread=True)
-    
     def action_review_emails(self) -> None:
         """Navigate to review screen."""
         self.push_screen(ReviewScreen())
-    
+
     def action_database_browser(self) -> None:
         """Navigate to database browser."""
         self.push_screen(DatabaseScreen())
-    
+
     def action_query_performance(self) -> None:
         """Navigate to performance screen."""
         self.push_screen(QueryPerformanceScreen())
@@ -238,14 +283,45 @@ class WebContractorTUI(App):
     def get_system_commands(self, screen: Screen) -> list:
         """Get system commands for command palette."""
         commands = list(super().get_system_commands(screen))
-        commands.extend([
-            ("Run Discovery", "Execute discovery pipeline", self.action_run_discovery),
-            ("Run Audit", "Audit + generate emails in one flow", self.action_run_unified_pipeline),
-            ("Review Emails", "Review generated emails", lambda: self.push_screen(ReviewScreen())),
-            ("Database Browser", "Browse all data", lambda: self.push_screen(DatabaseScreen())),
-            ("Query Performance", "View performance stats", lambda: self.push_screen(QueryPerformanceScreen())),
-            ("Refresh Dashboard", "Refresh dashboard stats", self.dashboard.refresh_dashboard),
-        ])
+        commands.extend(
+            [
+                (
+                    "Run Discovery",
+                    "Execute discovery pipeline",
+                    self.action_run_discovery,
+                ),
+                (
+                    "Run Audit",
+                    "Audit pending leads",
+                    self.action_run_audit,
+                ),
+                (
+                    "Generate Emails",
+                    "Generate emails for qualified leads",
+                    self.action_generate_emails,
+                ),
+                (
+                    "Review Emails",
+                    "Review generated emails",
+                    lambda: self.push_screen(ReviewScreen()),
+                ),
+                (
+                    "Database Browser",
+                    "Browse all data",
+                    lambda: self.push_screen(DatabaseScreen()),
+                ),
+                (
+                    "Query Performance",
+                    "View performance stats",
+                    lambda: self.push_screen(QueryPerformanceScreen()),
+                ),
+                (
+                    "Refresh Dashboard",
+                    "Refresh dashboard stats",
+                    self.dashboard.refresh_dashboard,
+                ),
+            ]
+        )
         return commands
 
 

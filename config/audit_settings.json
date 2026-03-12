@@ -1,22 +1,11 @@
 {
-  "audit_metadata": {
-    "version": "3.0",
-    "description": "Multi-agent audit system with specialized agents for different audit aspects",
-    "default_qualification_threshold": 60,
-    "critical_failure_threshold": 25
-  },
   "agents": {
-    "execution_order": ["technical", "contact", "content", "business", "visual"],
-    "technical": {
-      "enabled": true,
-      "weight": 1.0,
-      "timeout": 10,
-      "early_exit_rules": {
-        "min_score": 20,
-        "max_critical_issues": 3
-      },
-      "disabled_for_buckets": []
-    },
+    "execution_order": [
+      "contact",
+      "content",
+      "business",
+      "visual"
+    ],
     "contact": {
       "enabled": true,
       "weight": 1.0,
@@ -30,8 +19,8 @@
       "enabled": true,
       "weight": 1.0,
       "timeout": 30,
-      "model": "gemma:2b-instruct-q4_0",
-      "system_message": "You are a professional content auditor. Analyze website copy for clarity, CTAs, value proposition, and trust signals. Output ONLY valid JSON.",
+      "model": "llama-3.1-8b-instant",
+      "system_message": "You are a BRUTALLY HONEST content auditor. Analyze website copy for clarity, CTAs, value proposition, and trust signals. Scoring: 100=Perfect, 70=Good, 40=Needs improvement, 10=Terrible. Output ONLY valid JSON.",
       "prompt_template": "Analyze website content for '{business_name}' (industry: {bucket}).\n\nContent:\n{content}\n\nEvaluate:\n1. Value Proposition: Clear within 3 seconds?\n2. Call-to-Actions: Visible, specific, and compelling?\n3. Professional Tone: Appropriate for industry?\n4. Trust Signals: Testimonials, badges, credentials?\n5. Content Quality: Well-written, no errors?\n\nReturn ONLY JSON:\n{{\n  \"content_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"value_proposition|cta|tone|trust|content_quality\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}",
       "early_exit_rules": {},
       "disabled_for_buckets": []
@@ -42,262 +31,51 @@
       "timeout": 30,
       "llm_business_audit": {
         "enabled": true,
-        "model": "gemma:2b-instruct-q4_0",
-        "system_message": "You are a business strategy expert. Evaluate industry-specific requirements. Output ONLY valid JSON.",
-        "prompt_template": "Evaluate {bucket} business website for '{business_name}'.\n\nContent:\n{content}\n\nCheck industry-specific requirements:\n1. Service Clarity: What they offer is clear?\n2. Target Audience: Clear who they serve?\n3. Differentiation: What makes them unique?\n4. Industry Standards: Meeting expectations?\n\nReturn ONLY JSON:\n{{\n  \"observations\": [\n    {{\n      \"type\": \"service_clarity|target_audience|differentiation|standards\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}"
+        "model": "llama-3.1-8b-instant",
+        "system_message": "You are a BRUTALLY HONEST business strategy expert. Evaluate industry-specific requirements. Scoring: 100=Perfect, 70=Average, 40=Poor, 10=Terrible. Be critical.",
+        "prompt_template": "Evaluate {bucket} business website for '{business_name}'.\n\nContent:\n{content}\n\nCheck industry-specific requirements:\n1. Service Clarity: What they offer is clear?\n2. Target Audience: Clear who they serve?\n3. Differentiation: What makes them unique?\n4. Industry Standards: Meeting expectations?\n\nReturn ONLY JSON:\n{{\n  \"business_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"service_clarity|target_audience|differentiation|standards\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}"
       },
       "early_exit_rules": {},
       "disabled_for_buckets": []
     },
     "visual": {
-      "enabled": false,
+      "enabled": true,
       "weight": 1.0,
       "timeout": 60,
-      "model": "richardyoung/smolvlm2-2.2b-instruct",
-      "system_message": "You are a visual UX design expert. Analyze website screenshots for design quality, usability, and professionalism. Output ONLY valid JSON.",
+      "model": "llama-3.2-90b-vision-preview",
+      "system_message": "You are a BRUTALLY HONEST visual UX design expert. Analyze website screenshots for design quality, usability, and professionalism. Scoring: 100=Perfect, 70=Good, 40=Poor, 10=Terrible. Output ONLY valid JSON.",
       "prompt_template": "Analyze website screenshot for '{business_name}' (industry: {bucket}).\n\nEvaluate:\n1. Design Quality: Colors, fonts, visual hierarchy\n2. Usability: Navigation clarity, button visibility\n3. Mobile-Friendliness: Readable text, proper spacing\n4. Professionalism: Trustworthy appearance\n5. Modern Standards: Contemporary design patterns\n\nReturn ONLY JSON:\n{{\n  \"visual_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"category\": \"design|usability|mobile|professionalism|modern\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}",
       "early_exit_rules": {},
-      "disabled_for_buckets": ["Developers", "Marketing Agencies"]
+      "disabled_for_buckets": [
+        "Developers",
+        "Marketing Agencies"
+      ]
     }
   },
   "agent_weights": {
-    "technical": 0.30,
-    "content": 0.25,
-    "visual": 0.20,
-    "business": 0.15,
-    "contact": 0.10
-  },
-  "technical_checks": [
-    {
-      "id": "missing_title",
-      "name": "Page Title",
-      "type": "html_exists",
-      "selector": "title",
-      "min_length": 10,
-      "score_impact": 15,
-      "severity": "critical",
-      "description": "Page title missing or too short",
-      "remediation": "Add a descriptive page title (10-60 characters) that includes target keywords"
-    },
-    {
-      "id": "missing_meta",
-      "name": "Meta Description",
-      "type": "html_exists",
-      "selector": "meta[name='description']",
-      "score_impact": 10,
-      "severity": "warning",
-      "description": "Meta description missing",
-      "remediation": "Add a compelling meta description (150-160 characters) that summarizes page content"
-    },
-    {
-      "id": "no_viewport",
-      "name": "Mobile Friendly",
-      "type": "html_exists",
-      "selector": "meta[name='viewport']",
-      "score_impact": 20,
-      "severity": "critical",
-      "description": "Not mobile-friendly - missing viewport meta tag",
-      "remediation": "Add <meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-    },
-    {
-      "id": "no_h1",
-      "name": "H1 Heading",
-      "type": "html_exists",
-      "selector": "h1",
-      "score_impact": 10,
-      "severity": "warning",
-      "description": "Missing H1 heading - poor SEO and accessibility",
-      "remediation": "Add a single, descriptive H1 tag as the main page heading"
-    },
-    {
-      "id": "multiple_h1",
-      "name": "Multiple H1s",
-      "type": "html_count",
-      "selector": "h1",
-      "max_count": 1,
-      "score_impact": 5,
-      "severity": "info",
-      "description": "Multiple H1 tags found - confuses search engines",
-      "remediation": "Keep only one H1 per page; use H2-H6 for subheadings"
-    },
-    {
-      "id": "missing_alt_text",
-      "name": "Image Alt Text",
-      "type": "image_alt_ratio",
-      "threshold": 0.3,
-      "score_impact": 10,
-      "severity": "warning",
-      "description": "Too many images without alt text - impacts SEO and accessibility",
-      "remediation": "Add descriptive alt text to all images (at least 30% coverage recommended)"
-    },
-    {
-      "id": "no_analytics",
-      "name": "Analytics Tracking",
-      "type": "script_match",
-      "patterns": ["google-analytics", "gtag", "analytics.google.com"],
-      "score_impact": 5,
-      "severity": "info",
-      "description": "No Google Analytics or tracking detected",
-      "remediation": "Implement Google Analytics or similar tool to track visitor behavior"
-    },
-    {
-      "id": "no_ssl",
-      "name": "SSL/HTTPS",
-      "type": "protocol_check",
-      "protocol": "https://",
-      "score_impact": 25,
-      "severity": "critical",
-      "description": "Website not using HTTPS - security risk and SEO penalty",
-      "remediation": "Install SSL certificate and redirect all HTTP traffic to HTTPS"
-    },
-    {
-      "id": "slow_load",
-      "name": "Page Load Time",
-      "type": "load_time",
-      "threshold": 3.0,
-      "score_impact": 10,
-      "severity": "warning",
-      "description": "Slow page load time - impacts user experience and rankings",
-      "remediation": "Optimize images, leverage caching, minimize CSS/JS, consider CDN"
-    },
-    {
-      "id": "missing_contact_page",
-      "name": "Contact Information",
-      "type": "link_match",
-      "patterns": ["contact", "get-in-touch", "contact-us", "reach-us"],
-      "score_impact": 10,
-      "severity": "warning",
-      "description": "No contact page or contact information found",
-      "remediation": "Add a dedicated contact page with email, phone, or contact form"
-    },
-    {
-      "id": "no_social_media",
-      "name": "Social Media Links",
-      "type": "link_match",
-      "patterns": ["facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com"],
-      "score_impact": 5,
-      "severity": "info",
-      "description": "No social media links found",
-      "remediation": "Add links to active social media profiles to build credibility"
-    },
-    {
-      "id": "no_cta",
-      "name": "Call-to-Action",
-      "type": "text_match",
-      "patterns": ["contact us", "get started", "book now", "learn more", "request quote", "schedule"],
-      "score_impact": 8,
-      "severity": "warning",
-      "description": "No clear call-to-action elements",
-      "remediation": "Add prominent, actionable CTAs throughout the site (buttons, forms)"
-    }
-  ],
-  "llm_audit": {
-    "enabled": true,
-    "model": "gemma:2b-instruct-q4_0",
-    "system_message": "Output ONLY valid JSON. You are a website auditor. Analyze content and structure.",
-    "prompt_template": "Analyze website for '{business_name}'.\n\nContent:\n{content}\n\nEvaluate:\n1. Value Prop: Clear in 3s?\n2. CTAs: Visible and compelling?\n3. Tone: Professional?\n4. Trust: Testimonials/badges?\n5. UX: Easy to navigate?\n\nReturn ONLY JSON:\n{{\n  \"qualitative_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"value_proposition|cta|tone|trust|ux\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"short finding\"\n    }}\n  ]\n}}"
-  },
-  "visual_audit": {
-    "enabled": false,
-    "model": "richardyoung/smolvlm2-2.2b-instruct",
-    "system_message": "Output ONLY valid JSON. You are a visual UX auditor. Analyze screenshots.",
-    "prompt_template": "Analyze screenshot for '{business_name}'.\n\nCheck:\n1. Design: Colors, fonts, layout.\n2. UI: Buttons, navigation clarity.\n3. Mobile: Readability, spacing.\n4. Trust: Professional look.\n\nReturn ONLY JSON:\n{{\n  \"visual_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"category\": \"design|ui|mobile|trust\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"short fix\"\n    }}\n  ]\n}}"
-  },
-  "scoring_weights": {
-    "technical_score": 0.35,
-    "content_score": 0.35,
-    "visual_score": 0.30
+    "business": 0.50,
+    "content": 0.30,
+    "visual": 0.20
   },
   "qualification_rules": {
-    "target_score_min": 0,
-    "target_score_max": 84,
-    "min_issues_required": 2,
-    "weighted_calculation": true,
-    "bonus_points": {
-      "has_contact_info": 5,
-      "has_social_media": 3,
-      "has_cta": 5,
-      "loads_fast": 3
-    }
-  },
-  "bucket_overrides": {
-    "Interior Designers": {
-      "additional_checks": [
-        {
-          "id": "missing_portfolio",
-          "name": "Portfolio/Gallery",
-          "type": "link_match",
-          "patterns": ["portfolio", "projects", "gallery", "work", "design"],
-          "score_impact": 20,
-          "severity": "critical",
-          "description": "No portfolio or project gallery found - critical for design businesses",
-          "remediation": "Create a dedicated portfolio section showcasing completed design projects"
-        },
-        {
-          "id": "no_before_after",
-          "name": "Before/After Examples",
-          "type": "text_match",
-          "patterns": ["before", "after", "transformation", "makeover"],
-          "score_impact": 10,
-          "severity": "warning",
-          "description": "No before/after or transformation examples",
-          "remediation": "Add before/after photos and transformation showcases"
-        }
-      ]
-    },
-    "Developers": {
-      "additional_checks": [
-        {
-          "id": "github_presence",
-          "name": "GitHub Profile",
-          "type": "link_match",
-          "patterns": ["github.com"],
-          "score_impact": 10,
-          "severity": "info",
-          "description": "No GitHub link found",
-          "remediation": "Link to GitHub profile to showcase coding skills"
-        }
-      ]
-    },
-    "Marketing Agencies": {
-      "additional_checks": [
-        {
-          "id": "case_studies",
-          "name": "Case Studies",
-          "type": "link_match",
-          "patterns": ["case study", "case studies", "client success", "results"],
-          "score_impact": 15,
-          "severity": "warning",
-          "description": "No case studies or client success stories",
-          "remediation": "Publish detailed case studies with metrics and client results"
-        }
-      ]
-    }
+    "score_threshold": 90
   },
   "email_generation": {
     "enabled": true,
-    "model": "gemma:2b-instruct-q4_0",
+    "model": "llama-3.1-8b-instant",
     "timeout": 30,
-    "system_message": "You are a professional cold email writer. Write personalized, concise outreach emails. Output ONLY valid JSON with subject and body.",
-    "prompt_template": "Write a cold outreach email for a web development contractor.\n\nTarget: {business_name} ({bucket})\nWebsite: {url}\n\nIssues Found:\n{issues}\n\nWrite a personalized email that:\n1. Mentions their business specifically\n2. Points out 1-2 key issues (not all)\n3. Offers a solution without being pushy\n4. Has a clear, low-pressure CTA\n5. Keeps it under 150 words\n\nReturn ONLY JSON:\n{{\n  \"subject\": \"<subject line under 50 chars>\",\n  \"body\": \"<email body with greeting and signature>\"\n}}",
-    "signature": {
-      "closing": "Best regards,",
-      "name": "[Your Name]",
-      "company": "[Your Company]",
-      "contact": "[Your Email/Phone]"
-    },
-    "bucket_templates": {
-      "Interior Designers": {
-        "angle": "Focus on portfolio presentation and visual appeal",
-        "cta": "Offer free website audit + portfolio optimization"
-      },
-      "Developers": {
-        "angle": "Emphasize technical excellence and performance",
-        "cta": "Offer code review + performance optimization"
-      },
-      "Marketing Agencies": {
-        "angle": "Highlight credibility and client trust signals",
-        "cta": "Offer conversion-focused redesign"
+    "cold_email": {
+      "system_message": "Write a personalized B2B cold email. Use [SUBJECT] and [BODY] tags. Use line breaks between paragraphs. No placeholders.",
+      "prompt_template": "Generate a short cold email for {business_name}.\n\nAudit Results:\n{issue_summary}\n\nEmail must:\n1. Mention 1 specific site detail.\n2. Mention 1-2 critical issues (design, speed, or mobile).\n3. Explain the business impact (lost sales).\n4. Offer a quick audit/call.\n5. Max 120 words, no placeholders, no signature.\n\nFormat your response EXACTLY like this:\n[SUBJECT]Your subject line here[/SUBJECT]\n[BODY]\nDear [Business],\n\nYour email body here.\n\nUse blank lines between paragraphs.\n\nBest regards[/BODY]",
+      "variations": {
+        "quick": {
+          "system_message": "Write a concise B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
+          "prompt_template": "Write a SHORT email (max 80 words) for {business_name}.\n\nIssues:\n{issue_summary}\n\nEmail should:\n- Lead with a specific site issue.\n- Mention one benefit.\n- Quick CTA.\n- No placeholders.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
+        },
+        "detailed": {
+          "system_message": "Write a detailed B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
+          "prompt_template": "Write a detailed email (max 200 words) for {business_name}.\n\nAudit:\n{issue_summary}\n\nStructure:\n1. Personal opener about their site.\n2. Explain 2-3 issues found.\n3. Business impact.\n4. Proposed solution.\n5. Soft CTA.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
+        }
       }
     }
   }

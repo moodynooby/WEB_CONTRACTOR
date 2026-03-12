@@ -1,14 +1,30 @@
 """Core business logic for Web Contractor."""
 
+from core.audit import AuditOrchestrator
 from core.discovery import PlaywrightScraper
-from core.email import EmailSender
-from core.llm import is_available, generate, generate_with_retry, OllamaError
+from core.email import EmailSender, EmailGenerator
+from core.llm import (
+    is_available,
+    generate,
+    generate_with_retry,
+    LLMError,
+    ProviderError,
+    get_provider_info,
+)
+from core.local_models import (
+    generate_embedding,
+    compute_similarity,
+    analyze_sentiment,
+    compute_text_quality_score,
+    find_duplicates,
+    get_model_info as get_local_model_info,
+    is_available as local_models_available,
+)
 from core.app_core import WebContractorApp, Config
 from core.db_models import (
     db,
     Bucket,
     Lead,
-    Audit,
     EmailCampaign,
     QueryPerformance,
 )
@@ -39,16 +55,26 @@ __all__ = [
     "Config",
     "PlaywrightScraper",
     "EmailSender",
+    "EmailGenerator",
+    "AuditOrchestrator",
     "is_available",
     "generate",
     "generate_with_retry",
-    "OllamaError",
+    "LLMError",
+    "ProviderError",
+    "get_provider_info",
+    "generate_embedding",
+    "compute_similarity",
+    "analyze_sentiment",
+    "compute_text_quality_score",
+    "find_duplicates",
+    "get_local_model_info",
+    "local_models_available",
     "db",
     "init_db",
     "close_db",
     "Bucket",
     "Lead",
-    "Audit",
     "EmailCampaign",
     "QueryPerformance",
     "save_bucket",

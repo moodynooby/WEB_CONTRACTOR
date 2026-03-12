@@ -6,10 +6,9 @@ All database operations - clean data access layer.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from peewee import DatabaseError, IntegrityError, JOIN, prefetch
+from peewee import DatabaseError, IntegrityError, JOIN
 
 from core.db_models import (
-    Audit,
     Bucket,
     EmailCampaign,
     Lead,
@@ -21,7 +20,7 @@ from core.db_models import (
 def init_db() -> None:
     """Initialize database and create tables."""
     db.connect(reuse_if_open=True)
-    db.create_tables([Bucket, Lead, Audit, EmailCampaign, QueryPerformance], safe=True)
+    db.create_tables([Bucket, Lead, EmailCampaign, QueryPerformance], safe=True)
 
 
 def close_db() -> None:
@@ -40,10 +39,6 @@ def save_bucket(data: Dict[str, Any]) -> Bucket:
         Saved Bucket instance.
     """
     bucket_data = data.copy()
-
-    for key in ["categories", "search_patterns", "geographic_segments"]:
-        if key in bucket_data and isinstance(bucket_data[key], list):
-            bucket_data[key] = bucket_data[key]
 
     bucket, created = Bucket.get_or_create(
         name=bucket_data["name"], defaults=bucket_data
@@ -104,6 +99,8 @@ def save_lead(data: Dict[str, Any]) -> int:
             quality_score=data.get("quality_score", 0.5),
             social_links=data.get("social_links", {}),
             contact_form_url=data.get("contact_form_url"),
+            tech_stack=data.get("tech_stack"),
+            metadata=data.get("metadata", {}),
         )
         return lead.id
     except (IntegrityError, DatabaseError) as e:
@@ -144,6 +141,8 @@ def save_leads_batch(leads: List[Dict[str, Any]]) -> int:
                 "quality_score": lead_data.get("quality_score", 0.5),
                 "social_links": lead_data.get("social_links", {}),
                 "contact_form_url": lead_data.get("contact_form_url"),
+                "tech_stack": lead_data.get("tech_stack"),
+                "metadata": lead_data.get("metadata", {}),
             }
         )
 
@@ -176,6 +175,12 @@ def update_lead_contact_info(lead_id: int, info: Dict[str, Any]) -> None:
 
     if "contact_form_url" in info:
         update_data["contact_form_url"] = info["contact_form_url"]
+
+    if "tech_stack" in info:
+        update_data["tech_stack"] = info["tech_stack"]
+
+    if "metadata" in info:
+        update_data["metadata"] = info["metadata"]
 
     if update_data:
         Lead.update(**update_data).where(Lead.id == lead_id).execute()
@@ -226,27 +231,23 @@ def get_qualified_leads(limit: int = 50) -> List[Dict[str, Any]]:
         .limit(limit)
     )
 
-    leads_with_audits = prefetch(query, Audit)
-
     result: List[Dict[str, Any]] = []
-    for lead in leads_with_audits:
-        latest_audit = lead.audits[0] if lead.audits else None
+    for lead in query:
         result.append(
             {
                 "id": lead.id,
                 "business_name": lead.business_name,
                 "website": lead.website,
                 "bucket": lead.bucket.name if lead.bucket else None,
-                "issues_json": latest_audit.issues_json
-                if latest_audit and latest_audit.issues_json
-                else [],
+                "issues_json": lead.issues_json or [],
+                "audit_score": lead.audit_score or 0,
             }
         )
     return result
 
 
 def save_audits_batch(audits: List[Dict[str, Any]]) -> int:
-    """Save multiple audits.
+    """Save audit results to Lead table.
 
     Args:
         audits: List of audit data dictionaries.
@@ -263,19 +264,14 @@ def save_audits_batch(audits: List[Dict[str, Any]]) -> int:
             try:
                 lead_id = audit_data["lead_id"]
                 data = audit_data.get("data", {})
-                duration = audit_data.get("duration")
-
-                Audit.create(
-                    lead_id=lead_id,
-                    url=data.get("url"),
-                    score=data.get("score", 0),
-                    issues_json=data.get("issues", []),
-                    qualified=bool(data.get("qualified", 0)),
-                    duration=duration,
-                )
+                score = data.get("score", 0)
+                issues = data.get("issues", [])
+                qualified = bool(data.get("qualified", 0))
 
                 Lead.update(
-                    status="qualified" if data.get("qualified") else "unqualified"
+                    status="qualified" if qualified else "unqualified",
+                    audit_score=score,
+                    issues_json=issues,
                 ).where(Lead.id == lead_id).execute()
 
                 saved += 1
@@ -534,14 +530,16 @@ def cleanup_stale_queries(days_threshold: int = 30) -> int:
     cutoff_date = datetime.now() - timedelta(days=days_threshold)
 
     stale_old = QueryPerformance.select().where(
-        not QueryPerformance.is_active,
+        ~QueryPerformance.is_active,
         QueryPerformance.last_executed_at < cutoff_date,
     )
 
-    count = 0
-    for qp in stale_old:
-        qp.delete_instance()
-        count += 1
+    # Use bulk delete for better performance
+    count = stale_old.count()
+    QueryPerformance.delete().where(
+        ~QueryPerformance.is_active,
+        QueryPerformance.last_executed_at < cutoff_date,
+    ).execute()
 
     return count
 

@@ -12,7 +12,7 @@ class YellowPagesIndiaScraper(BaseScraper):
     """Scraper for YellowPages India."""
 
     SOURCE_NAME = "yellowpages"
-    BASE_URL = "https://www.yellowpages.in"
+    BASE_URL = "https://www.indianyellowpages.com/"
 
     SELECTORS = {
         "search_box": "input#search",

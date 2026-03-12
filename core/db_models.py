@@ -4,7 +4,7 @@ Pure model definitions only - no business logic.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from peewee import (
     BooleanField,
@@ -104,13 +104,15 @@ class Lead(BaseModel):
     source = TextField(null=True)
     status = TextField(default="pending_audit")
     quality_score = FloatField(default=0.5)
-    bucket = ForeignKeyField(
-        Bucket, backref="leads", null=True, on_delete="SET NULL"
-    )
+    audit_score = IntegerField(default=0)
+    issues_json = JSONField(null=True)
+    bucket = ForeignKeyField(Bucket, backref="leads", null=True, on_delete="SET NULL")
     created_at = DateTimeField(default=datetime.now)
     last_email_sent_at = DateTimeField(null=True)
     social_links = JSONField(null=True)
     contact_form_url = TextField(null=True)
+    tech_stack = TextField(null=True)
+    metadata = JSONField(null=True)
 
     class Meta:
         indexes = ((("status",), False), (("bucket_id",), False))
@@ -121,25 +123,6 @@ class Lead(BaseModel):
         data["social_links"] = self.social_links or {}
         data["bucket"] = self.bucket.name if self.bucket else None
         return data
-
-
-class Audit(BaseModel):
-    """Audit result for a lead's website."""
-
-    lead = ForeignKeyField(Lead, backref="audits", on_delete="CASCADE")
-    url = TextField(null=True)
-    score = IntegerField(default=0)
-    issues_json = JSONField(null=True)
-    qualified = BooleanField(default=False)
-    duration = FloatField(null=True)
-    audit_date = DateTimeField(default=datetime.now)
-
-    class Meta:
-        indexes = ((("qualified",), False), (("lead_id",), False))
-
-    def get_issues(self) -> List[Dict[str, Any]]:
-        """Get audit issues as list of dictionaries."""
-        return self.issues_json or []
 
 
 class EmailCampaign(BaseModel):
@@ -169,9 +152,7 @@ class EmailCampaign(BaseModel):
 class QueryPerformance(BaseModel):
     """Track query performance to identify and disable stale queries."""
 
-    bucket = ForeignKeyField(
-        Bucket, backref="query_performances", on_delete="CASCADE"
-    )
+    bucket = ForeignKeyField(Bucket, backref="query_performances", on_delete="CASCADE")
     query_pattern = TextField()
     city = TextField()
     is_active = BooleanField(default=True)
