@@ -43,3 +43,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[project.scripts]
+lint = "uv run ruff check --fix . && uv run uncomment . && uv run mypy ."
+run = "uv run python main.py"

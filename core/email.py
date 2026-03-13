@@ -4,18 +4,135 @@ Uses direct SMTP with context manager for efficient connection handling.
 
 Also contains EmailGenerator class for generating personalized cold emails
 for qualified leads based on their audit results.
+
+Also contains contact discovery functions for extracting email and phone 
+information from websites.
 """
 
 import json
+import re
 import smtplib
 import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable
+from typing import Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import parse_qs, urljoin, urlparse
+
+from bs4 import BeautifulSoup
+import email_validator
+
 
 from core import llm
-from core.db_repository import get_qualified_leads, mark_email_sent, save_emails_batch
+from core.db_repository import (
+    get_qualified_leads,
+    mark_email_sent,
+    save_emails_batch,
+)
 from core.utils import load_json_config
+
+
+def validate_email(email: str) -> Optional[str]:
+    """Validate and normalize email using email-validator library."""
+    if not email or len(email) > 254 or "@" not in email:
+        return None
+    try:
+        email_obj = email_validator.validate_email(email, check_deliverability=True)
+        return email_obj.normalized
+    except email_validator.EmailNotValidError:
+        return None
+
+
+def find_emails_in_html(soup: BeautifulSoup, base_url: str) -> List[str]:
+    """Find all valid emails in HTML from mailto links and text content."""
+    emails: List[str] = []
+    seen: Set[str] = set()
+
+    for elem in soup.find_all(True):
+        href = elem.get("href", "")
+        if href and isinstance(href, str) and "mailto:" in href.lower():
+            for e in href.lower().replace("mailto:", "").split(","):
+                normalized = validate_email(e.strip())
+                if normalized and normalized not in seen:
+                    emails.append(normalized)
+                    seen.add(normalized)
+
+        onclick = elem.get("onclick", "")
+        if onclick and "mailto:" in str(onclick).lower():
+            for match in re.findall(r"mailto:([^\s\'\",;]+)", str(onclick), re.I):
+                normalized = validate_email(match.lower().strip())
+                if normalized and normalized not in seen:
+                    emails.append(normalized)
+                    seen.add(normalized)
+
+    text = soup.get_text(separator=" ", strip=True)
+    for pattern in [
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+        r"[\(\<\[]([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})[\)\>\]]",
+    ]:
+        for match in re.findall(pattern, text):
+            normalized = validate_email(match.lower().strip())
+            if normalized and normalized not in seen:
+                emails.append(normalized)
+                seen.add(normalized)
+
+    return emails
+
+
+def find_contact_form_email(soup: BeautifulSoup, base_url: str) -> Tuple[Optional[str], Optional[str]]:
+    """Extract email from contact form action URLs."""
+    for form in soup.find_all("form"):
+        action = form.get("action", "")
+        if not action or not isinstance(action, str):
+            continue
+
+        form_url = (
+            urljoin(base_url, action) if not action.startswith("http") else action
+        )
+
+        if "mailto:" in action.lower():
+            email = action.lower().replace("mailto:", "").strip()
+            normalized = validate_email(email)
+            if normalized:
+                return (normalized, form_url)
+
+        parsed = urlparse(form_url)
+        for param in ["email", "to", "recipient", "_replyto"]:
+            if param in parsed.query:
+                for value in parse_qs(parsed.query).get(param, []):
+                    normalized = validate_email(value)
+                    if normalized:
+                        return (normalized, form_url)
+
+    return (None, None)
+
+def find_phone(soup: BeautifulSoup) -> Optional[str]:
+    """Extract phone number from tel: links."""
+    for link in soup.find_all("a", href=True):
+        href = str(link.get("href", ""))
+        if href.startswith("tel:"):
+            return href.replace("tel:", "")
+    return None
+
+
+def discover_contact_info(html_content: str, base_url: str) -> Dict[str, Optional[str]]:
+    """Discover contact information from website HTML.
+    
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    emails = find_emails_in_html(soup, base_url)
+    email = emails[0] if emails else None
+
+    form_email, form_url = find_contact_form_email(soup, base_url)
+    if not email and form_email:
+        email = form_email
+
+    phone = find_phone(soup)
+
+    return {
+        "email": email,
+        "phone": phone,
+    }
 
 
 class EmailSender:
@@ -93,86 +210,6 @@ class EmailGenerator:
         """Log message with style."""
         self.logger(message, style)
 
-    def generate_for_lead(
-        self, lead: dict, audit_result: dict | None = None
-    ) -> dict | None:
-        """Generate email for a single lead.
-
-        Args:
-            lead: Lead dict with business_name, website, bucket
-            audit_result: Optional audit result dict with issues
-
-        Returns:
-            Email dict with subject, body, lead_id, status or None
-        """
-        if not self.email_config.get("enabled", True):
-            self.log("  ⚠ Email generation disabled, skipping", "warning")
-            return None
-
-        issues = []
-        if audit_result:
-            issues = audit_result.get("issues", [])
-        elif lead.get("issues_json"):
-            issues_json: Any = lead.get("issues_json")
-            issues = (
-                issues_json
-                if isinstance(issues_json, list)
-                else json.loads(issues_json)
-            )
-
-        critical_issues = [i for i in issues if i.get("severity") == "critical"]
-        warning_issues = [i for i in issues if i.get("severity") == "warning"]
-        top_issues = (critical_issues + warning_issues)[:3]
-        issues_text = "\n".join([f"- {i['description']}" for i in top_issues])
-
-        bucket_templates = self.email_config.get("bucket_templates", {})
-        bucket_template = bucket_templates.get(lead.get("bucket", "default"), {})
-        angle = bucket_template.get("angle", "")
-        cta = bucket_template.get("cta", "")
-
-        prompt = self.email_config.get("prompt_template", "").format(
-            business_name=lead["business_name"],
-            bucket=lead.get("bucket", "default"),
-            url=lead["website"],
-            issues=issues_text,
-        )
-
-        if angle:
-            prompt += f"\n\nAngle: {angle}"
-        if cta:
-            prompt += f"\nCTA: {cta}"
-
-        system_message = self.email_config.get("system_message", "")
-
-        try:
-            raw = llm.generate(
-                model=self.email_config.get("model", "llama-3.1-8b-instant"),
-                prompt=prompt,
-                system=system_message,
-                format_json=True,
-                timeout=self.email_config.get("timeout", 30),
-            )
-            data = json.loads(raw)
-
-            subject = data.get("subject", "")
-            body = data.get("body", "")
-
-            if not subject or not body:
-                self.log("  ⚠ LLM returned empty email", "warning")
-                return None
-
-            return {
-                "lead_id": lead["id"],
-                "subject": subject,
-                "body": body,
-                "status": "needs_review",
-                "variation": "default",
-            }
-
-        except Exception as e:
-            self.log(f"  ⚠ Email generation failed: {e}", "error")
-            return None
-
     def generate(
         self, limit: int = 20, progress_callback: Callable | None = None
     ) -> dict:
@@ -199,21 +236,65 @@ class EmailGenerator:
         for i, lead in enumerate(leads, 1):
             self.log(f"  [{i}/{len(leads)}] {lead['business_name']}", "info")
 
-            issues_json = lead.get("issues_json", [])
-            issues = (
-                issues_json
-                if isinstance(issues_json, list)
-                else json.loads(issues_json)
+            issues = lead.get("issues_json", [])
+            if not isinstance(issues, list):
+                issues = json.loads(issues)
+
+            critical_issues = [i for i in issues if i.get("severity") == "critical"]
+            warning_issues = [i for i in issues if i.get("severity") == "warning"]
+            top_issues = (critical_issues + warning_issues)[:3]
+            issues_text = "\n".join([f"- {i['description']}" for i in top_issues])
+
+            bucket_templates = self.email_config.get("bucket_templates", {})
+            bucket_template = bucket_templates.get(lead.get("bucket", "default"), {})
+            angle = bucket_template.get("angle", "")
+            cta = bucket_template.get("cta", "")
+
+            prompt = self.email_config.get("prompt_template", "").format(
+                business_name=lead["business_name"],
+                bucket=lead.get("bucket", "default"),
+                url=lead["website"],
+                issues=issues_text,
             )
-            audit_result = {"issues": issues}
+
+            if angle:
+                prompt += f"\n\nAngle: {angle}"
+            if cta:
+                prompt += f"\nCTA: {cta}"
+
+            system_message = self.email_config.get("system_message", "")
 
             email_start = time.time()
-            email_data = self.generate_for_lead(lead, audit_result)
+            try:
+                raw = llm.generate(
+                    model=self.email_config.get("model", "llama-3.1-8b-instant"),
+                    prompt=prompt,
+                    system=system_message,
+                    format_json=True,
+                    timeout=self.email_config.get("timeout", 30),
+                )
+                data = json.loads(raw)
 
-            if email_data:
-                email_data["duration"] = time.time() - email_start
+                subject = data.get("subject", "")
+                body = data.get("body", "")
+
+                if not subject or not body:
+                    self.log("  ⚠ LLM returned empty email", "warning")
+                    continue
+
+                email_data = {
+                    "lead_id": lead["id"],
+                    "subject": subject,
+                    "body": body,
+                    "status": "needs_review",
+                    "variation": "default",
+                    "duration": time.time() - email_start,
+                }
                 email_batch.append(email_data)
                 generated += 1
+
+            except Exception as e:
+                self.log(f"  ⚠ Email generation failed: {e}", "error")
 
             if progress_callback:
                 progress_callback(

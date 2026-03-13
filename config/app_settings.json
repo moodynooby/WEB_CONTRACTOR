@@ -54,45 +54,30 @@
         "enabled": true,
         "priority": 2,
         "max_results": 50,
-        "regions": [
-          "global"
-        ],
         "description": "Google Maps business listings"
       },
       "google_search": {
         "enabled": true,
         "priority": 1,
         "max_results": 50,
-        "regions": [
-          "global"
-        ],
         "description": "Google Search for blog/platform websites"
       },
       "justdial": {
         "enabled": true,
         "priority": 3,
         "max_results": 50,
-        "regions": [
-          "india"
-        ],
         "description": "JustDial Indian business directory"
       },
       "sulekha": {
         "enabled": true,
         "priority": 5,
         "max_results": 50,
-        "regions": [
-          "india"
-        ],
         "description": "Sulekha Indian community network"
       },
       "yellowpages": {
         "enabled": true,
         "priority": 4,
         "max_results": 50,
-        "regions": [
-          "india"
-        ],
         "description": "YellowPages India"
       }
     },
@@ -109,11 +94,11 @@
     "max_retries": 2
   },
   "discovery_limits": {
-    "max_queries_per_run": 20,
-    "max_patterns_per_bucket": 3,
-    "max_cities_per_segment": 2,
-    "max_results_per_query": 5,
-    "max_leads_per_query": 2
+    "max_queries_per_run": 500,
+    "max_patterns_per_bucket": 30,
+    "max_cities_per_segment": 20,
+    "max_results_per_query": 50,
+    "max_leads_per_query": 20
   },
   "scraper_settings": {
     "headless": true,

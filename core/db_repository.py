@@ -239,6 +239,8 @@ def get_qualified_leads(limit: int = 50) -> List[Dict[str, Any]]:
                 "business_name": lead.business_name,
                 "website": lead.website,
                 "bucket": lead.bucket.name if lead.bucket else None,
+                "email": lead.email,
+                "phone": lead.phone,
                 "issues_json": lead.issues_json or [],
                 "audit_score": lead.audit_score or 0,
             }
@@ -534,7 +536,6 @@ def cleanup_stale_queries(days_threshold: int = 30) -> int:
         QueryPerformance.last_executed_at < cutoff_date,
     )
 
-    # Use bulk delete for better performance
     count = stale_old.count()
     QueryPerformance.delete().where(
         ~QueryPerformance.is_active,

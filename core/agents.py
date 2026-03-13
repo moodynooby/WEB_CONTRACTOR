@@ -11,15 +11,12 @@ w- ContentAgent: Copy quality, CTAs (LLM-based, 3-5s)
 
 import json
 import os
-import re
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, TypedDict
-from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from email_validator import EmailNotValidError, validate_email
 
 from core import llm
 
@@ -124,10 +121,9 @@ class BaseAgent(ABC):
                 penalty += 35
             elif severity == "warning":
                 penalty += 15
-            else:  # info
+            else:  
                 penalty += 5
 
-        # Final score is the lower of the suggested score or safety-capped score
         return max(0, min(score, 100 - penalty))
 
     def _call_llm_with_retry(
@@ -281,7 +277,7 @@ class ContentAgent(BaseAgent):
                 if attempt < max_retries:
                     continue
                 self.log(f"Content LLM failed: {error.get('error')}", "error")
-                score = 50  # Default to neutral/failed score if audit fails
+                score = 50  
                 break
 
             score = llm_result.get("content_score", 100)
@@ -383,7 +379,7 @@ class VisualAgent(BaseAgent):
                 if attempt < max_retries:
                     continue
                 self.log(f"Visual LLM failed: {error.get('error')}", "error")
-                score = 50  # Neutral default
+                score = 50  
                 break
 
             score = visual_result.get("visual_score", 100)
@@ -536,10 +532,9 @@ class BusinessAgent(BaseAgent):
                     if attempt < max_retries:
                         continue
                     self.log(f"Business LLM failed: {error.get('error')}", "error")
-                    score = min(score, 70)  # Cap score if LLM audit fails
+                    score = min(score, 70)  
                     break
 
-                # Extract score from LLM if provided
                 if "business_score" in llm_result:
                     score = min(score, llm_result["business_score"])
 
@@ -565,252 +560,10 @@ class BusinessAgent(BaseAgent):
         )
 
 
-class ContactAgent(BaseAgent):
-    """Contact discovery agent: Email, phone, contact form detection."""
-
-    def __init__(
-        self,
-        config: dict,
-        logger: Callable[[str, str], None] | None = None,
-    ) -> None:
-        super().__init__(config, logger)
-
-    def _validate_email(self, email: str) -> str | None:
-        """Validate and normalize email using email-validator library."""
-        if not email or len(email) > 254 or "@" not in email:
-            return None
-        try:
-            return validate_email(email, check_deliverability=True).normalized
-        except EmailNotValidError:
-            return None
-
-    def _find_emails_in_html(self, soup: BeautifulSoup, base_url: str) -> list[str]:
-        """Find all valid emails in HTML from mailto links and text content."""
-        emails: list[str] = []
-        seen: set[str] = set()
-
-        for elem in soup.find_all(True):
-            href = elem.get("href", "")
-            if href and isinstance(href, str) and "mailto:" in href.lower():
-                for e in href.lower().replace("mailto:", "").split(","):
-                    normalized = self._validate_email(e.strip())
-                    if normalized and normalized not in seen:
-                        emails.append(normalized)
-                        seen.add(normalized)
-
-            onclick = elem.get("onclick", "")
-            if onclick and "mailto:" in str(onclick).lower():
-                for match in re.findall(r"mailto:([^\s\'\",;]+)", str(onclick), re.I):
-                    normalized = self._validate_email(match.lower().strip())
-                    if normalized and normalized not in seen:
-                        emails.append(normalized)
-                        seen.add(normalized)
-
-        text = soup.get_text(separator=" ", strip=True)
-        for pattern in [
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
-            r"[\(\<\[]([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})[\)\>\]]",
-        ]:
-            for match in re.findall(pattern, text):
-                normalized = self._validate_email(match.lower().strip())
-                if normalized and normalized not in seen:
-                    emails.append(normalized)
-                    seen.add(normalized)
-
-        return emails
-
-    def _find_contact_form_email(
-        self, soup: BeautifulSoup, base_url: str
-    ) -> tuple[str | None, str | None]:
-        """Extract email from contact form action URLs."""
-        for form in soup.find_all("form"):
-            action = form.get("action", "")
-            if not action or not isinstance(action, str):
-                continue
-
-            form_url = (
-                urljoin(base_url, action) if not action.startswith("http") else action
-            )
-
-            if "mailto:" in action.lower():
-                email = action.lower().replace("mailto:", "").strip()
-                normalized = self._validate_email(email)
-                if normalized:
-                    return (normalized, form_url)
-
-            parsed = urlparse(form_url)
-            for param in ["email", "to", "recipient", "_replyto"]:
-                if param in parsed.query:
-                    for value in parse_qs(parsed.query).get(param, []):
-                        normalized = self._validate_email(value)
-                        if normalized:
-                            return (normalized, form_url)
-
-        return (None, None)
-
-    def _find_social_links(self, soup: BeautifulSoup) -> dict[str, str]:
-        """Extract social media links from HTML."""
-        social: dict[str, str] = {}
-        domains = {
-            "linkedin": "linkedin.com",
-            "facebook": "facebook.com",
-            "instagram": "instagram.com",
-            "twitter": ["twitter.com", "x.com"],
-        }
-
-        for link in soup.find_all("a", href=True):
-            href = str(link.get("href", ""))
-            href_lower = href.lower()
-            for platform, domain in domains.items():
-                if isinstance(domain, list):
-                    if any(d in href_lower for d in domain) and platform not in social:
-                        social[platform] = href
-                elif (
-                    isinstance(domain, str)
-                    and domain in href_lower
-                    and platform not in social
-                ):
-                    social[platform] = href
-
-        return social
-
-    def _find_contact_page_url(self, soup: BeautifulSoup, base_url: str) -> str | None:
-        """Find contact page URL from navigation links."""
-        keywords = ["contact", "get-in-touch", "support"]
-        for link in soup.find_all("a", href=True):
-            href = str(link.get("href", ""))
-            if any(k in href.lower() for k in keywords):
-                return urljoin(base_url, href) if not href.startswith("http") else href
-        return None
-
-    def _find_phone(self, soup: BeautifulSoup) -> str | None:
-        """Extract phone number from tel: links."""
-        for link in soup.find_all("a", href=True):
-            href = str(link.get("href", ""))
-            if href.startswith("tel:"):
-                return href.replace("tel:", "")
-        return None
-
-    def _discover_contact_info(self, html_content: str, base_url: str) -> dict:
-        """Discover contact information from website HTML."""
-        soup = BeautifulSoup(html_content, "html.parser")
-
-        emails = self._find_emails_in_html(soup, base_url)
-        email = emails[0] if emails else None
-
-        form_email, form_url = self._find_contact_form_email(soup, base_url)
-        if not email and form_email:
-            email = form_email
-
-        return {
-            "email": email,
-            "social_links": self._find_social_links(soup),
-            "contact_form_url": form_url or self._find_contact_page_url(soup, base_url),
-            "phone": self._find_phone(soup),
-        }
-
-    def execute(
-        self,
-        url: str,
-        business_name: str,
-        bucket: str,
-        html_content: str | None = None,
-        soup: BeautifulSoup | None = None,
-        response: requests.Response | None = None,
-        screenshot_base64: str | None = None,
-        previous_results: dict[str, AgentResult] | None = None,
-    ) -> AgentResult:
-        start_time = time.time()
-
-        if not html_content:
-            fetched = self._fetch_url(url)
-            if fetched is None:
-                return AgentResult(
-                    score=0,
-                    issues=[
-                        {
-                            "type": "error",
-                            "severity": "critical",
-                            "description": "Fetch failed",
-                        }
-                    ],
-                    duration=time.time() - start_time,
-                    agent_name="Contact",
-                    metadata={"error": "fetch_failed"},
-                )
-            html_content, soup, _ = fetched
-
-        discovered_info = self._discover_contact_info(html_content, url)
-
-        if not discovered_info["email"] and discovered_info["contact_form_url"]:
-            try:
-                c_resp = requests.get(
-                    discovered_info["contact_form_url"],
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    timeout=5,
-                )
-                c_html = c_resp.text
-                c_info = self._discover_contact_info(
-                    c_html,
-                    discovered_info["contact_form_url"],
-                )
-                if c_info["email"]:
-                    discovered_info["email"] = c_info["email"]
-                if c_info["phone"] and not discovered_info["phone"]:
-                    discovered_info["phone"] = c_info["phone"]
-            except Exception as e:
-                self.log(f"Error fetching contact page: {e}", "error")
-
-        score = 100
-        issues = []
-
-        if not discovered_info["email"]:
-            score -= 40
-            issues.append(
-                {
-                    "type": "missing_email",
-                    "severity": "warning",
-                    "description": "No email address found on website",
-                    "remediation": "Add visible email address or contact form",
-                }
-            )
-
-        if not discovered_info["phone"]:
-            score -= 20
-            issues.append(
-                {
-                    "type": "missing_phone",
-                    "severity": "info",
-                    "description": "No phone number found",
-                    "remediation": "Add phone number for better lead conversion",
-                }
-            )
-
-        if not discovered_info["contact_form_url"]:
-            score -= 20
-            issues.append(
-                {
-                    "type": "missing_contact_form",
-                    "severity": "info",
-                    "description": "No contact form detected",
-                    "remediation": "Add contact form for easy lead capture",
-                }
-            )
-
-        return AgentResult(
-            score=max(0, score),
-            issues=issues,
-            duration=time.time() - start_time,
-            agent_name="Contact",
-            metadata=discovered_info,
-        )
-
-
 AGENT_REGISTRY: dict[str, type[BaseAgent]] = {
     "content": ContentAgent,
     "visual": VisualAgent,
     "business": BusinessAgent,
-    "contact": ContactAgent,
 }
 
 

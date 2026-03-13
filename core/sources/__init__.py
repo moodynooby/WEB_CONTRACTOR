@@ -49,16 +49,8 @@ def get_all_enabled_sources(
     enabled_sources = []
     for source_name, source_class in all_source_classes.items():
         source_config = sources_config.get(source_name, {})
-
-        # Check if enabled and supports the region
-        is_enabled = source_config.get("enabled", True)
-        supported_regions = source_config.get("regions", ["india"])
-
-        region_matches = "global" in supported_regions or region in supported_regions
-
-        if is_enabled and region_matches:
-            instance = source_class(settings=source_config)
-            enabled_sources.append((instance, source_config.get("priority", 99)))
+        instance = source_class(settings=source_config)
+        enabled_sources.append((instance, source_config.get("priority", 99)))
 
     enabled_sources.sort(key=lambda x: x[1])
     return [s[0] for s in enabled_sources]

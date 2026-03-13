@@ -1,20 +1,10 @@
 {
   "agents": {
     "execution_order": [
-      "contact",
       "content",
       "business",
       "visual"
     ],
-    "contact": {
-      "enabled": true,
-      "weight": 1.0,
-      "timeout": 15,
-      "early_exit_rules": {
-        "min_score": 40
-      },
-      "disabled_for_buckets": []
-    },
     "content": {
       "enabled": true,
       "weight": 1.0,

@@ -177,8 +177,6 @@ class WebContractorApp:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
         """Generate outreach emails for qualified leads.
-
-        Note: For unified audit + email generation, use run_unified_pipeline() instead.
         """
         self.logger("Starting email generation...", "info")
         try:

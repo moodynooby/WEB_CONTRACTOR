@@ -278,7 +278,6 @@ class PlaywrightScraper:
         def worker(scraper):
             """Worker function for single source scraping."""
             try:
-                # Each thread needs its own playwright instance for sync_api thread safety
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=sources_scrape_settings.get("headless", True)
@@ -314,7 +313,6 @@ class PlaywrightScraper:
                 try:
                     leads = future.result(timeout=timeout_seconds)
                     if leads:
-                        # Normalize leads
                         scraper_instance = next(
                             s for s in enabled_sources if s.SOURCE_NAME == source_name
                         )

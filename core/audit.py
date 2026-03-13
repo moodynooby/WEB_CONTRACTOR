@@ -12,7 +12,7 @@ from typing import Any, Callable
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-
+from core.email import discover_contact_info
 from core.agents import (
     AgentResult,
     BaseAgent,
@@ -21,7 +21,6 @@ from core.agents import (
 from core.db_repository import (
     get_pending_audits,
     save_audits_batch,
-    update_lead_contact_info,
 )
 from core.utils import load_json_config
 
@@ -31,8 +30,6 @@ class AuditOrchestrator:
     Orchestrates multi-agent audit pipeline.
 
     Execution flow:
-    1. Technical Agent (fast HTTP checks) → Early exit if critical failures
-    2. Contact Agent (discover email/phone) → Skip if no contact info
     3. Content Agent (LLM copy analysis) → Optional based on config
     4. Business Agent (industry checks) → Optional based on bucket
     5. Visual Agent (VLM screenshot) → Only for high-value leads
@@ -60,13 +57,6 @@ class AuditOrchestrator:
     @contextmanager
     def managed_session(self):
         """Context manager for shared browser session and HTTP session."""
-        try:
-            import asyncio
-
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -74,18 +64,16 @@ class AuditOrchestrator:
             }
         )
 
-        try:
-            with sync_playwright() as p:
+        with sync_playwright() as p:
+            try:
                 self._browser = p.chromium.launch(headless=True)
                 self._context = self._browser.new_context()
-                try:
-                    yield self
-                finally:
+                yield self
+            finally:
+                if self._context:
                     self._context.close()
+                if self._browser:
                     self._browser.close()
-        except Exception as e:
-            self.log(f"Session error: {e}", "error")
-            yield self
 
     def audit_lead(self, lead: dict) -> dict[str, Any]:
         """Audit single lead using multi-agent pipeline with PARALLEL execution.
@@ -119,122 +107,101 @@ class AuditOrchestrator:
             }
 
         html_content, soup, response = fetch_result
-        screenshot_base64 = None
+
+        discovered_info = discover_contact_info(html_content, lead["website"])
+
+        if not discovered_info.get("email"):
+            self.log(f"  ✗ No valid email found for {lead['business_name']}", "warning")
+            return {
+                "lead_id": lead["id"],
+                "url": lead["website"],
+                "score": 0,
+                "issues": [
+                    {
+                        "type": "error",
+                        "severity": "high",
+                        "description": "No contact email found on website",
+                    }
+                ],
+                "qualified": 0,
+                "discovered_info": discovered_info,
+                "duration": time.time() - start_time,
+                "agents_run": [],
+            }
 
         results: dict[str, AgentResult] = {}
         agents_run = []
         all_agents = self._create_agents_for_bucket(lead.get("bucket", "default"))
 
-        stage1_agents = [
-            (n, a, e) for n, a, e in all_agents if n in ["technical", "contact"]
-        ]
-        stage2_agents = [
-            (n, a, e) for n, a, e in all_agents if n in ["content", "business"]
-        ]
-        stage3_agents = [(n, a, e) for n, a, e in all_agents if n in ["visual"]]
+        audit_agents = [(n, a, e) for n, a, e in all_agents]
+        
+        screenshot_base64 = None
+        if any(n == "visual" for n, _, _ in audit_agents):
+            self.log("  Taking screenshot for Visual agent...", "info")
+            screenshot_base64 = self._take_screenshot(lead["website"])
 
-        early_exit_triggered = False
+        if not audit_agents:
+            return {
+                "lead_id": lead["id"],
+                "url": lead["website"],
+                "score": 0,
+                "issues": [],
+                "qualified": 0,
+                "discovered_info": discovered_info,
+                "duration": 0,
+                "agents_run": agents_run,
+            }
 
-        if stage1_agents:
-            self.log(
-                "  Running Stage 1 agents (Technical + Contact) in parallel...", "info"
-            )
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {
-                    executor.submit(
-                        self._run_agent_parallel,
-                        agent_name,
-                        agent,
-                        lead,
-                        html_content,
-                        soup,
-                        response,
-                        screenshot_base64,
-                        results,
-                    ): agent_name
-                    for agent_name, agent, _ in stage1_agents
-                }
-                for future in as_completed(futures):
-                    agent_name, result = future.result()
-                    results[agent_name] = result
-                    agents_run.append(agent_name)
-                    exit_rules = next(
-                        (e for n, _, e in stage1_agents if n == agent_name), {}
-                    )
-                    self.log(
-                        f"  {agent_name.title()} complete: score={result['score']}, {len(result.get('issues', []))} issues, {result['duration']:.2f}s",
-                        "success",
-                    )
-                    if exit_rules and self._should_early_exit(result, exit_rules):
-                        self.log("  Early exit triggered after Stage 1", "warning")
-                        early_exit_triggered = True
-                        break
-
-        if stage2_agents and not early_exit_triggered:
-            self.log(
-                "  Running Stage 2 agents (Content + Business) in parallel...", "info"
-            )
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {
-                    executor.submit(
-                        self._run_agent_parallel,
-                        agent_name,
-                        agent,
-                        lead,
-                        html_content,
-                        soup,
-                        response,
-                        screenshot_base64,
-                        results,
-                    ): agent_name
-                    for agent_name, agent, _ in stage2_agents
-                }
-                for future in as_completed(futures):
-                    agent_name, result = future.result()
-                    results[agent_name] = result
-                    agents_run.append(agent_name)
-                    exit_rules = next(
-                        (e for n, _, e in stage2_agents if n == agent_name), {}
-                    )
-                    self.log(
-                        f"  {agent_name.title()} complete: score={result['score']}, {len(result.get('issues', []))} issues, {result['duration']:.2f}s",
-                        "success",
-                    )
-                    if exit_rules and self._should_early_exit(result, exit_rules):
-                        self.log("  Early exit triggered after Stage 2", "warning")
-                        early_exit_triggered = True
-                        break
-
-        if stage3_agents and not early_exit_triggered:
-            for agent_name, agent, exit_rules in stage3_agents:
-                self.log(f"  Running {agent_name} agent...", "info")
-                if not screenshot_base64:
-                    screenshot_base64 = self._take_screenshot(lead["website"])
-                result = agent.execute(
-                    url=lead["website"],
-                    business_name=lead["business_name"],
-                    bucket=lead.get("bucket", "default"),
-                    html_content=html_content,
-                    soup=soup,
-                    response=response,
-                    screenshot_base64=screenshot_base64,
-                    previous_results=results,
-                )
+        self.log(f"  Running {len(audit_agents)} audit agents in parallel...", "info")
+        with ThreadPoolExecutor(max_workers=len(audit_agents)) as executor:
+            futures = {
+                executor.submit(
+                    self._run_agent_parallel,
+                    agent_name,
+                    agent,
+                    lead,
+                    html_content,
+                    soup,
+                    response,
+                    screenshot_base64,
+                    results,
+                ): (agent_name, exit_rules)
+                for agent_name, agent, exit_rules in audit_agents
+            }
+            for future in as_completed(futures):
+                agent_name, result = future.result()
+                _, exit_rules = futures[future]
                 results[agent_name] = result
                 agents_run.append(agent_name)
                 self.log(
                     f"  {agent_name.title()} complete: score={result['score']}, {len(result.get('issues', []))} issues, {result['duration']:.2f}s",
                     "success",
                 )
+                
+                if exit_rules:
+                    min_score = exit_rules.get("min_score", 0)
+                    if result["score"] < min_score:
+                        self.log(
+                            f"  ⚠ Early exit: {agent_name} score {result['score']} below threshold {min_score}",
+                            "warning",
+                        )
+                        break
+                    
+                    max_critical = exit_rules.get("max_critical_issues", -1)
+                    if max_critical >= 0:
+                        critical_issues = [
+                            i for i in result.get("issues", []) 
+                            if i.get("severity") == "critical"
+                        ]
+                        if len(critical_issues) > max_critical:
+                            self.log(
+                                f"  ⚠ Early exit: {len(critical_issues)} critical issues (max: {max_critical})",
+                                "warning",
+                            )
+                            break
 
         weights = self.audit_settings.get("agent_weights", {})
         final_score, all_issues = self._aggregate_results(results, weights)
-
-        discovered_info = {}
-        if "contact" in results:
-            discovered_info = results["contact"].get("metadata", {})
-            if discovered_info.get("email") or discovered_info.get("phone"):
-                update_lead_contact_info(lead["id"], discovered_info)
 
         qual_rules = self.audit_settings.get("qualification_rules", {})
         qualified = self._is_qualified(final_score, all_issues, qual_rules)
@@ -309,16 +276,35 @@ class AuditOrchestrator:
         with self.managed_session():
             return self.audit_leads(leads, progress_callback)
 
-    def _fetch_page(self, url: str):
-        """Fetch a URL using requests (fallback) or Playwright."""
+    def _fetch_page(self, url: str) -> tuple[str, BeautifulSoup, Any] | None:
+        """Fetch a URL using requests with Playwright fallback for JS-heavy sites.
+        
+        Args:
+            url: URL to fetch
+            
+        Returns:
+            Tuple of (html_content, soup, response) or None if fetch fails
+        """
         if not url.startswith("http"):
             url = f"https://{url}"
+        
         try:
-            resp = self._session.get(url, timeout=15, verify=False)
+            resp = self._session.get(url, timeout=15)
             if resp.status_code == 200:
                 return resp.text, BeautifulSoup(resp.text, "html.parser"), resp
         except Exception as e:
-            self.log(f"Fetch error: {e}", "warning")
+            self.log(f"  Requests failed, trying Playwright: {e}", "warning")
+        
+        if self._context:
+            try:
+                page = self._context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                html = page.content()
+                page.close()
+                return html, BeautifulSoup(html, "html.parser"), None
+            except Exception as e:
+                self.log(f"  Playwright fetch failed: {e}", "error")
+        
         return None
 
     def _take_screenshot(self, url: str) -> str | None:
@@ -361,29 +347,6 @@ class AuditOrchestrator:
         )
         return agent_name, result
 
-    def _should_early_exit(self, result: AgentResult, exit_rules: dict) -> bool:
-        """Check if agent result triggers early exit."""
-        min_score = exit_rules.get("min_score", 0)
-        if result["score"] < min_score:
-            self.log(
-                f"  Early exit: {result['agent_name']} score {result['score']} below threshold {min_score}",
-                "warning",
-            )
-            return True
-
-        critical_count = exit_rules.get("max_critical_issues", -1)
-        if critical_count >= 0:
-            critical_issues = [
-                i for i in result.get("issues", []) if i.get("severity") == "critical"
-            ]
-            if len(critical_issues) > critical_count:
-                self.log(
-                    f"  Early exit: {len(critical_issues)} critical issues (max: {critical_count})",
-                    "warning",
-                )
-                return True
-        return False
-
     def _aggregate_results(
         self, results: dict[str, AgentResult], weights: dict[str, float]
     ) -> tuple[int, list[dict[str, Any]]]:
@@ -422,7 +385,7 @@ class AuditOrchestrator:
         """Create agent instances with bucket-specific config."""
         agents = []
         execution_order = self.agent_configs.get(
-            "execution_order", ["technical", "contact", "content", "business", "visual"]
+            "execution_order", ["content", "business", "visual"]
         )
 
         for agent_name in execution_order:

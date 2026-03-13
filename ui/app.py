@@ -165,7 +165,6 @@ class WebContractorTUI(App):
         timestamp = datetime.now().strftime("%H:%M:%S")
         full_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Determine log level for file output
         if style == "error":
             level = "ERROR"
         elif style == "success":
@@ -175,7 +174,6 @@ class WebContractorTUI(App):
         else:
             level = "INFO"
 
-        # Console output
         if style == "success":
             print(f"\033[92m[{timestamp}] ✓ {message}\033[0m", file=sys.stderr)
         elif style == "error":
@@ -185,7 +183,6 @@ class WebContractorTUI(App):
         else:
             print(f"[{timestamp}] {message}", file=sys.stderr)
 
-        # File output
         log_file_path = "logs.txt"
         try:
             with open(log_file_path, "a") as f:
@@ -193,7 +190,6 @@ class WebContractorTUI(App):
         except Exception as e:
             print(f"Log file write error: {e}", file=sys.stderr)
 
-        # UI output
         try:
             log_widget = self.query_one("#activity-log", RichLog)
             if style == "success":
