@@ -54,18 +54,16 @@
     "enabled": true,
     "model": "llama-3.1-8b-instant",
     "timeout": 30,
-    "cold_email": {
-      "system_message": "Write a personalized B2B cold email. Use [SUBJECT] and [BODY] tags. Use line breaks between paragraphs. No placeholders.",
-      "prompt_template": "Generate a short cold email for {business_name}.\n\nAudit Results:\n{issue_summary}\n\nEmail must:\n1. Mention 1 specific site detail.\n2. Mention 1-2 critical issues (design, speed, or mobile).\n3. Explain the business impact (lost sales).\n4. Offer a quick audit/call.\n5. Max 120 words, no placeholders, no signature.\n\nFormat your response EXACTLY like this:\n[SUBJECT]Your subject line here[/SUBJECT]\n[BODY]\nDear [Business],\n\nYour email body here.\n\nUse blank lines between paragraphs.\n\nBest regards[/BODY]",
-      "variations": {
-        "quick": {
-          "system_message": "Write a concise B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
-          "prompt_template": "Write a SHORT email (max 80 words) for {business_name}.\n\nIssues:\n{issue_summary}\n\nEmail should:\n- Lead with a specific site issue.\n- Mention one benefit.\n- Quick CTA.\n- No placeholders.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
-        },
-        "detailed": {
-          "system_message": "Write a detailed B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
-          "prompt_template": "Write a detailed email (max 200 words) for {business_name}.\n\nAudit:\n{issue_summary}\n\nStructure:\n1. Personal opener about their site.\n2. Explain 2-3 issues found.\n3. Business impact.\n4. Proposed solution.\n5. Soft CTA.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
-        }
+    "system_message": "Write a personalized B2B cold email. Use [SUBJECT] and [BODY] tags. Use line breaks between paragraphs. No placeholders.",
+    "prompt_template": "Generate a short cold email for {business_name}.\n\nAudit Results:\n{issue_summary}\n\nEmail must:\n1. Mention 1 specific site detail.\n2. Mention 1-2 critical issues (design, speed, or mobile).\n3. Explain the business impact (lost sales).\n4. Offer a quick audit/call.\n5. Max 120 words, no placeholders, no signature.\n\nFormat your response EXACTLY like this:\n[SUBJECT]Your subject line here[/SUBJECT]\n[BODY]\nDear [Business],\n\nYour email body here.\n\nUse blank lines between paragraphs.\n\nBest regards[/BODY]",
+    "variations": {
+      "quick": {
+        "system_message": "Write a concise B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
+        "prompt_template": "Write a SHORT email (max 80 words) for {business_name}.\n\nIssues:\n{issue_summary}\n\nEmail should:\n- Lead with a specific site issue.\n- Mention one benefit.\n- Quick CTA.\n- No placeholders.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
+      },
+      "detailed": {
+        "system_message": "Write a detailed B2B cold email. Use [SUBJECT] and [BODY] tags. No placeholders.",
+        "prompt_template": "Write a detailed email (max 200 words) for {business_name}.\n\nAudit:\n{issue_summary}\n\nStructure:\n1. Personal opener about their site.\n2. Explain 2-3 issues found.\n3. Business impact.\n4. Proposed solution.\n5. Soft CTA.\n\nFormat:\n[SUBJECT]subject[/SUBJECT]\n[BODY]body[/BODY]"
       }
     }
   }

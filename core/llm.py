@@ -37,14 +37,34 @@ DEFAULT_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "30"))
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+PROVIDERS = {
+    "groq": {
+        "api_key": GROQ_API_KEY,
+        "base_url": GROQ_BASE_URL,
+        "default_model": DEFAULT_MODEL,
+        "extra_headers": {},
+    },
+    "openrouter": {
+        "api_key": OPENROUTER_API_KEY,
+        "base_url": OPENROUTER_BASE_URL,
+        "default_model": FALLBACK_MODEL,
+        "extra_headers": {
+            "HTTP-Referer": "https://github.com/web-contractor",
+            "X-Title": "Web Contractor",
+        },
+    },
+}
+
 
 class LLMError(Exception):
     """Raised on LLM API failures"""
+
     pass
 
 
 class ProviderError(LLMError):
     """Raised when all providers fail"""
+
     pass
 
 
@@ -52,41 +72,140 @@ def get_session() -> requests.Session:
     """Get thread-local HTTP session"""
     if not hasattr(_local, "session"):
         _local.session = requests.Session()
-        _local.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        _local.session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36"
+            }
+        )
     return _local.session  # type: ignore[no-any-return]
 
 
 def is_available() -> bool:
     """Test if at least one LLM provider is available"""
-    if GROQ_API_KEY:
-        try:
-            session = get_session()
-            session.headers.update({"Authorization": f"Bearer {GROQ_API_KEY}"})
-            response = session.get(
-                f"{GROQ_BASE_URL}/models",
-                timeout=5
-            )
-            if response.status_code == 200:
-                return True
-        except requests.exceptions.RequestException:
-            pass
-
-    if OPENROUTER_API_KEY:
-        try:
-            session = get_session()
-            session.headers.update({"Authorization": f"Bearer {OPENROUTER_API_KEY}"})
-            response = session.get(
-                f"{OPENROUTER_BASE_URL}/models",
-                timeout=5
-            )
-            if response.status_code == 200:
-                return True
-        except requests.exceptions.RequestException:
-            pass
-
+    for name, config in PROVIDERS.items():
+        if config["api_key"]:
+            try:
+                session = get_session()
+                session.headers.update({"Authorization": f"Bearer {config['api_key']}"})
+                response = session.get(f"{config['base_url']}/models", timeout=5)
+                if response.status_code == 200:
+                    return True
+            except requests.exceptions.RequestException:
+                pass
     return False
+
+
+def _build_messages(
+    prompt: str | None,
+    system: str | None,
+    image_base64: str | None,
+) -> list[dict]:
+    """Build message list for API request."""
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": _compact_system(system)})
+
+    if image_base64 and prompt:
+        user_content = [
+            {"type": "text", "text": _compact_prompt(prompt)},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+            },
+        ]
+        messages.append({"role": "user", "content": user_content})
+    else:
+        messages.append({"role": "user", "content": prompt or ""})
+
+    return messages
+
+
+def _get_provider_headers(api_key: str, extra_headers: dict) -> dict:
+    """Build headers for provider API request."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    headers.update(extra_headers)
+    return headers
+
+
+def _handle_api_response(
+    response: requests.Response,
+    provider_name: str,
+    format_json: bool,
+) -> str:
+    """Handle API response and extract content."""
+    if response.status_code == 200:
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        if not content or content.strip() == "":
+            raise LLMError(f"Empty response from {provider_name}")
+
+        if format_json:
+            return _extract_json(content)
+        return content  # type: ignore[no-any-return]
+    elif response.status_code == 429:
+        raise LLMError(f"{provider_name} rate limit exceeded")
+    else:
+        raise LLMError(f"{provider_name} API error: {response.status_code}")
+
+
+def _generate_with_config(
+    model: str,
+    prompt: str | None,
+    system: str | None,
+    format_json: bool,
+    timeout: int,
+    image_base64: str | None,
+    provider_name: str,
+    api_key: str,
+    base_url: str,
+    extra_headers: dict,
+) -> str:
+    """Generate response using specified provider configuration."""
+    session = get_session()
+    session.headers.update(_get_provider_headers(api_key, extra_headers))
+
+    messages = _build_messages(prompt, system, image_base64)
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.1 if format_json else 0.3,
+        "max_tokens": 2048,
+    }
+
+    if format_json:
+        payload["response_format"] = {"type": "json_object"}
+
+    try:
+        response = session.post(
+            f"{base_url}/chat/completions",
+            json=payload,
+            timeout=timeout,
+        )
+        return _handle_api_response(response, provider_name, format_json)
+
+    except requests.exceptions.Timeout:
+        raise LLMError(f"{provider_name} request timeout")
+    except requests.exceptions.RequestException as e:
+        raise LLMError(f"{provider_name} connection error: {e}")
+
+
+def _get_provider_order(provider: str | None):
+    """Get ordered list of (provider_name, model) to try."""
+    primary = provider or DEFAULT_PROVIDER
+    primary_config = PROVIDERS[primary]
+    primary_model = primary_config["default_model"]
+
+    if primary_config["api_key"]:
+        yield (primary, primary_model)
+
+    for name, config in PROVIDERS.items():
+        if name != primary and config["api_key"]:
+            yield (name, config["default_model"])
 
 
 def generate(
@@ -98,7 +217,7 @@ def generate(
     provider: str | None = None,
     image_base64: str | None = None,
 ) -> str:
-    """Generate text from LLM with automatic provider fallback
+    """Generate text from LLM with automatic provider fallback.
 
     Args:
         model: Model name (default: from env config)
@@ -115,214 +234,34 @@ def generate(
     Raises:
         ProviderError: If all providers fail
     """
-    if provider is None:
-        provider = DEFAULT_PROVIDER
+    errors: list[str] = []
 
-    if model is None:
-        model = DEFAULT_MODEL if provider == "groq" else FALLBACK_MODEL
+    for provider_name, provider_model in _get_provider_order(provider):
+        config = PROVIDERS[provider_name]
+        use_model = model or provider_model
 
-    try:
-        if provider == "groq" and GROQ_API_KEY:
-            return _generate_groq(
-                model=model,
-                prompt=prompt,
-                system=system,
-                format_json=format_json,
-                timeout=timeout,
-                image_base64=image_base64,
-            )
-        elif provider == "openrouter" and OPENROUTER_API_KEY:
-            return _generate_openrouter(
-                model=model,
-                prompt=prompt,
-                system=system,
-                format_json=format_json,
-                timeout=timeout,
-                image_base64=image_base64,
-            )
-        else:
-            if provider == "groq" and OPENROUTER_API_KEY:
-                return _generate_openrouter(
-                    model=FALLBACK_MODEL,
-                    prompt=prompt,
-                    system=system,
-                    format_json=format_json,
-                    timeout=timeout,
-                    image_base64=image_base64,
-                )
-            elif provider == "openrouter" and GROQ_API_KEY:
-                return _generate_groq(
-                    model=DEFAULT_MODEL,
-                    prompt=prompt,
-                    system=system,
-                    format_json=format_json,
-                    timeout=timeout,
-                    image_base64=image_base64,
-                )
-    except LLMError:
-        pass
-
-    if provider == "groq" and OPENROUTER_API_KEY:
         try:
-            return _generate_openrouter(
-                model=FALLBACK_MODEL,
+            return _generate_with_config(
+                model=use_model,
                 prompt=prompt,
                 system=system,
                 format_json=format_json,
                 timeout=timeout,
                 image_base64=image_base64,
+                provider_name=provider_name,
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                extra_headers=config["extra_headers"],
             )
-        except LLMError:
-            pass
-    elif provider == "openrouter" and GROQ_API_KEY:
-        try:
-            return _generate_groq(
-                model=DEFAULT_MODEL,
-                prompt=prompt,
-                system=system,
-                format_json=format_json,
-                timeout=timeout,
-                image_base64=image_base64,
-            )
-        except LLMError:
-            pass
+        except LLMError as e:
+            errors.append(f"{provider_name}: {e}")
+            continue
 
     raise ProviderError(
-        f"All providers failed. Groq key: {'yes' if GROQ_API_KEY else 'no'}, "
+        f"All providers failed. Errors: {'; '.join(errors)}. "
+        f"Groq key: {'yes' if GROQ_API_KEY else 'no'}, "
         f"OpenRouter key: {'yes' if OPENROUTER_API_KEY else 'no'}"
     )
-
-
-def _generate_groq(
-    model: str,
-    prompt: str | None,
-    system: str | None,
-    format_json: bool,
-    timeout: int,
-    image_base64: str | None,
-) -> str:
-    """Generate using Groq API"""
-    session = get_session()
-    session.headers.update({
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    })
-
-    messages: list[dict] = []
-    if system:
-        messages.append({"role": "system", "content": _compact_system(system)})
-
-    if image_base64 and prompt:
-        user_content = [
-            {"type": "text", "text": _compact_prompt(prompt)},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
-        ]
-        messages.append({"role": "user", "content": user_content})
-    else:
-        messages.append({"role": "user", "content": prompt or ""})
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1 if format_json else 0.3,
-        "max_tokens": 2048,
-    }
-
-    if format_json:
-        payload["response_format"] = {"type": "json_object"}
-
-    try:
-        response = session.post(
-            f"{GROQ_BASE_URL}/chat/completions",
-            json=payload,
-            timeout=timeout,
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            if not content or content.strip() == "":
-                raise LLMError("Empty response from Groq")
-
-            if format_json:
-                return _extract_json(content)
-            return content  # type: ignore[no-any-return]
-        elif response.status_code == 429:
-            raise LLMError("Groq rate limit exceeded")
-        else:
-            raise LLMError(f"Groq API error: {response.status_code}")
-
-    except requests.exceptions.Timeout:
-        raise LLMError("Groq request timeout")
-    except requests.exceptions.RequestException as e:
-        raise LLMError(f"Groq connection error: {e}")
-
-
-def _generate_openrouter(
-    model: str,
-    prompt: str | None,
-    system: str | None,
-    format_json: bool,
-    timeout: int,
-    image_base64: str | None,
-) -> str:
-    """Generate using OpenRouter API"""
-    session = get_session()
-    session.headers.update({
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/web-contractor",
-        "X-Title": "Web Contractor",
-    })
-
-    messages: list[dict] = []
-    if system:
-        messages.append({"role": "system", "content": _compact_system(system)})
-
-    if image_base64 and prompt:
-        user_content = [
-            {"type": "text", "text": _compact_prompt(prompt)},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
-        ]
-        messages.append({"role": "user", "content": user_content})
-    else:
-        messages.append({"role": "user", "content": prompt or ""})
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1 if format_json else 0.3,
-        "max_tokens": 2048,
-    }
-
-    if format_json:
-        payload["response_format"] = {"type": "json_object"}
-
-    try:
-        response = session.post(
-            f"{OPENROUTER_BASE_URL}/chat/completions",
-            json=payload,
-            timeout=timeout,
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            if not content or content.strip() == "":
-                raise LLMError("Empty response from OpenRouter")
-
-            if format_json:
-                return _extract_json(content)
-            return content  # type: ignore[no-any-return]
-        elif response.status_code == 429:
-            raise LLMError("OpenRouter rate limit exceeded")
-        else:
-            raise LLMError(f"OpenRouter API error: {response.status_code}")
-
-    except requests.exceptions.Timeout:
-        raise LLMError("OpenRouter request timeout")
-    except requests.exceptions.RequestException as e:
-        raise LLMError(f"OpenRouter connection error: {e}")
 
 
 def generate_with_retry(
@@ -335,27 +274,30 @@ def generate_with_retry(
     provider: str | None = None,
     image_base64: str | None = None,
 ) -> str:
-    """Generate with retry logic (for email operations)
+    """Generate with retry logic (for email operations).
 
-    Retries with exponential backoff on transient failures.
+    Retries with exponential backoff on transient failures and
+    exponential timeout increase.
     """
     last_error = None
 
     for attempt in range(max_retries):
+        current_timeout = timeout * (2**attempt)
+
         try:
             return generate(
                 model=model,
                 prompt=prompt,
                 system=system,
                 format_json=format_json,
-                timeout=timeout,
+                timeout=current_timeout,
                 provider=provider,
                 image_base64=image_base64,
             )
         except LLMError as e:
             last_error = e
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  
+                wait_time = 2**attempt
                 time.sleep(wait_time)
 
     raise ProviderError(f"Failed after {max_retries} attempts: {last_error}")
@@ -377,7 +319,7 @@ def _extract_json(text: str) -> str:
 
 
 def _compact_prompt(prompt: str, max_length: int = 1500) -> str:
-    """Compact prompt for small models - truncate to essential info"""
+    """Compact prompt for small models - truncate to essential info."""
     if len(prompt) <= max_length:
         return prompt
 
@@ -392,14 +334,14 @@ def _compact_prompt(prompt: str, max_length: int = 1500) -> str:
 
 
 def _compact_system(system: str, max_length: int = 500) -> str:
-    """Compact system message for API calls"""
+    """Compact system message for API calls."""
     if len(system) <= max_length:
         return system
     return system[:max_length].strip()
 
 
 def get_provider_info() -> dict:
-    """Get current provider configuration"""
+    """Get current provider configuration."""
     return {
         "primary_provider": DEFAULT_PROVIDER,
         "groq_configured": bool(GROQ_API_KEY),

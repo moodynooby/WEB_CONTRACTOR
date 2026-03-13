@@ -5,7 +5,7 @@ Uses direct SMTP with context manager for efficient connection handling.
 Also contains EmailGenerator class for generating personalized cold emails
 for qualified leads based on their audit results.
 
-Also contains contact discovery functions for extracting email and phone 
+Also contains contact discovery functions for extracting email and phone
 information from websites.
 """
 
@@ -78,7 +78,9 @@ def find_emails_in_html(soup: BeautifulSoup, base_url: str) -> List[str]:
     return emails
 
 
-def find_contact_form_email(soup: BeautifulSoup, base_url: str) -> Tuple[Optional[str], Optional[str]]:
+def find_contact_form_email(
+    soup: BeautifulSoup, base_url: str
+) -> Tuple[Optional[str], Optional[str]]:
     """Extract email from contact form action URLs."""
     for form in soup.find_all("form"):
         action = form.get("action", "")
@@ -105,6 +107,7 @@ def find_contact_form_email(soup: BeautifulSoup, base_url: str) -> Tuple[Optiona
 
     return (None, None)
 
+
 def find_phone(soup: BeautifulSoup) -> Optional[str]:
     """Extract phone number from tel: links."""
     for link in soup.find_all("a", href=True):
@@ -115,9 +118,7 @@ def find_phone(soup: BeautifulSoup) -> Optional[str]:
 
 
 def discover_contact_info(html_content: str, base_url: str) -> Dict[str, Optional[str]]:
-    """Discover contact information from website HTML.
-    
-    """
+    """Discover contact information from website HTML."""
     soup = BeautifulSoup(html_content, "html.parser")
 
     emails = find_emails_in_html(soup, base_url)
@@ -254,7 +255,7 @@ class EmailGenerator:
                 business_name=lead["business_name"],
                 bucket=lead.get("bucket", "default"),
                 url=lead["website"],
-                issues=issues_text,
+                issue_summary=issues_text,
             )
 
             if angle:
