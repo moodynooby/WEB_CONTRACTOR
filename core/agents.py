@@ -23,6 +23,11 @@ from bs4 import BeautifulSoup, Tag
 from core import llm
 
 VERIFY_SSL = os.getenv("REQUESTS_VERIFY_SSL", "true").lower() != "false"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+DEFAULT_FETCH_TIMEOUT = 10
+DEFAULT_LLM_RETRIES = 2
+CONTENT_LENGTH_RETRY = [1000, 500, 200]
+LLM_TIMEOUT_RETRY = [30, 15, 10]
 
 
 class AgentResult(TypedDict, total=False):
@@ -79,50 +84,75 @@ class BaseAgent(ABC):
         agent_name = self.__class__.__name__.replace("Agent", "")
         self.logger(f"[{agent_name}] {message}", style)
 
-    def _fetch_url(
-        self, url: str
-    ) -> tuple[str, BeautifulSoup, requests.Response] | None:
-        """Fetch URL and return html, soup, response. Returns None on error."""
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = requests.get(url, headers=headers, timeout=10, verify=VERIFY_SSL)
-            return resp.text, BeautifulSoup(resp.text, "html.parser"), resp
-        except Exception as e:
-            self.log(f"Fetch failed: {e}", "error")
-            return None
+    def _retry_with_truncated_content(
+        self,
+        llm_config: dict,
+        business_name: str,
+        bucket: str,
+        text_content: str,
+        agent_type: str,
+    ) -> tuple[dict, list[dict[str, Any]], int]:
+        """Call LLM with retry logic using truncated content on failures.
 
-    def _normalize_severity(self, severity: str) -> str:
-        """Normalize severity to match DB constraints (critical/warning/info)."""
-        mapping = {
-            "critical": ["critical", "high", "error", "fatal"],
-            "warning": ["warning", "medium", "warn"],
-        }
-        s = str(severity).lower().strip()
-        for normalized, values in mapping.items():
-            if s in values:
-                return normalized
-        return "info"
+        Args:
+            llm_config: LLM configuration dict
+            business_name: Business name for prompt
+            bucket: Bucket/category name for prompt
+            text_content: Full text content to truncate
+            agent_type: Type identifier for logging ("Content" or "Business")
 
-    def _apply_issue_penalties(self, score: int, issues: list[dict[str, Any]]) -> int:
-        """Apply penalties to score based on found issues.
-
-        Ensures the final score reflects the severity of detected issues
-        even if the LLM provided a generous score.
+        Returns:
+            Tuple of (llm_result, issues, score). On failure, returns ({}, [], 50/70)
         """
-        if not issues:
-            return score
+        max_retries = DEFAULT_LLM_RETRIES
+        content_lengths = CONTENT_LENGTH_RETRY
 
-        penalty = 0
-        for issue in issues:
-            severity = issue.get("severity", "info")
-            if severity == "critical":
-                penalty += 35
-            elif severity == "warning":
-                penalty += 15
-            else:  
-                penalty += 5
+        for attempt in range(max_retries + 1):
+            current_content_len = content_lengths[min(attempt, len(content_lengths) - 1)]
 
-        return max(0, min(score, 100 - penalty))
+            prompt_retry = llm_config.get("prompt_template", "").format(
+                business_name=business_name,
+                bucket=bucket,
+                content=text_content[:current_content_len],
+            )
+
+            if attempt > 0:
+                self.log(
+                    f"  {agent_type} audit retry {attempt}/{max_retries} with {current_content_len} chars",
+                    "warning",
+                )
+
+            llm_result, error = self._call_llm_with_retry(
+                model=llm_config.get("model", "llama-3.1-8b-instant"),
+                prompt=prompt_retry,
+                system=llm_config.get("system_message", "Output ONLY valid JSON."),
+                format_json=True,
+                max_retries=1,
+            )
+
+            if error:
+                if attempt < max_retries:
+                    continue
+                self.log(f"{agent_type} LLM failed: {error.get('error')}", "error")
+                default_score = 50 if agent_type == "Content" else 70
+                return {}, [], default_score
+
+            score = llm_result.get(f"{agent_type.lower()}_score", 100)
+            issues = []
+            for obs in llm_result.get("observations", []):
+                issues.append(
+                    {
+                        "type": f"{agent_type.lower()}_{obs.get('type', 'observation')}",
+                        "severity": self._normalize_severity(
+                            obs.get("severity", "info")
+                        ),
+                        "description": f"{agent_type}: {obs.get('description')}",
+                        "remediation": obs.get("recommendation"),
+                    }
+                )
+            return llm_result, issues, score
+
+        return {}, [], 50
 
     def _call_llm_with_retry(
         self,
@@ -130,14 +160,14 @@ class BaseAgent(ABC):
         prompt: str,
         system: str,
         format_json: bool = True,
-        max_retries: int = 2,
+        max_retries: int = DEFAULT_LLM_RETRIES,
     ) -> tuple[dict, dict]:
         """Call LLM with retry logic for timeouts/invalid JSON.
 
         Returns:
             Tuple of (result_dict, error_dict). If successful, error_dict is empty.
         """
-        timeouts = [self.timeout, 15, 10]
+        timeouts = LLM_TIMEOUT_RETRY
 
         for attempt in range(max_retries + 1):
             try:
@@ -174,6 +204,39 @@ class BaseAgent(ABC):
 
         return {}, {"error": "max_retries_exceeded"}
 
+    def _normalize_severity(self, severity: str) -> str:
+        """Normalize severity to match DB constraints (critical/warning/info)."""
+        mapping = {
+            "critical": ["critical", "high", "error", "fatal"],
+            "warning": ["warning", "medium", "warn"],
+        }
+        s = str(severity).lower().strip()
+        for normalized, values in mapping.items():
+            if s in values:
+                return normalized
+        return "info"
+
+    def _apply_issue_penalties(self, score: int, issues: list[dict[str, Any]]) -> int:
+        """Apply penalties to score based on found issues.
+
+        Ensures the final score reflects the severity of detected issues
+        even if the LLM provided a generous score.
+        """
+        if not issues:
+            return score
+
+        penalty = 0
+        for issue in issues:
+            severity = issue.get("severity", "info")
+            if severity == "critical":
+                penalty += 35
+            elif severity == "warning":
+                penalty += 15
+            else:  
+                penalty += 5
+
+        return max(0, min(score, 100 - penalty))
+
 
 class ContentAgent(BaseAgent):
     """Content audit agent: Copy quality, CTAs, value proposition.
@@ -186,6 +249,12 @@ class ContentAgent(BaseAgent):
         config: dict,
         logger: Callable[[str, str], None] | None = None,
     ) -> None:
+        """Initialize ContentAgent.
+
+        Args:
+            config: Agent configuration dict
+            logger: Optional logging function
+        """
         super().__init__(config, logger)
         self.llm_config = config
         self.llm_enabled = llm.is_available()
@@ -197,8 +266,19 @@ class ContentAgent(BaseAgent):
         bucket: str,
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
-        response: requests.Response | None = None,
     ) -> AgentResult:
+        """Execute content audit.
+
+        Args:
+            url: Website URL
+            business_name: Business name
+            bucket: Bucket/category name
+            html_content: Raw HTML (required)
+            soup: Parsed BeautifulSoup object (optional)
+
+        Returns:
+            AgentResult with score, issues, duration, and metadata
+        """
         start_time = time.time()
         issues: list[dict[str, Any]] = []
         score = 100
@@ -213,81 +293,36 @@ class ContentAgent(BaseAgent):
             )
 
         if not html_content:
-            fetched = self._fetch_url(url)
-            if fetched is None:
-                return AgentResult(
-                    score=0,
-                    issues=[
-                        {
-                            "type": "error",
-                            "severity": "critical",
-                            "description": "Fetch failed",
-                        }
-                    ],
-                    duration=time.time() - start_time,
-                    agent_name="Content",
-                    metadata={"error": "fetch_failed"},
-                )
-            html_content, soup, _ = fetched
+            self.log("HTML content required but not provided", "error")
+            return AgentResult(
+                score=0,
+                issues=[
+                    {
+                        "type": "error",
+                        "severity": "critical",
+                        "description": "HTML content not provided",
+                    }
+                ],
+                duration=time.time() - start_time,
+                agent_name="Content",
+                metadata={"error": "missing_html_content"},
+            )
 
         soup_obj = BeautifulSoup(html_content, "html.parser")
         for elem in soup_obj(["script", "style", "meta", "link"]):
             elem.decompose()
         text_content = soup_obj.get_text(separator=" ", strip=True)[:2000]
 
-        system_message = self.llm_config.get(
-            "system_message",
-            "You are a professional content auditor. Output ONLY valid JSON.",
+        llm_result, llm_issues, llm_score = self._retry_with_truncated_content(
+            llm_config=self.llm_config,
+            business_name=business_name,
+            bucket=bucket,
+            text_content=text_content,
+            agent_type="Content",
         )
 
-        max_retries = 2
-        content_lengths = [1000, 500, 200]
-
-        for attempt in range(max_retries + 1):
-            current_content_len = content_lengths[
-                min(attempt, len(content_lengths) - 1)
-            ]
-
-            prompt_retry = self.llm_config.get("prompt_template", "").format(
-                business_name=business_name,
-                bucket=bucket,
-                content=text_content[:current_content_len],
-            )
-
-            if attempt > 0:
-                self.log(
-                    f"  Content audit retry {attempt}/{max_retries} with {current_content_len} chars",
-                    "warning",
-                )
-
-            llm_result, error = self._call_llm_with_retry(
-                model=self.llm_config.get("model", "llama-3.1-8b-instant"),
-                prompt=prompt_retry,
-                system=system_message,
-                format_json=True,
-                max_retries=1,
-            )
-
-            if error:
-                if attempt < max_retries:
-                    continue
-                self.log(f"Content LLM failed: {error.get('error')}", "error")
-                score = 50  
-                break
-
-            score = llm_result.get("content_score", 100)
-            for obs in llm_result.get("observations", []):
-                issues.append(
-                    {
-                        "type": f"content_{obs.get('type', 'observation')}",
-                        "severity": self._normalize_severity(
-                            obs.get("severity", "info")
-                        ),
-                        "description": f"Content: {obs.get('description')}",
-                        "remediation": obs.get("recommendation"),
-                    }
-                )
-            break
+        score = llm_score
+        issues.extend(llm_issues)
 
         return AgentResult(
             score=self._apply_issue_penalties(score, issues),
@@ -310,6 +345,12 @@ class BusinessAgent(BaseAgent):
         config: dict,
         logger: Callable[[str, str], None] | None = None,
     ) -> None:
+        """Initialize BusinessAgent.
+
+        Args:
+            config: Agent configuration dict
+            logger: Optional logging function
+        """
         super().__init__(config, logger)
         self.bucket_overrides = config.get("bucket_overrides", {})
         self.llm_enabled = llm.is_available()
@@ -321,29 +362,38 @@ class BusinessAgent(BaseAgent):
         bucket: str,
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
-        response: requests.Response | None = None,
     ) -> AgentResult:
+        """Execute business audit.
+
+        Args:
+            url: Website URL
+            business_name: Business name
+            bucket: Bucket/category name
+            html_content: Raw HTML (required)
+            soup: Parsed BeautifulSoup object (required for bucket checks)
+
+        Returns:
+            AgentResult with score, issues, duration, and metadata
+        """
         start_time = time.time()
         issues: list[dict[str, Any]] = []
         score = 100
 
         if not html_content or not soup:
-            fetched = self._fetch_url(url)
-            if fetched is None:
-                return AgentResult(
-                    score=0,
-                    issues=[
-                        {
-                            "type": "error",
-                            "severity": "critical",
-                            "description": "Fetch failed",
-                        }
-                    ],
-                    duration=time.time() - start_time,
-                    agent_name="Business",
-                    metadata={"error": "fetch_failed"},
-                )
-            html_content, soup, _ = fetched
+            self.log("HTML content and soup required but not provided", "error")
+            return AgentResult(
+                score=0,
+                issues=[
+                    {
+                        "type": "error",
+                        "severity": "critical",
+                        "description": "HTML content not provided",
+                    }
+                ],
+                duration=time.time() - start_time,
+                agent_name="Business",
+                metadata={"error": "missing_html_content"},
+            )
 
         bucket_checks = self.bucket_overrides.get(bucket, [])
 
@@ -389,56 +439,16 @@ class BusinessAgent(BaseAgent):
             llm_config = self.config["llm_business_audit"]
             text_content = soup.get_text(separator=" ", strip=True)[:1000]
 
-            max_retries = 2
-            content_lengths = [1000, 500, 200]
+            llm_result, llm_issues, llm_score = self._retry_with_truncated_content(
+                llm_config=llm_config,
+                business_name=business_name,
+                bucket=bucket,
+                text_content=text_content,
+                agent_type="Business",
+            )
 
-            for attempt in range(max_retries + 1):
-                current_content_len = content_lengths[
-                    min(attempt, len(content_lengths) - 1)
-                ]
-
-                prompt_retry = llm_config.get("prompt_template", "").format(
-                    business_name=business_name,
-                    bucket=bucket,
-                    content=text_content[:current_content_len],
-                )
-
-                if attempt > 0:
-                    self.log(
-                        f"  Business audit retry {attempt}/{max_retries} with {current_content_len} chars",
-                        "warning",
-                    )
-
-                llm_result, error = self._call_llm_with_retry(
-                    model=llm_config.get("model", "llama-3.1-8b-instant"),
-                    prompt=prompt_retry,
-                    system=llm_config.get("system_message", "Output ONLY valid JSON."),
-                    format_json=True,
-                    max_retries=1,
-                )
-
-                if error:
-                    if attempt < max_retries:
-                        continue
-                    self.log(f"Business LLM failed: {error.get('error')}", "error")
-                    score = min(score, 70)  
-                    break
-
-                if "business_score" in llm_result:
-                    score = min(score, llm_result["business_score"])
-
-                for obs in llm_result.get("observations", []):
-                    issues.append(
-                        {
-                            "type": f"business_{obs.get('type', 'observation')}",
-                            "severity": self._normalize_severity(
-                                obs.get("severity", "info")
-                            ),
-                            "description": f"Business: {obs.get('description')}",
-                            "remediation": obs.get("recommendation"),
-                        }
-                    )
-                break
+            score = min(score, llm_score)
+            issues.extend(llm_issues)
 
         return AgentResult(
             score=self._apply_issue_penalties(score, issues),
@@ -461,18 +471,31 @@ class TechnicalAgent(BaseAgent):
         config: dict,
         logger: Callable[[str, str], None] | None = None,
     ) -> None:
+        """Initialize TechnicalAgent.
+
+        Args:
+            config: Agent configuration dict
+            logger: Optional logging function
+        """
         super().__init__(config, logger)
         self.checks = config.get("checks", {})
 
     def execute(
         self,
         url: str,
-        business_name: str,
-        bucket: str,
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
-        response: requests.Response | None = None,
     ) -> AgentResult:
+        """Execute technical SEO audit.
+
+        Args:
+            url: Website URL
+            html_content: Raw HTML (required)
+            soup: Parsed BeautifulSoup object (required)
+
+        Returns:
+            AgentResult with score, issues, duration, and metadata
+        """
         start_time = time.time()
         issues: list[dict[str, Any]] = []
         score = 100
@@ -487,22 +510,20 @@ class TechnicalAgent(BaseAgent):
             )
 
         if not html_content or not soup:
-            fetched = self._fetch_url(url)
-            if fetched is None:
-                return AgentResult(
-                    score=0,
-                    issues=[
-                        {
-                            "type": "error",
-                            "severity": "critical",
-                            "description": "Fetch failed",
-                        }
-                    ],
-                    duration=time.time() - start_time,
-                    agent_name="Technical",
-                    metadata={"error": "fetch_failed"},
-                )
-            html_content, soup, _ = fetched
+            self.log("HTML content and soup required but not provided", "error")
+            return AgentResult(
+                score=0,
+                issues=[
+                    {
+                        "type": "error",
+                        "severity": "critical",
+                        "description": "HTML content not provided",
+                    }
+                ],
+                duration=time.time() - start_time,
+                agent_name="Technical",
+                metadata={"error": "missing_html_content"},
+            )
 
         title = soup.find("title")
         if not title or not title.get_text(strip=True):
@@ -527,11 +548,9 @@ class TechnicalAgent(BaseAgent):
             score -= self.checks.get("title_long_penalty", 5)
 
         meta_desc = soup.find("meta", attrs={"name": "description"})
-        meta_desc_content = ""
-        if isinstance(meta_desc, Tag):
-            meta_desc_content = meta_desc.get("content", "") or ""
-        
-        if not isinstance(meta_desc, Tag) or not (isinstance(meta_desc_content, str) and meta_desc_content.strip()):
+        meta_desc_content = str(meta_desc.get("content", "") or "") if isinstance(meta_desc, Tag) else ""
+
+        if not isinstance(meta_desc, Tag) or not meta_desc_content.strip():
             issues.append(
                 {
                     "type": "seo_description_missing",
@@ -541,7 +560,7 @@ class TechnicalAgent(BaseAgent):
                 }
             )
             score -= self.checks.get("description_missing_penalty", 15)
-        elif isinstance(meta_desc_content, str) and len(meta_desc_content) > 160:
+        elif len(meta_desc_content) > 160:
             issues.append(
                 {
                     "type": "seo_description_too_long",
@@ -618,7 +637,6 @@ class TechnicalAgent(BaseAgent):
 
         if self.checks.get("check_robots_txt", True):
             try:
-
                 parsed = urllib.parse.urlparse(url)
                 robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
                 robots_resp = requests.get(robots_url, timeout=5, verify=VERIFY_SSL)
@@ -632,8 +650,8 @@ class TechnicalAgent(BaseAgent):
                         }
                     )
                     score -= self.checks.get("robots_txt_missing_penalty", 5)
-            except Exception:
-                pass  
+            except Exception as e:
+                self.log(f"robots.txt check failed: {e}", "warning")  
 
         h1_tags = soup.find_all("h1")
         if not h1_tags:
@@ -714,18 +732,33 @@ class PerformanceAgent(BaseAgent):
         config: dict,
         logger: Callable[[str, str], None] | None = None,
     ) -> None:
+        """Initialize PerformanceAgent.
+
+        Args:
+            config: Agent configuration dict
+            logger: Optional logging function
+        """
         super().__init__(config, logger)
         self.thresholds = config.get("thresholds", {})
 
     def execute(
         self,
         url: str,
-        business_name: str,
-        bucket: str,
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
         response: requests.Response | None = None,
     ) -> AgentResult:
+        """Execute performance audit.
+
+        Args:
+            url: Website URL
+            html_content: Raw HTML (required)
+            soup: Parsed BeautifulSoup object (required)
+            response: HTTP response object (optional, used for response time check)
+
+        Returns:
+            AgentResult with score, issues, duration, and metadata
+        """
         start_time = time.time()
         issues: list[dict[str, Any]] = []
         score = 100
@@ -740,22 +773,20 @@ class PerformanceAgent(BaseAgent):
             )
 
         if not html_content or not soup:
-            fetched = self._fetch_url(url)
-            if fetched is None:
-                return AgentResult(
-                    score=0,
-                    issues=[
-                        {
-                            "type": "error",
-                            "severity": "critical",
-                            "description": "Fetch failed",
-                        }
-                    ],
-                    duration=time.time() - start_time,
-                    agent_name="Performance",
-                    metadata={"error": "fetch_failed"},
-                )
-            html_content, soup, _ = fetched
+            self.log("HTML content and soup required but not provided", "error")
+            return AgentResult(
+                score=0,
+                issues=[
+                    {
+                        "type": "error",
+                        "severity": "critical",
+                        "description": "HTML content not provided",
+                    }
+                ],
+                duration=time.time() - start_time,
+                agent_name="Performance",
+                metadata={"error": "missing_html_content"},
+            )
 
         html_size = len(html_content.encode("utf-8"))
         max_html_size = self.thresholds.get("max_html_size_kb", 100) * 1024

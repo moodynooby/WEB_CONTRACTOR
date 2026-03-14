@@ -16,6 +16,10 @@ dependencies = [
     "groq>=0.4.0",
     "email-scraper>=0.6",
     "mailscout>=0.1.1",
+    "mkdocs>=1.6.1",
+    "mkdocstrings[python]>=1.0.3",
+    "mkdocs-material>=9.7.5",
+    "mkdocs-api-autonav>=0.4.0",
 ]
 
 [dependency-groups]
@@ -30,22 +34,4 @@ dev = [
     "types-beautifulsoup4>=4.12.0.20250516",
 ]
 
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
 
-[[tool.mypy.overrides]]
-module = "core.db_peewee"
-disable_error_code = ["attr-defined", "arg-type", "assignment"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-
-[project.scripts]
-lint = "uv run ruff check --fix . && uv run uncomment . && uv run mypy ."
-run = "uv run python main.py"

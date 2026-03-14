@@ -1,0 +1,16 @@
+site_name: Web Contracter
+docs_dir: docs       
+site_dir: docs_public      
+theme:
+  name: material   
+
+plugins:
+  - search
+  - api-autonav:
+      modules: ["core", "ui"]
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google  
+            show_source: true

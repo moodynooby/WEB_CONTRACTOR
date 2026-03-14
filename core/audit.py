@@ -24,6 +24,7 @@ from core.agents import (
     AgentResult,
     BaseAgent,
     get_agent,
+    DEFAULT_USER_AGENT,
 )
 from core.db_repository import (
     get_pending_audits,
@@ -65,11 +66,7 @@ class AuditOrchestrator:
     def managed_session(self):
         """Context manager for shared HTTP session."""
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-        )
+        self._session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
         yield self
 
     def audit_lead(self, lead: dict) -> dict[str, Any]:
@@ -130,9 +127,7 @@ class AuditOrchestrator:
         agents_run = []
         all_agents = self._create_agents_for_bucket(lead.get("bucket", "default"))
 
-        audit_agents = [(n, a, e) for n, a, e in all_agents]
-
-        if not audit_agents:
+        if not all_agents:
             return {
                 "lead_id": lead["id"],
                 "url": lead["website"],
@@ -144,8 +139,8 @@ class AuditOrchestrator:
                 "agents_run": agents_run,
             }
 
-        self.log(f"  Running {len(audit_agents)} audit agents in parallel...", "info")
-        with ThreadPoolExecutor(max_workers=len(audit_agents)) as executor:
+        self.log(f"  Running {len(all_agents)} audit agents in parallel...", "info")
+        with ThreadPoolExecutor(max_workers=len(all_agents)) as executor:
             futures = {
                 executor.submit(
                     self._run_agent_parallel,
@@ -157,7 +152,7 @@ class AuditOrchestrator:
                     response,
                     results,
                 ): (agent_name, exit_rules)
-                for agent_name, agent, exit_rules in audit_agents
+                for agent_name, agent, exit_rules in all_agents
             }
             for future in as_completed(futures):
                 agent_name, result = future.result()
@@ -168,7 +163,7 @@ class AuditOrchestrator:
                     f"  {agent_name.title()} complete: score={result['score']}, {len(result.get('issues', []))} issues, {result['duration']:.2f}s",
                     "success",
                 )
-                
+
                 if exit_rules:
                     min_score = exit_rules.get("min_score", 0)
                     if result["score"] < min_score:
@@ -177,11 +172,11 @@ class AuditOrchestrator:
                             "warning",
                         )
                         break
-                    
+
                     max_critical = exit_rules.get("max_critical_issues", -1)
                     if max_critical >= 0:
                         critical_issues = [
-                            i for i in result.get("issues", []) 
+                            i for i in result.get("issues", [])
                             if i.get("severity") == "critical"
                         ]
                         if len(critical_issues) > max_critical:
@@ -191,11 +186,12 @@ class AuditOrchestrator:
                             )
                             break
 
-        weights = self.audit_settings.get("agent_weights", {})
-        final_score, all_issues = self._aggregate_results(results, weights)
-
-        qual_rules = self.audit_settings.get("qualification_rules", {})
-        qualified = self._is_qualified(final_score, all_issues, qual_rules)
+        final_score, all_issues = self._aggregate_results(
+            results, self.audit_settings.get("agent_weights", {})
+        )
+        qualified = self._is_qualified(
+            final_score, all_issues, self.audit_settings.get("qualification_rules", {})
+        )
 
         duration = time.time() - start_time
         self.log(
@@ -299,14 +295,22 @@ class AuditOrchestrator:
         results,
     ):
         """Run agent in parallel context."""
-        result = agent.execute(
-            url=lead["website"],
-            business_name=lead["business_name"],
-            bucket=lead.get("bucket", "default"),
-            html_content=html_content,
-            soup=soup,
-            response=response,
-        )
+        agent_type = type(agent).__name__
+        if agent_type in ("TechnicalAgent", "PerformanceAgent"):
+            result = agent.execute(
+                url=lead["website"],
+                html_content=html_content,
+                soup=soup,
+                response=response if agent_type == "PerformanceAgent" else None,
+            )
+        else:
+            result = agent.execute(
+                url=lead["website"],
+                business_name=lead["business_name"],
+                bucket=lead.get("bucket", "default"),
+                html_content=html_content,
+                soup=soup,
+            )
         return agent_name, result
 
     def _aggregate_results(
