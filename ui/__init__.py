@@ -6,7 +6,6 @@ from ui.screens import (
     DatabaseScreen,
     ReviewScreen,
     RefineEmailModal,
-    MarketReviewScreen,
     QueryPerformanceScreen,
 )
 
@@ -16,6 +15,5 @@ __all__ = [
     "DatabaseScreen",
     "ReviewScreen",
     "RefineEmailModal",
-    "MarketReviewScreen",
     "QueryPerformanceScreen",
 ]

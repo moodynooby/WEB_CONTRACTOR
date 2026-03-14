@@ -2,6 +2,14 @@
 
 This module provides the AuditOrchestrator class which runs multi-agent
 audits on leads to evaluate their websites and determine qualification.
+
+Multi-Agent Pipeline:
+1. Content Agent (LLM copy analysis)
+2. Business Agent (industry checks)
+3. Technical Agent (SEO, meta tags, structured data)
+4. Performance Agent (page speed indicators)
+
+All agents run in parallel for maximum efficiency.
 """
 
 import time
@@ -11,7 +19,6 @@ from typing import Any, Callable
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 from core.email import discover_contact_info
 from core.agents import (
     AgentResult,
@@ -30,10 +37,12 @@ class AuditOrchestrator:
     Orchestrates multi-agent audit pipeline.
 
     Execution flow:
-    3. Content Agent (LLM copy analysis) → Optional based on config
-    4. Business Agent (industry checks) → Optional based on bucket
-    5. Visual Agent (VLM screenshot) → Only for high-value leads
+    1. Content Agent (LLM copy analysis)
+    2. Business Agent (industry checks)
+    3. Technical Agent (SEO, meta tags)
+    4. Performance Agent (speed indicators)
 
+    All agents run in parallel for maximum efficiency.
     Scores are weighted and aggregated for final qualification decision.
     """
 
@@ -46,8 +55,6 @@ class AuditOrchestrator:
         )
         self.audit_settings = load_json_config("audit_settings.json")
         self.agent_configs = self.audit_settings.get("agents", {})
-        self._browser = None
-        self._context = None
         self._session = None
 
     def log(self, message: str, style: str = "") -> None:
@@ -56,24 +63,14 @@ class AuditOrchestrator:
 
     @contextmanager
     def managed_session(self):
-        """Context manager for shared browser session and HTTP session."""
+        """Context manager for shared HTTP session."""
         self._session = requests.Session()
         self._session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
         )
-
-        with sync_playwright() as p:
-            try:
-                self._browser = p.chromium.launch(headless=True)
-                self._context = self._browser.new_context()
-                yield self
-            finally:
-                if self._context:
-                    self._context.close()
-                if self._browser:
-                    self._browser.close()
+        yield self
 
     def audit_lead(self, lead: dict) -> dict[str, Any]:
         """Audit single lead using multi-agent pipeline with PARALLEL execution.
@@ -134,11 +131,6 @@ class AuditOrchestrator:
         all_agents = self._create_agents_for_bucket(lead.get("bucket", "default"))
 
         audit_agents = [(n, a, e) for n, a, e in all_agents]
-        
-        screenshot_base64 = None
-        if any(n == "visual" for n, _, _ in audit_agents):
-            self.log("  Taking screenshot for Visual agent...", "info")
-            screenshot_base64 = self._take_screenshot(lead["website"])
 
         if not audit_agents:
             return {
@@ -163,7 +155,6 @@ class AuditOrchestrator:
                     html_content,
                     soup,
                     response,
-                    screenshot_base64,
                     results,
                 ): (agent_name, exit_rules)
                 for agent_name, agent, exit_rules in audit_agents
@@ -277,50 +268,24 @@ class AuditOrchestrator:
             return self.audit_leads(leads, progress_callback)
 
     def _fetch_page(self, url: str) -> tuple[str, BeautifulSoup, Any] | None:
-        """Fetch a URL using requests with Playwright fallback for JS-heavy sites.
-        
+        """Fetch a URL using requests.
+
         Args:
             url: URL to fetch
-            
+
         Returns:
             Tuple of (html_content, soup, response) or None if fetch fails
         """
         if not url.startswith("http"):
             url = f"https://{url}"
-        
+
         try:
             resp = self._session.get(url, timeout=15)
             if resp.status_code == 200:
                 return resp.text, BeautifulSoup(resp.text, "html.parser"), resp
         except Exception as e:
-            self.log(f"  Requests failed, trying Playwright: {e}", "warning")
-        
-        if self._context:
-            try:
-                page = self._context.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                html = page.content()
-                page.close()
-                return html, BeautifulSoup(html, "html.parser"), None
-            except Exception as e:
-                self.log(f"  Playwright fetch failed: {e}", "error")
-        
-        return None
+            self.log(f"  Requests failed: {e}", "warning")
 
-    def _take_screenshot(self, url: str) -> str | None:
-        """Take screenshot of URL using Playwright."""
-        if not self._context:
-            return None
-        try:
-            page = self._context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=10000)
-            screenshot = page.screenshot()
-            page.close()
-            import base64
-
-            return base64.b64encode(screenshot).decode()
-        except Exception as e:
-            self.log(f"Screenshot failed: {e}", "warning")
         return None
 
     def _run_agent_parallel(
@@ -331,7 +296,6 @@ class AuditOrchestrator:
         html_content,
         soup,
         response,
-        screenshot_base64,
         results,
     ):
         """Run agent in parallel context."""
@@ -342,8 +306,6 @@ class AuditOrchestrator:
             html_content=html_content,
             soup=soup,
             response=response,
-            screenshot_base64=screenshot_base64,
-            previous_results=results,
         )
         return agent_name, result
 
@@ -385,7 +347,7 @@ class AuditOrchestrator:
         """Create agent instances with bucket-specific config."""
         agents = []
         execution_order = self.agent_configs.get(
-            "execution_order", ["content", "business", "visual"]
+            "execution_order", ["content", "business"]
         )
 
         for agent_name in execution_order:

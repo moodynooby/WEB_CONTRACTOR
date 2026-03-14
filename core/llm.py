@@ -99,23 +99,12 @@ def is_available() -> bool:
 def _build_messages(
     prompt: str | None,
     system: str | None,
-    image_base64: str | None,
 ) -> list[dict]:
     """Build message list for API request."""
     messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": _compact_system(system)})
 
-    if image_base64 and prompt:
-        user_content = [
-            {"type": "text", "text": _compact_prompt(prompt)},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
-            },
-        ]
-        messages.append({"role": "user", "content": user_content})
-    else:
         messages.append({"role": "user", "content": prompt or ""})
 
     return messages
@@ -158,7 +147,6 @@ def _generate_with_config(
     system: str | None,
     format_json: bool,
     timeout: int,
-    image_base64: str | None,
     provider_name: str,
     api_key: str,
     base_url: str,
@@ -168,7 +156,7 @@ def _generate_with_config(
     session = get_session()
     session.headers.update(_get_provider_headers(api_key, extra_headers))
 
-    messages = _build_messages(prompt, system, image_base64)
+    messages = _build_messages(prompt, system)
 
     payload = {
         "model": model,
@@ -215,7 +203,6 @@ def generate(
     format_json: bool = False,
     timeout: int = DEFAULT_TIMEOUT,
     provider: str | None = None,
-    image_base64: str | None = None,
 ) -> str:
     """Generate text from LLM with automatic provider fallback.
 
@@ -226,7 +213,6 @@ def generate(
         format_json: If True, request JSON output
         timeout: Request timeout in seconds
         provider: Force specific provider ("groq" or "openrouter")
-        image_base64: Optional base64 image for vision models
 
     Returns:
         Raw response text from model
@@ -247,7 +233,6 @@ def generate(
                 system=system,
                 format_json=format_json,
                 timeout=timeout,
-                image_base64=image_base64,
                 provider_name=provider_name,
                 api_key=config["api_key"],
                 base_url=config["base_url"],
@@ -272,13 +257,14 @@ def generate_with_retry(
     max_retries: int = 3,
     timeout: int = DEFAULT_TIMEOUT,
     provider: str | None = None,
-    image_base64: str | None = None,
 ) -> str:
     """Generate with retry logic (for email operations).
 
     Retries with exponential backoff on transient failures and
-    exponential timeout increase.
+    exponential timeout increase. Rate limits get longer backoff.
     """
+    import random
+
     last_error = None
 
     for attempt in range(max_retries):
@@ -292,12 +278,14 @@ def generate_with_retry(
                 format_json=format_json,
                 timeout=current_timeout,
                 provider=provider,
-                image_base64=image_base64,
             )
         except LLMError as e:
             last_error = e
             if attempt < max_retries - 1:
-                wait_time = 2**attempt
+                is_rate_limit = "rate limit" in str(e).lower()
+                base_wait = 4 if is_rate_limit else 2
+                jitter = random.uniform(0, 1)
+                wait_time = (base_wait**attempt) + jitter
                 time.sleep(wait_time)
 
     raise ProviderError(f"Failed after {max_retries} attempts: {last_error}")

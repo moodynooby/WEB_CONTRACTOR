@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Page
 
+try:
+    from email_scraper import scrape_emails
+except ImportError:
+    scrape_emails = None
+
 
 class ScraperError(Exception):
     """Base exception for scraper errors."""
@@ -21,7 +26,11 @@ class SourceUnavailableError(ScraperError):
 
 
 class EmailExtractor:
-    """Utility class for extracting emails from text/HTML."""
+    """Utility class for extracting emails from text/HTML.
+
+    Uses email-scraper library for obfuscated email detection,
+    with regex fallback if library unavailable.
+    """
 
     EMAIL_PATTERN = re.compile(
         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE
@@ -29,14 +38,21 @@ class EmailExtractor:
 
     @classmethod
     def extract_from_text(cls, text: str) -> List[str]:
-        """Extract emails from plain text."""
+        """Extract emails from plain text using regex."""
         if not text:
             return []
         return list(set(cls.EMAIL_PATTERN.findall(text)))
 
     @classmethod
     def extract_from_html(cls, html: str) -> List[str]:
-        """Extract emails from HTML content."""
+        """Extract emails from HTML content using email-scraper."""
+        if not html:
+            return []
+
+        if scrape_emails is not None:
+            scraped = scrape_emails(html)
+            return list(scraped) if scraped else []
+
         return cls.extract_from_text(html)
 
     @classmethod
@@ -50,9 +66,9 @@ class PhoneExtractor:
     """Utility class for extracting phone numbers from text/HTML."""
 
     PHONE_PATTERNS = [
-        re.compile(r"\+?91[\s\-]?[6-9]\d{9}"),  
-        re.compile(r"\+?\d{1,3}[\s\-]?\d{6,12}"),  
-        re.compile(r"\(?\d{2,5}\)?[\s\-]?\d{4,8}"),  
+        re.compile(r"\+?91[\s\-]?[6-9]\d{9}"),
+        re.compile(r"\+?\d{1,3}[\s\-]?\d{6,12}"),
+        re.compile(r"\(?\d{2,5}\)?[\s\-]?\d{4,8}"),
     ]
 
     @classmethod

@@ -18,7 +18,6 @@ from ui.dashboard import DashboardManager
 from ui.screens import (
     DatabaseScreen,
     ReviewScreen,
-    MarketReviewScreen,
     QueryPerformanceScreen,
 )
 
@@ -273,9 +272,6 @@ class WebContractorTUI(App):
         """Navigate to performance screen."""
         self.push_screen(QueryPerformanceScreen())
 
-    def show_market_review(self, suggestions: list) -> None:
-        """Show market expansion suggestions."""
-        self.push_screen(MarketReviewScreen(suggestions))
 
     def get_system_commands(self, screen: Screen) -> list:
         """Get system commands for command palette."""
