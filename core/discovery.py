@@ -1,22 +1,15 @@
-"""Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)
-
-Efficient resource management with per-operation browser contexts:
-- Fresh browser context created for each scraping operation
-- Automatic cleanup on exit via context managers
-- HTTP session for API calls
-- Dynamic configuration from app_settings.json and database
-"""
+"""Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)"""
 
 import asyncio
 import json
-import random
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from playwright.sync_api import Page, sync_playwright
 
-from core.utils import load_json_config
+from core.settings import DEFAULT_USER_AGENT, load_json_section
+from core.logging import get_logger
 from core.db_repository import (
     get_all_buckets,
     get_bucket_id_by_name,
@@ -30,90 +23,57 @@ from core.db_repository import (
 from core.sources import get_all_enabled_sources
 
 
-def _load_app_settings() -> dict:
-    """Load application settings from config file."""
-    return load_json_config("app_settings.json")
+def _build_discovery_settings() -> dict[str, Any]:
+    """Merge relevant sections into one flat dict."""
+    cfg = load_json_section("scraper") or {}
+    limits = load_json_section("discovery_limits") or {}
+    sources = load_json_section("discovery_sources") or {}
+    anti = load_json_section("anti_detection") or {}
+    parallel = load_json_section("parallel") or {}
+    scoring = load_json_section("query_scoring") or {}
+    perf = load_json_section("query_performance") or {}
+    all_cfg = {**cfg, **limits, **sources, **anti, **parallel, **scoring, **perf}
+    from core.settings import STALE_QUERY_THRESHOLD, STALE_QUERY_CLEANUP_DAYS
+
+    all_cfg["stale_query_threshold"] = STALE_QUERY_THRESHOLD
+    all_cfg["stale_query_cleanup_days"] = STALE_QUERY_CLEANUP_DAYS
+    return all_cfg
 
 
 class PlaywrightScraper:
     """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
 
-    def __init__(
-        self,
-        logger: Callable | None = None,
-    ):
+    def __init__(self):
+        self.logger = get_logger(__name__)
         self.buckets = get_all_buckets()
-        self.logger = logger
-        self._settings = load_json_config("app_settings.json")
-
-    def _get_llm_settings(self) -> dict:
-        """Get LLM settings from config."""
-        defaults = {
-            "default_model": "gemma:2b-instruct-q4_0",
-            "expansion_model": "gemma:2b-instruct-q4_0",
-            "timeout_seconds": 30,
-            "max_retries": 2,
-        }
-        settings = self._settings.get("llm_settings", {})
-        return {**defaults, **settings}
-
-    def _get_discovery_limits(self) -> dict:
-        """Get discovery limits from config."""
-        defaults = {
-            "max_queries_per_run": 20,
-            "max_patterns_per_bucket": 3,
-            "max_cities_per_segment": 2,
-            "max_results_per_query": 5,
-            "max_leads_per_query": 2,
-        }
-        limits = self._settings.get("discovery_limits", {})
-        return {**defaults, **limits}
-
-    def _get_scraper_settings(self) -> dict:
-        """Get scraper settings from config."""
-        defaults = {
-            "headless": True,
-            "user_agents": [
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            ],
-            "page_load_timeout_ms": 5000,
-            "search_wait_timeout_ms": 10000,
-            "result_click_delay_ms": 2000,
-        }
-        settings = self._settings.get("scraper_settings", {})
-        return {**defaults, **settings}
-
-    def _get_random_user_agent(self) -> str:
-        """Get a random user agent from configured list."""
-        scraper_settings = self._get_scraper_settings()
-        user_agents = scraper_settings["user_agents"]
-        return str(random.choice(user_agents)) if user_agents else user_agents[0]
+        self._settings = _build_discovery_settings()
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message to provided logger or print"""
-        if self.logger:
-            self.logger(message, style)
+        """Log message with level awareness."""
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
         else:
-            print(message)
+            self.logger.debug(message)
 
     @contextmanager
     def managed_session(self):
-        """Context manager for scraping session - creates fresh browser context per operation
-
-        Always creates a new browser context for reliability and proper cleanup.
-        Sets up event loop for Playwright sync API when running in threads.
-        """
+        """Context manager for scraping session - creates fresh browser context per operation."""
         try:
             asyncio.get_event_loop()
         except RuntimeError:
             asyncio.set_event_loop(asyncio.new_event_loop())
 
-        scraper_settings = self._get_scraper_settings()
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=scraper_settings["headless"])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            browser = p.chromium.launch(
+                headless=self._settings.get("scraper_settings", {}).get(
+                    "headless", True
+                )
             )
+            context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
             self._context = context
 
             try:
@@ -147,12 +107,8 @@ class PlaywrightScraper:
             bucket_name: Optional bucket name to filter queries
             limit: Optional limit override. If None, uses config or bucket default.
         """
-        self.buckets = get_all_buckets()
-        limits = self._get_discovery_limits()
+        limit = limit or self._settings.get("max_queries_per_run", 500)
         stale_threshold = self._settings.get("stale_query_threshold", 3)
-
-        if limit is None:
-            limit = limits["max_queries_per_run"]
 
         queries: List[Dict[str, Any]] = []
         buckets = [
@@ -161,8 +117,7 @@ class PlaywrightScraper:
 
         buckets.sort(key=lambda b: b.get("priority", 1), reverse=True)
 
-        app_settings = load_json_config("app_settings.json")
-        geo_focus = app_settings.get("geographic_focus") or {}
+        geo_focus = load_json_section("geographic_focus")
 
         stale_query_set = set()
         for bucket in buckets:
@@ -176,7 +131,7 @@ class PlaywrightScraper:
 
         for bucket in buckets:
             bucket_max_queries = bucket.get(
-                "max_queries", limits["max_patterns_per_bucket"]
+                "max_queries", self._settings.get("max_patterns_per_bucket", 500)
             )
 
             search_patterns = bucket.get("search_patterns", [])
@@ -202,7 +157,7 @@ class PlaywrightScraper:
 
                 for seg_name in segments:
                     if seg_name in geo_focus:
-                        max_cities = limits["max_cities_per_segment"]
+                        max_cities = self._settings.get("max_cities_per_segment", 50)
                         cities.extend(
                             geo_focus[seg_name].get("cities", [])[:max_cities]
                         )
@@ -343,19 +298,14 @@ class PlaywrightScraper:
             progress_callback: Optional callback(current, total, message)
         """
         self.buckets = self._load_buckets()
-        limits = self._get_discovery_limits()
+        max_queries = max_queries or self._settings.get("max_queries_per_run", 500)
 
         cleanup_days = self._settings.get("stale_query_cleanup_days", 30)
         cleaned = cleanup_stale_queries(days_threshold=cleanup_days)
         if cleaned > 0:
             self.log(f"Cleaned up {cleaned} old stale queries", "info")
 
-        if max_queries is None:
-            max_queries = limits["max_queries_per_run"]
-
-        self.log(f"\n{'=' * 60}")
         self.log("DISCOVERY: Query Generation + Lead Scraping")
-        self.log(f"{'=' * 60}")
 
         queries = self.generate_queries(bucket_name, max_queries)
         self.log(f"Generated {len(queries)} search queries", "info")

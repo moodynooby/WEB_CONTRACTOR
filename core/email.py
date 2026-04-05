@@ -32,13 +32,24 @@ except ImportError:
 
 
 from core import llm
+from core.settings import (
+    DEFAULT_USER_AGENT,
+    EMAIL_SIGNATURE,
+    SMTP_SERVER,
+    SMTP_PORT,
+    GMAIL_EMAIL,
+    GMAIL_PASSWORD,
+    DEFAULT_MODEL,
+    EMAIL_MAX_RETRIES,
+    load_json_section,
+)
+from core.logging import get_logger
 from core.db_repository import (
     get_qualified_leads,
     mark_email_sent,
     save_emails_batch,
     update_lead_contact_info,
 )
-from core.utils import load_json_config
 
 
 def validate_email(email: str) -> Optional[str]:
@@ -199,13 +210,7 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
     try:
         import requests
 
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        }
+        headers = {"User-Agent": DEFAULT_USER_AGENT}
         response = requests.get(website_url, headers=headers, timeout=10)
         response.raise_for_status()
 
@@ -227,33 +232,26 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
 
 
 class EmailSender:
-    """SMTP Email Sender - simplified without connection pooling"""
+    """SMTP Email Sender."""
 
-    def __init__(
-        self,
-        logger: Callable | None = None,
-        smtp_server: str = "smtp.gmail.com",
-        smtp_port: int = 587,
-        email: str | None = None,
-        password: str | None = None,
-    ):
-        self.smtp_server = smtp_server
-        self.smtp_port = smtp_port
-        self.email = email or __import__("os").getenv("GMAIL_EMAIL")
-        self.password = password or __import__("os").getenv("GMAIL_PASSWORD")
-        self.logger = logger
-        self.email_signature = (
-            "\n\nBest regards,\n"
-            "Manas Doshi,\n"
-            "Future Forwards - https://man27.netlify.app/services"
-        )
+    def __init__(self) -> None:
+        self.logger = get_logger(__name__)
+        self.smtp_server = SMTP_SERVER
+        self.smtp_port = SMTP_PORT
+        self.email = GMAIL_EMAIL
+        self.password = GMAIL_PASSWORD
+        self.email_signature = EMAIL_SIGNATURE
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message to provided logger or print"""
-        if self.logger:
-            self.logger(message, style)
+        """Log message with level awareness."""
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
         else:
-            print(message)
+            self.logger.debug(message)
 
     def send_email(
         self, to_email: str, subject: str, body: str, campaign_id: int | None = None
@@ -285,27 +283,23 @@ class EmailSender:
 
 
 class EmailGenerator:
-    """
-    Generates personalized cold emails for qualified leads.
+    """Generates personalized cold emails for qualified leads."""
 
-    This is separate from the audit process - it takes already-audited
-    leads that have been marked as qualified and generates emails for them.
-    """
-
-    def __init__(
-        self,
-        logger: Callable[[str, str], None] | None = None,
-    ) -> None:
-        self.logger: Callable[[str, str], None] = logger or (
-            lambda msg, style: print(f"[{style}] {msg}")
-        )
-        self.audit_settings = load_json_config("audit_settings.json")
-        self.email_config = self.audit_settings.get("email_generation", {})
-        self.app_settings = load_json_config("app_settings.json")
+    def __init__(self) -> None:
+        self.logger = get_logger(__name__)
+        self.email_config = load_json_section("email_generation")
+        self.llm_config = load_json_section("llm")
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message with style."""
-        self.logger(message, style)
+        """Log message with level awareness."""
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
 
     def generate(
         self, limit: int = 20, progress_callback: Callable | None = None
@@ -403,11 +397,11 @@ class EmailGenerator:
             email_start = time.time()
             try:
                 raw = llm.generate_with_retry(
-                    model=self.email_config.get("model", "llama-3.1-8b-instant"),
+                    model=DEFAULT_MODEL,
                     prompt=prompt,
                     system=system_message,
                     format_json=True,
-                    max_retries=self.email_config.get("max_retries", 3),
+                    max_retries=EMAIL_MAX_RETRIES,
                     timeout=self.email_config.get("timeout", 30),
                 )
                 data = json.loads(raw)
@@ -467,7 +461,7 @@ class EmailGenerator:
         Returns:
             Dict with refined subject and body
         """
-        llm_settings = self.app_settings.get("llm_settings", {})
+        llm_settings = self.llm_config
 
         if not self.email_config.get("enabled", True):
             self.log("Email refinement disabled", "warning")

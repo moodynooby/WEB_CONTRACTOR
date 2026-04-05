@@ -24,43 +24,34 @@ from core.agents import (
     AgentResult,
     BaseAgent,
     get_agent,
-    DEFAULT_USER_AGENT,
 )
+from core.settings import DEFAULT_USER_AGENT, load_json_section
 from core.db_repository import (
     get_pending_audits,
     save_audits_batch,
 )
-from core.utils import load_json_config
+from core.logging import get_logger
 
 
 class AuditOrchestrator:
-    """
-    Orchestrates multi-agent audit pipeline.
+    """Orchestrates multi-agent audit pipeline."""
 
-    Execution flow:
-    1. Content Agent (LLM copy analysis)
-    2. Business Agent (industry checks)
-    3. Technical Agent (SEO, meta tags)
-    4. Performance Agent (speed indicators)
-
-    All agents run in parallel for maximum efficiency.
-    Scores are weighted and aggregated for final qualification decision.
-    """
-
-    def __init__(
-        self,
-        logger: Callable[[str, str], None] | None = None,
-    ) -> None:
-        self.logger: Callable[[str, str], None] = logger or (
-            lambda msg, style: print(f"[{style}] {msg}")
-        )
-        self.audit_settings = load_json_config("audit_settings.json")
-        self.agent_configs = self.audit_settings.get("agents", {})
+    def __init__(self) -> None:
+        self.logger = get_logger(__name__)
+        self.audit_settings = load_json_section("agents")
+        self.agent_configs = self.audit_settings
         self._session = None
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message with style."""
-        self.logger(message, style)
+        """Log message with level awareness."""
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
 
     @contextmanager
     def managed_session(self):
@@ -176,7 +167,8 @@ class AuditOrchestrator:
                     max_critical = exit_rules.get("max_critical_issues", -1)
                     if max_critical >= 0:
                         critical_issues = [
-                            i for i in result.get("issues", [])
+                            i
+                            for i in result.get("issues", [])
                             if i.get("severity") == "critical"
                         ]
                         if len(critical_issues) > max_critical:
@@ -187,10 +179,10 @@ class AuditOrchestrator:
                             break
 
         final_score, all_issues = self._aggregate_results(
-            results, self.audit_settings.get("agent_weights", {})
+            results, load_json_section("agents").get("weights", {})
         )
         qualified = self._is_qualified(
-            final_score, all_issues, self.audit_settings.get("qualification_rules", {})
+            final_score, all_issues, load_json_section("qualification")
         )
 
         duration = time.time() - start_time
@@ -296,12 +288,18 @@ class AuditOrchestrator:
     ):
         """Run agent in parallel context."""
         agent_type = type(agent).__name__
-        if agent_type in ("TechnicalAgent", "PerformanceAgent"):
+        if agent_type == "PerformanceAgent":
             result = agent.execute(
                 url=lead["website"],
                 html_content=html_content,
                 soup=soup,
-                response=response if agent_type == "PerformanceAgent" else None,
+                response=response,
+            )
+        elif agent_type == "TechnicalAgent":
+            result = agent.execute(
+                url=lead["website"],
+                html_content=html_content,
+                soup=soup,
             )
         else:
             result = agent.execute(
@@ -365,7 +363,7 @@ class AuditOrchestrator:
                 )
                 continue
 
-            agent = get_agent(agent_name, agent_config, logger=self.logger)
+            agent = get_agent(agent_name, agent_config)
             exit_rules = agent_config.get("early_exit_rules", {})
             agents.append((agent_name, agent, exit_rules))
 

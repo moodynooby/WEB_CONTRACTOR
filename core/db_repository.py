@@ -338,9 +338,11 @@ def get_emails_for_review(limit: int = 50) -> List[Dict[str, Any]]:
             "email": ec.lead.email,
             "subject": ec.subject,
             "body": ec.body,
+            "status": ec.status,
             "lead_id": ec.lead_id,
             "social_links": ec.lead.social_links or {},
             "contact_form_url": ec.lead.contact_form_url,
+            "duration": ec.duration,
         }
         for ec in query
     ]
@@ -357,7 +359,7 @@ def update_email_content(campaign_id: int, subject: str, body: str) -> None:
     EmailCampaign.update(
         subject=subject,
         body=body,
-        status="pending",
+        status="approved",
     ).where(EmailCampaign.id == campaign_id).execute()
 
 

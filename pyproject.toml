@@ -1,15 +1,14 @@
 [project]
 name = "web-contractor"
 version = "1"
-description = "Ultra-minimal lead generation and outreach automation with Textual TUI"
+description = "Ultra-minimal lead generation and outreach automation with Streamlit web UI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "textual>=0.47.0",
+    "streamlit>=1.28.0",
     "requests>=2.32.5",
     "playwright>=1.40.0",
     "python-dotenv>=1.2.1",
-    "click>=8.1.7",
     "beautifulsoup4>=4.12.0",
     "peewee>=4.0.1",
     "email-validator>=2.3.0",
@@ -23,16 +22,14 @@ dependencies = [
 ]
 
 [project.scripts]
-web-contractor = "cli:main"
-wc-discover = "cli:discover"
-wc-audit = "cli:audit"
+web-contractor = "main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "ui", "agent_contexts"]
+packages = ["core", "agent_contexts", "pages"]
 include = ["*.py"]
 
 [dependency-groups]

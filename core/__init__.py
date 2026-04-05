@@ -1,9 +1,19 @@
-"""Core business logic for Web Contractor."""
+"""Core business logic for Web Contractor.
 
-from core.audit import AuditOrchestrator
-from core.discovery import PlaywrightScraper
-from core.email import EmailSender, EmailGenerator
-from core.llm import (
+Single entry point for environment initialization.
+All modules should import from here to ensure dotenv is loaded first.
+"""
+
+from dotenv import load_dotenv
+load_dotenv()  # noqa: E402
+
+from core.settings import load_json_section  # noqa: E402
+from core.logging import get_logger, setup_root_logger  # noqa: E402
+
+from core.audit import AuditOrchestrator  # noqa: E402
+from core.discovery import PlaywrightScraper  # noqa: E402
+from core.email import EmailSender, EmailGenerator  # noqa: E402
+from core.llm import (  # noqa: E402
     is_available,
     generate,
     generate_with_retry,
@@ -11,15 +21,15 @@ from core.llm import (
     ProviderError,
     get_provider_info,
 )
-from core.app_core import WebContractorApp, Config
-from core.db_models import (
+from core.app_core import WebContractorApp  # noqa: E402
+from core.db_models import (  # noqa: E402
     db,
     Bucket,
     Lead,
     EmailCampaign,
     QueryPerformance,
 )
-from core.db_repository import (
+from core.db_repository import (  # noqa: E402
     init_db,
     close_db,
     save_bucket,
@@ -38,12 +48,12 @@ from core.db_repository import (
     mark_email_sent,
     cleanup_stale_queries,
 )
-from core.utils import load_json_config
 
 __all__ = [
-    "load_json_config",
+    "load_json_section",
+    "get_logger",
+    "setup_root_logger",
     "WebContractorApp",
-    "Config",
     "PlaywrightScraper",
     "EmailSender",
     "EmailGenerator",

@@ -1,6 +1,6 @@
 """Multi-Agent Audit System
 
-Specialized agents for different audit aspects, configured via audit_settings.json
+Specialized agents for different audit aspects, configured via config/app_config.json
 and executed sequentially with early exit.
 
 Agents:
@@ -9,21 +9,23 @@ Agents:
 - TechnicalAgent: SEO, meta tags, structured data (rule-based, <1s)
 - PerformanceAgent: Page speed indicators (rule-based, <1s)
 """
+
+import re
 import urllib.parse
 import json
-import os
-import re
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, TypedDict
+from typing import Any, TypedDict
 
 import requests
 from bs4 import BeautifulSoup, Tag
 
 from core import llm
+from core.settings import VERIFY_SSL
+from core.logging import get_logger
 
-VERIFY_SSL = os.getenv("REQUESTS_VERIFY_SSL", "true").lower() != "false"
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+logger = get_logger(__name__)
+
 DEFAULT_FETCH_TIMEOUT = 10
 DEFAULT_LLM_RETRIES = 2
 CONTENT_LENGTH_RETRY = [1000, 500, 200]
@@ -46,10 +48,9 @@ class BaseAgent(ABC):
     def __init__(
         self,
         config: dict,
-        logger: Callable[[str, str], None] | None = None,
     ) -> None:
         self.config = config
-        self.logger = logger or (lambda msg, style: print(f"[{style}] {msg}"))
+        self.logger = get_logger(self.__class__.__name__)
         self.enabled = config.get("enabled", True)
         self.weight = config.get("weight", 1.0)
         self.timeout = config.get("timeout", 30)
@@ -64,25 +65,19 @@ class BaseAgent(ABC):
         soup: BeautifulSoup | None = None,
         response: requests.Response | None = None,
     ) -> AgentResult:
-        """Execute the agent's audit logic.
-
-        Args:
-            url: Website URL
-            business_name: Business name
-            bucket: Bucket/category name
-            html_content: Raw HTML (optional, may be provided by orchestrator)
-            soup: Parsed BeautifulSoup object (optional)
-            response: HTTP response object (optional)
-
-        Returns:
-            AgentResult with score, issues, duration, and metadata
-        """
+        """Execute the agent's audit logic."""
         pass
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message with agent prefix."""
-        agent_name = self.__class__.__name__.replace("Agent", "")
-        self.logger(f"[{agent_name}] {message}", style)
+        """Log message with level awareness."""
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
 
     def _retry_with_truncated_content(
         self,
@@ -108,7 +103,9 @@ class BaseAgent(ABC):
         content_lengths = CONTENT_LENGTH_RETRY
 
         for attempt in range(max_retries + 1):
-            current_content_len = content_lengths[min(attempt, len(content_lengths) - 1)]
+            current_content_len = content_lengths[
+                min(attempt, len(content_lengths) - 1)
+            ]
 
             prompt_retry = llm_config.get("prompt_template", "").format(
                 business_name=business_name,
@@ -232,7 +229,7 @@ class BaseAgent(ABC):
                 penalty += 35
             elif severity == "warning":
                 penalty += 15
-            else:  
+            else:
                 penalty += 5
 
         return max(0, min(score, 100 - penalty))
@@ -247,15 +244,8 @@ class ContentAgent(BaseAgent):
     def __init__(
         self,
         config: dict,
-        logger: Callable[[str, str], None] | None = None,
     ) -> None:
-        """Initialize ContentAgent.
-
-        Args:
-            config: Agent configuration dict
-            logger: Optional logging function
-        """
-        super().__init__(config, logger)
+        super().__init__(config)
         self.llm_config = config
         self.llm_enabled = llm.is_available()
 
@@ -343,15 +333,8 @@ class BusinessAgent(BaseAgent):
     def __init__(
         self,
         config: dict,
-        logger: Callable[[str, str], None] | None = None,
     ) -> None:
-        """Initialize BusinessAgent.
-
-        Args:
-            config: Agent configuration dict
-            logger: Optional logging function
-        """
-        super().__init__(config, logger)
+        super().__init__(config)
         self.bucket_overrides = config.get("bucket_overrides", {})
         self.llm_enabled = llm.is_available()
 
@@ -433,10 +416,8 @@ class BusinessAgent(BaseAgent):
                     )
                     score -= check["score_impact"]
 
-        if self.llm_enabled and self.config.get("llm_business_audit", {}).get(
-            "enabled"
-        ):
-            llm_config = self.config["llm_business_audit"]
+        if self.llm_enabled and self.config.get("llm_audit", {}).get("enabled"):
+            llm_config = self.config["llm_audit"]
             text_content = soup.get_text(separator=" ", strip=True)[:1000]
 
             llm_result, llm_issues, llm_score = self._retry_with_truncated_content(
@@ -469,15 +450,8 @@ class TechnicalAgent(BaseAgent):
     def __init__(
         self,
         config: dict,
-        logger: Callable[[str, str], None] | None = None,
     ) -> None:
-        """Initialize TechnicalAgent.
-
-        Args:
-            config: Agent configuration dict
-            logger: Optional logging function
-        """
-        super().__init__(config, logger)
+        super().__init__(config)
         self.checks = config.get("checks", {})
 
     def execute(
@@ -548,7 +522,11 @@ class TechnicalAgent(BaseAgent):
             score -= self.checks.get("title_long_penalty", 5)
 
         meta_desc = soup.find("meta", attrs={"name": "description"})
-        meta_desc_content = str(meta_desc.get("content", "") or "") if isinstance(meta_desc, Tag) else ""
+        meta_desc_content = (
+            str(meta_desc.get("content", "") or "")
+            if isinstance(meta_desc, Tag)
+            else ""
+        )
 
         if not isinstance(meta_desc, Tag) or not meta_desc_content.strip():
             issues.append(
@@ -651,7 +629,7 @@ class TechnicalAgent(BaseAgent):
                     )
                     score -= self.checks.get("robots_txt_missing_penalty", 5)
             except Exception as e:
-                self.log(f"robots.txt check failed: {e}", "warning")  
+                self.log(f"robots.txt check failed: {e}", "warning")
 
         h1_tags = soup.find_all("h1")
         if not h1_tags:
@@ -730,15 +708,9 @@ class PerformanceAgent(BaseAgent):
     def __init__(
         self,
         config: dict,
-        logger: Callable[[str, str], None] | None = None,
     ) -> None:
-        """Initialize PerformanceAgent.
-
-        Args:
-            config: Agent configuration dict
-            logger: Optional logging function
-        """
-        super().__init__(config, logger)
+        """Initialize PerformanceAgent."""
+        super().__init__(config)
         self.thresholds = config.get("thresholds", {})
 
     def execute(
@@ -818,9 +790,7 @@ class PerformanceAgent(BaseAgent):
             score -= 10
 
         script_tags = soup.find_all("script")
-        inline_js_scripts = [
-            script for script in script_tags if not script.get("src")
-        ]
+        inline_js_scripts = [script for script in script_tags if not script.get("src")]
         inline_js_size = sum(len(script.get_text()) for script in inline_js_scripts)
         max_inline_js = self.thresholds.get("max_inline_js_kb", 50) * 1024
 
@@ -871,9 +841,7 @@ class PerformanceAgent(BaseAgent):
             score -= 15
 
         images_without_dims = [
-            img
-            for img in images
-            if not (img.get("width") and img.get("height"))
+            img for img in images if not (img.get("width") and img.get("height"))
         ]
         if images and len(images_without_dims) / len(images) > 0.3:
             issues.append(
@@ -956,13 +924,11 @@ AGENT_REGISTRY: dict[str, type[BaseAgent]] = {
 }
 
 
-def get_agent(
-    agent_name: str, config: dict, logger: Callable | None = None
-) -> BaseAgent:
+def get_agent(agent_name: str, config: dict) -> BaseAgent:
     """Factory function to create agent instances."""
     agent_class = AGENT_REGISTRY.get(agent_name)
     if not agent_class:
         raise ValueError(
             f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}"
         )
-    return agent_class(config, logger=logger)
+    return agent_class(config)

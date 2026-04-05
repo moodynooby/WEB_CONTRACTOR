@@ -64,3 +64,11 @@ uv run ruff check --fix . && uv run uncomment . && uv run mypy .
 - Mypy configured to ignore ORM/framework dynamic attributes
 - Type hints help IDE autocomplete, not fight the type system
 
+
+
+
+docs:
+	uv run mkdocs serve
+
+lint:
+	uv run ruff check --fix . && uv run uncomment . && uv run mypy .

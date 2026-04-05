@@ -1,68 +1,22 @@
 """Unified Application Layer for Web Contractor
 
-Centralized service management, configuration loading, and lifecycle control.
-This decouples the UI from direct service instantiation.
+Centralized service management and lifecycle control.
 """
 
-import json
-from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 from core.db_repository import init_db, close_db
 from core.discovery import PlaywrightScraper
 from core.email import EmailSender, EmailGenerator
 from core.audit import AuditOrchestrator
-
-
-class Config:
-    """Centralized configuration management."""
-
-    def __init__(self, config_path: str = "config"):
-        self.config_path = Path(config_path)
-        self._cache: Dict[str, Dict] = {}
-
-    def load(self, filename: str) -> Dict:
-        """Load config file, using cache if available."""
-        if filename in self._cache:
-            return self._cache[filename]
-
-        filepath = self.config_path / filename
-        try:
-            with open(filepath, "r") as f:
-                data = json.load(f)
-                self._cache[filename] = data  # type: ignore[assignment]
-                return data  # type: ignore[return-value]
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
-
-    def get(self, filename: str, key: str, default: Any = None) -> Any:
-        """Get specific key from config file."""
-        data = self.load(filename)
-        return data.get(key, default)
+from core.logging import get_logger
 
 
 class WebContractorApp:
-    """
-    Unified application layer - manages all services.
+    """Unified application layer - manages all services."""
 
-    Usage:
-        app = WebContractorApp()
-        app.initialize()
-        app.run_discovery()
-        app.run_audit()
-        app.generate_emails()
-        app.send_email(...)
-        app.shutdown()
-    """
-
-    def __init__(
-        self,
-        config_path: str = "config",
-        logger: Optional[Callable[[str, str], None]] = None,
-    ):
-        self.config = Config(config_path)
-        self.logger = logger or (lambda msg, style="": print(f"[{style}] {msg}"))
-
+    def __init__(self):
+        self.logger = get_logger(__name__)
         self._scraper: Optional[PlaywrightScraper] = None
         self._email_sender: Optional[EmailSender] = None
         self._email_generator: Optional[EmailGenerator] = None
@@ -74,35 +28,27 @@ class WebContractorApp:
         if self._initialized:
             return
 
-        self.logger("Initializing database...", "info")
+        self.logger.info("Initializing database...")
         init_db()
 
-        self.logger("Initializing services...", "info")
-        self._scraper = PlaywrightScraper(logger=self._log_wrapper("discovery"))
-        self._orchestrator = AuditOrchestrator(logger=self._log_wrapper("audit"))
-        self._email_sender = EmailSender(logger=self._log_wrapper("email"))
-        self._email_generator = EmailGenerator(logger=self._log_wrapper("email_gen"))
+        self.logger.info("Initializing services...")
+        self._scraper = PlaywrightScraper()
+        self._orchestrator = AuditOrchestrator()
+        self._email_sender = EmailSender()
+        self._email_generator = EmailGenerator()
 
         self._initialized = True
-        self.logger("Initialization complete", "success")
+        self.logger.info("Initialization complete")
 
     def shutdown(self) -> None:
         """Cleanup resources."""
         if not self._initialized:
             return
 
-        self.logger("Shutting down...", "info")
+        self.logger.info("Shutting down...")
         close_db()
         self._initialized = False
-        self.logger("Shutdown complete", "success")
-
-    def _log_wrapper(self, service: str) -> Callable[[str, str], None]:
-        """Create logger wrapper with service prefix."""
-
-        def log(message: str, style: str = "") -> None:
-            self.logger(f"[{service}] {message}", style)
-
-        return log
+        self.logger.info("Shutdown complete")
 
     @property
     def scraper(self) -> PlaywrightScraper:
@@ -138,16 +84,16 @@ class WebContractorApp:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
         """Run lead discovery pipeline."""
-        self.logger("Starting discovery...", "info")
+        self.logger.info("Starting discovery...")
         try:
             result = self.scraper.run(
                 max_queries=max_queries,
                 progress_callback=progress_callback,
             )
-            self.logger("Discovery complete", "success")
-            return result  # type: ignore[no-any-return]
+            self.logger.info("Discovery complete")
+            return result
         except Exception as e:
-            self.logger(f"Discovery failed: {e}", "error")
+            self.logger.error(f"Discovery failed: {e}")
             raise
 
     def run_audit(
@@ -156,19 +102,19 @@ class WebContractorApp:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
         """Run lead audit pipeline using multi-agent orchestrator."""
-        self.logger("Starting multi-agent audit...", "info")
+        self.logger.info("Starting multi-agent audit...")
         try:
             result = self.orchestrator.run(
                 limit=limit,
                 progress_callback=progress_callback,
             )
-            self.logger(
-                f"Audit complete: {result.get('audited', 0)} audited, {result.get('qualified', 0)} qualified",
-                "success",
+            self.logger.info(
+                f"Audit complete: {result.get('audited', 0)} audited, "
+                f"{result.get('qualified', 0)} qualified"
             )
             return result
         except Exception as e:
-            self.logger(f"Audit failed: {e}", "error")
+            self.logger.error(f"Audit failed: {e}")
             raise
 
     def generate_emails(
@@ -176,21 +122,19 @@ class WebContractorApp:
         limit: int = 20,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
-        """Generate outreach emails for qualified leads.
-        """
-        self.logger("Starting email generation...", "info")
+        """Generate outreach emails for qualified leads."""
+        self.logger.info("Starting email generation...")
         try:
             result = self.email_generator.generate(
                 limit=limit,
                 progress_callback=progress_callback,
             )
-            self.logger(
-                f"Email generation complete: {result.get('generated', 0)} emails",
-                "success",
+            self.logger.info(
+                f"Email generation complete: {result.get('generated', 0)} emails"
             )
             return result
         except Exception as e:
-            self.logger(f"Email generation failed: {e}", "error")
+            self.logger.error(f"Email generation failed: {e}")
             raise
 
     def run_unified_pipeline(
@@ -199,7 +143,7 @@ class WebContractorApp:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict:
         """Run unified audit + email generation pipeline."""
-        self.logger("Starting unified pipeline...", "info")
+        self.logger.info("Starting unified pipeline...")
         try:
             audit_result = self.run_audit(
                 limit=limit, progress_callback=progress_callback
@@ -211,15 +155,14 @@ class WebContractorApp:
                 "qualified": audit_result.get("qualified", 0),
                 "emails_generated": email_result.get("generated", 0),
             }
-            self.logger(
+            self.logger.info(
                 f"Pipeline complete: {result.get('processed', 0)} processed, "
                 f"{result.get('qualified', 0)} qualified, "
-                f"{result.get('emails_generated', 0)} emails generated",
-                "success",
+                f"{result.get('emails_generated', 0)} emails generated"
             )
             return result
         except Exception as e:
-            self.logger(f"Pipeline failed: {e}", "error")
+            self.logger.error(f"Pipeline failed: {e}")
             raise
 
     def send_email(
@@ -238,10 +181,10 @@ class WebContractorApp:
                 campaign_id=campaign_id,
             )
             if success:
-                self.logger(f"Email sent to {to_email}", "success")
+                self.logger.info(f"Email sent to {to_email}")
             else:
-                self.logger(f"Email send failed for {to_email}", "error")
+                self.logger.error(f"Email send failed for {to_email}")
             return success
         except Exception as e:
-            self.logger(f"Email send error: {e}", "error")
+            self.logger.error(f"Email send error: {e}")
             raise

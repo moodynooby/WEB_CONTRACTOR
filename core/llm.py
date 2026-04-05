@@ -1,41 +1,26 @@
-"""LLM Client Module - Groq + OpenRouter with fallback support
+"""LLM Client Module - Groq + OpenRouter with fallback support"""
 
-Boundaries:
-- This module handles ALL LLM API calls (Groq primary, OpenRouter fallback)
-- External code should NOT make direct requests to LLM providers
-- Use is_available() to check connectivity
-- Use generate() for simple calls (no retry)
-- Use generate_with_retry() for critical operations (emails)
-
-Thread Safety:
-- Thread-local sessions prevent shared state issues
-- Rate limiting handled by provider APIs
-
-Configuration:
-- GROQ_API_KEY: Required for Groq (get free at https://console.groq.com)
-- OPENROUTER_API_KEY: Optional fallback
-- DEFAULT_PROVIDER: "groq" or "openrouter" (default: "groq")
-- DEFAULT_MODEL: Model ID for primary provider
-- FALLBACK_MODEL: Model ID for fallback provider
-"""
-
-import os
 import threading
 import time
 
 import requests
 
+from core.settings import (
+    GROQ_API_KEY,
+    OPENROUTER_API_KEY,
+    DEFAULT_PROVIDER,
+    DEFAULT_MODEL,
+    FALLBACK_MODEL,
+    LLM_TIMEOUT,
+    GROQ_BASE_URL,
+    OPENROUTER_BASE_URL,
+    DEFAULT_USER_AGENT,
+)
+from core.logging import get_logger
+
+logger = get_logger(__name__)
+
 _local = threading.local()
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "groq")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "llama-3.1-8b-instant")
-FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "google/gemma-2-2b-it:free")
-DEFAULT_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "30"))
-
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 PROVIDERS = {
     "groq": {
@@ -69,16 +54,11 @@ class ProviderError(LLMError):
 
 
 def get_session() -> requests.Session:
-    """Get thread-local HTTP session"""
+    """Get thread-local HTTP session."""
     if not hasattr(_local, "session"):
         _local.session = requests.Session()
-        _local.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36"
-            }
-        )
-    return _local.session  # type: ignore[no-any-return]
+        _local.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+    return _local.session
 
 
 def is_available() -> bool:
@@ -201,7 +181,7 @@ def generate(
     prompt: str | None = None,
     system: str | None = None,
     format_json: bool = False,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = LLM_TIMEOUT,
     provider: str | None = None,
 ) -> str:
     """Generate text from LLM with automatic provider fallback.
@@ -255,7 +235,7 @@ def generate_with_retry(
     system: str | None = None,
     format_json: bool = False,
     max_retries: int = 3,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = LLM_TIMEOUT,
     provider: str | None = None,
 ) -> str:
     """Generate with retry logic (for email operations).

@@ -1,0 +1,222 @@
+{
+  "db_path": "leads.db",
+  "log_level": "INFO",
+  
+  "email": {
+    "signature": "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587
+  },
+
+  "llm": {
+    "provider": "groq",
+    "default_model": "llama-3.1-8b-instant",
+    "fallback_model": "google/gemma-2-2b-it:free",
+    "timeout_seconds": 30
+  },
+
+  "scraper": {
+    "headless": true,
+    "verify_ssl": true,
+    "page_load_timeout_ms": 5000,
+    "search_wait_timeout_ms": 10000,
+    "result_click_delay_ms": 2000,
+    "user_agents": [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+    ]
+  },
+
+  "qualification": {
+    "score_threshold": 90,
+    "email_generation_limit": 20,
+    "email_max_retries": 3
+  },
+
+  "query_management": {
+    "stale_threshold": 3,
+    "stale_cleanup_days": 30
+  },
+
+  "parallel": {
+    "max_workers": 3,
+    "timeout_per_source_seconds": 30
+  },
+
+  "geographic_focus": {
+    "tier_1_metros": {
+      "tier": "Tier-1",
+      "cities": ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"],
+      "priority": 1
+    },
+    "tier_2_cities": {
+      "tier": "Tier-2",
+      "cities": ["Ahmedabad", "Jaipur", "Lucknow", "Indore", "Surat", "Nagpur", "Bhopal"],
+      "priority": 2
+    },
+    "gujarat_state": {
+      "tier": "State-wide",
+      "cities": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Gandhinagar"],
+      "priority": 3
+    },
+    "business_districts": {
+      "tier": "Business Districts",
+      "cities": ["Bandra-Mumbai", "Connaught Place-Delhi", "MG Road-Bangalore", "Banjara Hills-Hyderabad"],
+      "priority": 1
+    }
+  },
+
+  "discovery_sources": {
+    "sources": {
+      "google_maps": { "enabled": true, "priority": 2, "max_results": 50, "description": "Google Maps business listings" },
+      "google_search": { "enabled": true, "priority": 1, "max_results": 50, "description": "Google Search for blog/platform websites" },
+      "justdial": { "enabled": true, "priority": 3, "max_results": 50, "description": "JustDial Indian business directory" },
+      "sulekha": { "enabled": true, "priority": 5, "max_results": 50, "description": "Sulekha Indian community network" },
+      "yellowpages": { "enabled": true, "priority": 4, "max_results": 50, "description": "YellowPages India" }
+    }
+  },
+
+  "discovery_limits": {
+    "max_queries_per_run": 500,
+    "max_patterns_per_bucket": 30,
+    "max_cities_per_segment": 20,
+    "max_results_per_query": 50,
+    "max_leads_per_query": 20
+  },
+
+  "anti_detection": {
+    "enable_throttling": true,
+    "throttle_config": {
+      "min_delay_ms": 1000,
+      "max_delay_ms": 3000,
+      "delay_between_queries_ms": 2000
+    },
+    "enable_captcha_detection": true,
+    "block_patterns": [
+      "captcha", "verify you are human", "access denied",
+      "blocked", "unusual traffic", "rate limit exceeded"
+    ]
+  },
+
+  "query_scoring": {
+    "enabled": true,
+    "min_score_threshold": 0.3,
+    "llm_scoring": true,
+    "historical_weight": 0.6,
+    "llm_weight": 0.4,
+    "factors": {
+      "specificity": 0.3,
+      "commercial_intent": 0.3,
+      "location_specific": 0.2,
+      "competition_level": 0.2
+    }
+  },
+
+  "query_performance": {
+    "enabled": true,
+    "max_consecutive_failures": 3,
+    "auto_disable_stale": true,
+    "review_stale_interval_days": 7
+  },
+
+  "agents": {
+    "execution_order": ["content", "business", "technical", "performance"],
+    "weights": {
+      "content": 0.30,
+      "business": 0.30,
+      "technical": 0.25,
+      "performance": 0.15
+    },
+    "content": {
+      "enabled": true,
+      "weight": 0.30,
+      "timeout": 30,
+      "system_message": "You are a BRUTALLY HONEST content auditor. Analyze website copy for clarity, CTAs, value proposition, and trust signals. Scoring: 100=Perfect, 70=Good, 40=Needs improvement, 10=Terrible. Output ONLY valid JSON.",
+      "prompt_template": "Analyze website content for '{business_name}' (industry: {bucket}).\n\nContent:\n{content}\n\nEvaluate:\n1. Value Proposition: Clear within 3 seconds?\n2. Call-to-Actions: Visible, specific, and compelling?\n3. Professional Tone: Appropriate for industry?\n4. Trust Signals: Testimonials, badges, credentials?\n5. Content Quality: Well-written, no errors?\n\nReturn ONLY JSON:\n{{\n  \"content_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"value_proposition|cta|tone|trust|content_quality\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}"
+    },
+    "business": {
+      "enabled": true,
+      "weight": 0.30,
+      "timeout": 30,
+      "llm_audit": {
+        "enabled": true,
+        "system_message": "You are a BRUTALLY HONEST business strategy expert. Evaluate industry-specific requirements. Scoring: 100=Perfect, 70=Average, 40=Poor, 10=Terrible. Be critical.",
+        "prompt_template": "Evaluate {bucket} business website for '{business_name}'.\n\nContent:\n{content}\n\nCheck industry-specific requirements:\n1. Service Clarity: What they offer is clear?\n2. Target Audience: Clear who they serve?\n3. Differentiation: What makes them unique?\n4. Industry Standards: Meeting expectations?\n\nReturn ONLY JSON:\n{{\n  \"business_score\": <0-100>,\n  \"observations\": [\n    {{\n      \"type\": \"service_clarity|target_audience|differentiation|standards\",\n      \"severity\": \"critical|warning|info\",\n      \"description\": \"specific finding\",\n      \"recommendation\": \"how to fix\"\n    }}\n  ]\n}}"
+      },
+      "bucket_overrides": {
+        "Developers": [
+          { "id": "dev_github_link", "type": "link_match", "patterns": ["github.com", "gitlab.com", "bitbucket.org"], "description": "No link to code repository", "remediation": "Add a link to your GitHub or code portfolio", "severity": "warning", "score_impact": 10 },
+          { "id": "dev_projects_showcase", "type": "text_match", "patterns": ["projects", "portfolio", "case studies", "work"], "description": "No projects or portfolio section visible", "remediation": "Add a projects or portfolio section", "severity": "critical", "score_impact": 20 },
+          { "id": "dev_skills_section", "type": "text_match", "patterns": ["skills", "technologies", "tech stack", "languages"], "description": "No skills or technologies section", "remediation": "Add a skills/technologies section", "severity": "warning", "score_impact": 10 }
+        ],
+        "Marketing Agencies": [
+          { "id": "agency_case_studies", "type": "text_match", "patterns": ["case studies", "success stories", "results", "portfolio"], "description": "No case studies or results showcase", "remediation": "Add case studies demonstrating client results", "severity": "critical", "score_impact": 20 },
+          { "id": "agency_testimonials", "type": "text_match", "patterns": ["testimonial", "review", "client feedback"], "description": "No client testimonials visible", "remediation": "Add client testimonials and reviews", "severity": "warning", "score_impact": 10 },
+          { "id": "agency_services_clear", "type": "text_match", "patterns": ["services", "what we do", "offerings", "solutions"], "description": "Services not clearly defined", "remediation": "Create a clear services page", "severity": "warning", "score_impact": 10 }
+        ],
+        "E-commerce": [
+          { "id": "ecommerce_product_catalog", "type": "text_match", "patterns": ["products", "shop", "catalog", "collection"], "description": "No product catalog visible", "remediation": "Add a clear product catalog or shop section", "severity": "critical", "score_impact": 25 },
+          { "id": "ecommerce_cart_checkout", "type": "link_match", "patterns": ["cart", "checkout", "add to cart", "buy now"], "description": "No shopping cart or checkout", "remediation": "Implement shopping cart and checkout", "severity": "critical", "score_impact": 25 },
+          { "id": "ecommerce_secure_payment", "type": "text_match", "patterns": ["secure payment", "ssl", "encrypted", "payment methods"], "description": "No mention of secure payment options", "remediation": "Display trust badges and secure payment info", "severity": "warning", "score_impact": 15 }
+        ],
+        "Restaurants": [
+          { "id": "restaurant_menu", "type": "text_match", "patterns": ["menu", "our dishes", "food", "cuisine"], "description": "No menu visible on website", "remediation": "Add a clear menu with prices and descriptions", "severity": "critical", "score_impact": 20 },
+          { "id": "restaurant_location_hours", "type": "text_match", "patterns": ["hours", "open", "location", "address", "contact"], "description": "Missing location or hours", "remediation": "Add clear location, hours, and contact info", "severity": "critical", "score_impact": 20 },
+          { "id": "restaurant_reservation", "type": "link_match", "patterns": ["reserve", "booking", "reservation", "order online"], "description": "No online reservation or ordering", "remediation": "Add online reservation or ordering capability", "severity": "warning", "score_impact": 10 }
+        ],
+        "Photographers": [
+          { "id": "photographer_portfolio", "type": "text_match", "patterns": ["portfolio", "gallery", "work", "photos", "shoots"], "description": "No portfolio or gallery visible", "remediation": "Add a portfolio gallery showcasing your best work", "severity": "critical", "score_impact": 25 },
+          { "id": "photographer_services", "type": "text_match", "patterns": ["services", "packages", "pricing", "sessions"], "description": "No services or pricing information", "remediation": "Add services and pricing packages", "severity": "warning", "score_impact": 10 },
+          { "id": "photographer_contact_booking", "type": "link_match", "patterns": ["contact", "book", "inquire", "hire"], "description": "No clear contact or booking method", "remediation": "Add clear contact form or booking system", "severity": "warning", "score_impact": 10 }
+        ],
+        "default": [
+          { "id": "general_services_clear", "type": "text_match", "patterns": ["services", "what we do", "offerings", "products"], "description": "Services or products not clearly defined", "remediation": "Clearly state what you offer", "severity": "warning", "score_impact": 10 },
+          { "id": "general_contact_info", "type": "text_match", "patterns": ["contact", "email", "phone", "address"], "description": "Contact information not easily visible", "remediation": "Make contact information prominent", "severity": "warning", "score_impact": 10 }
+        ]
+      }
+    },
+    "technical": {
+      "enabled": true,
+      "weight": 0.25,
+      "timeout": 30,
+      "checks": {
+        "check_robots_txt": true,
+        "title_missing_penalty": 20,
+        "title_long_penalty": 5,
+        "description_missing_penalty": 15,
+        "description_long_penalty": 5,
+        "og_missing_penalty": 10,
+        "og_incomplete_penalty": 5,
+        "viewport_missing_penalty": 20,
+        "canonical_missing_penalty": 5,
+        "structured_data_missing_penalty": 10,
+        "robots_txt_missing_penalty": 5,
+        "h1_missing_penalty": 10,
+        "h1_multiple_penalty": 5,
+        "alt_text_missing_penalty": 10,
+        "https_missing_penalty": 20
+      },
+      "early_exit_rules": { "max_critical_issues": 2 }
+    },
+    "performance": {
+      "enabled": true,
+      "weight": 0.15,
+      "timeout": 30,
+      "thresholds": {
+        "max_html_size_kb": 100,
+        "max_inline_css_kb": 50,
+        "max_inline_js_kb": 50,
+        "max_resources": 50,
+        "max_response_time_ms": 1000
+      }
+    }
+  },
+
+  "email_generation": {
+    "enabled": true,
+    "timeout": 30,
+    "system_message": "Write a personalized B2B cold email. Output ONLY valid JSON.",
+    "prompt_template": "Generate a short cold email for {business_name}.\n\nAudit Results:\n{issue_summary}\n\nEmail must:\n1. Mention 1 specific site detail.\n2. Mention 1-2 critical issues (design, speed, or mobile).\n3. Explain the business impact (lost sales).\n4. Offer a quick audit/call.\n5. Max 120 words, no placeholders, no signature.\n\nReturn ONLY JSON:\n{{\"subject\": \"your subject line here\", \"body\": \"your email body here\"}}"
+  }
+}

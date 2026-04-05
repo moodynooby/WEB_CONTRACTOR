@@ -7,14 +7,14 @@ use_default_ignores = true
 respect_gitignore = true
 traverse_git_repos = false
 
-[languages.powershell]
-name = "PowerShell"
-extensions = [".ps1", ".psm1", ".psd1"]
-comment_nodes = ["comment"]
-
 [languages.ini]
 name = "INI"
 extensions = [".ini", ".cfg", ".conf"]
+comment_nodes = ["comment"]
+
+[languages.powershell]
+name = "PowerShell"
+extensions = [".ps1", ".psm1", ".psd1"]
 comment_nodes = ["comment"]
 
 [languages.python]

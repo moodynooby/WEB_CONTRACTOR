@@ -18,8 +18,10 @@ from peewee import (
 )
 from playhouse.sqlite_ext import JSONField
 
+from core.settings import DB_PATH
+
 db = SqliteDatabase(
-    "leads.db",
+    DB_PATH,
     thread_safe=True,
     pragmas={
         "journal_mode": "wal",
