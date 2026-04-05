@@ -3,6 +3,7 @@
 import traceback
 import streamlit as st
 from core.app_core import WebContractorApp
+from core.mode_manager import get_mode_manager
 
 st.set_page_config(
     page_title="Web Contractor",
@@ -82,12 +83,32 @@ if "app" not in st.session_state:
     st.session_state.app = WebContractorApp()
     st.session_state.app.initialize()
 
+with st.sidebar:
+    st.markdown("---")
+    mode_mgr = get_mode_manager()
+    current_mode = mode_mgr.get_current_mode()
+
+    mode_icon = "☁️" if not current_mode["is_local"] else "🖥️"
+    mode_label = (
+        "Cloud"
+        if not current_mode["is_local"]
+        else f"Local ({current_mode['local_provider']})"
+    )
+    perf_mode = current_mode["profile"]
+
+    st.markdown(f"### {mode_icon} {mode_label}")
+    st.markdown(f"**{perf_mode['icon']} {perf_mode['label']}**")
+    st.caption(f"Hardware: {current_mode['hardware'].replace('_', ' ').upper()}")
+
+    st.markdown("---")
+    st.caption("💡 Configure modes in Pipeline page → LLM Mode & Performance Settings")
+
 pg = st.navigation(
     [
+        st.Page("pages/0_Pipeline.py", title="🏗️ Pipeline"),
         st.Page("pages/1_Discovery.py", title="🔍 Discovery"),
         st.Page("pages/2_Audit.py", title="📋 Audit"),
         st.Page("pages/3_Email.py", title="📧 Email"),
-        st.Page("pages/4_Database.py", title="💾 Database"),
         st.Page("pages/5_Performance.py", title="📊 Performance"),
     ]
 )

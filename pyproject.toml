@@ -10,7 +10,7 @@ dependencies = [
     "playwright>=1.40.0",
     "python-dotenv>=1.2.1",
     "beautifulsoup4>=4.12.0",
-    "peewee>=4.0.1",
+    "pymongo>=4.6.0",
     "email-validator>=2.3.0",
     "groq>=0.4.0",
     "email-scraper>=0.6",
@@ -19,6 +19,9 @@ dependencies = [
     "mkdocstrings[python]>=1.0.3",
     "mkdocs-material>=9.7.5",
     "mkdocs-api-autonav>=0.4.0",
+    "plotly>=5.18.0",
+    "psutil>=7.2.2",
+    "cachetools>=5.3.0",
 ]
 
 [project.scripts]
@@ -40,9 +43,9 @@ dev = [
     "ruff>=0.15.0",
     "uncomment>=2.11.0",
     "types-requests>=2.32.4.20260107",
-    "types-peewee>=4.0.0.20260223",
     "types-beautifulsoup4>=4.12.0.20250516",
     "hatchling>=1.0.0",
+    "types-cachetools>=6.2.0.20260317",
 ]
 
 

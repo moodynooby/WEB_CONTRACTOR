@@ -44,11 +44,11 @@ from core.settings import (
     load_json_section,
 )
 from core.logging import get_logger
-from core.db_repository import (
+from core.repository import (
     get_qualified_leads,
     mark_email_sent,
     save_emails_batch,
-    update_lead_contact_info,
+    update_lead_status,
 )
 
 
@@ -347,10 +347,7 @@ class EmailGenerator:
                             "No email found, skipping",
                             "warning",
                         )
-                        update_lead_contact_info(
-                            lead["id"],
-                            {"status": "unqualified"},
-                        )
+                        update_lead_status(lead["id"], "unqualified")
                         continue
                 else:
                     self.log(
@@ -358,10 +355,7 @@ class EmailGenerator:
                         "No website, skipping",
                         "warning",
                     )
-                    update_lead_contact_info(
-                        lead["id"],
-                        {"status": "unqualified"},
-                    )
+                    update_lead_status(lead["id"], "unqualified")
                     continue
 
             self.log(f"  [{i}/{len(leads)}] {lead['business_name']}", "info")

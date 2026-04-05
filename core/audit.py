@@ -26,7 +26,7 @@ from core.agents import (
     get_agent,
 )
 from core.settings import DEFAULT_USER_AGENT, load_json_section
-from core.db_repository import (
+from core.repository import (
     get_pending_audits,
     save_audits_batch,
 )
@@ -155,6 +155,7 @@ class AuditOrchestrator:
                     "success",
                 )
 
+                should_exit = False
                 if exit_rules:
                     min_score = exit_rules.get("min_score", 0)
                     if result["score"] < min_score:
@@ -162,21 +163,27 @@ class AuditOrchestrator:
                             f"  ⚠ Early exit: {agent_name} score {result['score']} below threshold {min_score}",
                             "warning",
                         )
-                        break
+                        should_exit = True
 
-                    max_critical = exit_rules.get("max_critical_issues", -1)
-                    if max_critical >= 0:
-                        critical_issues = [
-                            i
-                            for i in result.get("issues", [])
-                            if i.get("severity") == "critical"
-                        ]
-                        if len(critical_issues) > max_critical:
-                            self.log(
-                                f"  ⚠ Early exit: {len(critical_issues)} critical issues (max: {max_critical})",
-                                "warning",
-                            )
-                            break
+                    if not should_exit:
+                        max_critical = exit_rules.get("max_critical_issues", -1)
+                        if max_critical >= 0:
+                            critical_issues = [
+                                i
+                                for i in result.get("issues", [])
+                                if i.get("severity") == "critical"
+                            ]
+                            if len(critical_issues) > max_critical:
+                                self.log(
+                                    f"  ⚠ Early exit: {len(critical_issues)} critical issues (max: {max_critical})",
+                                    "warning",
+                                )
+                                should_exit = True
+
+                if should_exit:
+                    # Cancel remaining futures to avoid wasted LLM API calls
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
 
         final_score, all_issues = self._aggregate_results(
             results, load_json_section("agents").get("weights", {})

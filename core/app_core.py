@@ -5,7 +5,7 @@ Centralized service management and lifecycle control.
 
 from typing import Callable, Dict, Optional
 
-from core.db_repository import init_db, close_db
+from core.db import init_db, close_db
 from core.discovery import PlaywrightScraper
 from core.email import EmailSender, EmailGenerator
 from core.audit import AuditOrchestrator

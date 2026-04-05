@@ -220,7 +220,7 @@ class BaseScraper(ABC):
     def get_max_results(self) -> int:
         """Get max results per query for this source."""
         config = self.get_source_config()
-        return config.get("max_results", 5)
+        return int(config.get("max_results", 5))
 
 
 class ScraperRegistry:

@@ -1,5 +1,4 @@
 {
-  "db_path": "leads.db",
   "log_level": "INFO",
   
   "email": {
@@ -10,9 +9,18 @@
 
   "llm": {
     "provider": "groq",
+    "mode": "cloud",
+    "performance_mode": "fast",
     "default_model": "llama-3.1-8b-instant",
     "fallback_model": "google/gemma-2-2b-it:free",
-    "timeout_seconds": 30
+    "timeout_seconds": 30,
+    
+    "local": {
+      "provider": "ollama",
+      "base_url": "http://localhost:11434/v1",
+      "model": "llama3.2:latest",
+      "hardware_profile": "auto"
+    }
   },
 
   "scraper": {
@@ -73,7 +81,11 @@
       "google_search": { "enabled": true, "priority": 1, "max_results": 50, "description": "Google Search for blog/platform websites" },
       "justdial": { "enabled": true, "priority": 3, "max_results": 50, "description": "JustDial Indian business directory" },
       "sulekha": { "enabled": true, "priority": 5, "max_results": 50, "description": "Sulekha Indian community network" },
-      "yellowpages": { "enabled": true, "priority": 4, "max_results": 50, "description": "YellowPages India" }
+      "yellowpages": { "enabled": true, "priority": 4, "max_results": 50, "description": "YellowPages India" },
+      "blogspot": { "enabled": true, "priority": 1, "max_results": 50, "description": "Blogspot/Blogger sites" },
+      "wordpress": { "enabled": true, "priority": 1, "max_results": 50, "description": "WordPress.com sites" },
+      "wix": { "enabled": true, "priority": 1, "max_results": 50, "description": "Wix-hosted sites" },
+      "website_filter": { "enabled": true, "priority": 1, "max_results": 50, "description": "Broad website discovery with TLD filters" }
     }
   },
 
@@ -181,7 +193,7 @@
       "weight": 0.25,
       "timeout": 30,
       "checks": {
-        "check_robots_txt": true,
+        "check_robots_txt": false,
         "title_missing_penalty": 20,
         "title_long_penalty": 5,
         "description_missing_penalty": 15,

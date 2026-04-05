@@ -1,6 +1,5 @@
 """Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)"""
 
-import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -10,7 +9,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from core.settings import DEFAULT_USER_AGENT, load_json_section
 from core.logging import get_logger
-from core.db_repository import (
+from core.repository import (
     get_all_buckets,
     get_bucket_id_by_name,
     save_leads_batch,
@@ -45,8 +44,19 @@ class PlaywrightScraper:
 
     def __init__(self):
         self.logger = get_logger(__name__)
-        self.buckets = get_all_buckets()
         self._settings = _build_discovery_settings()
+        self._buckets_cache: list[dict[str, Any]] | None = None
+
+    @property
+    def buckets(self) -> list[dict[str, Any]]:
+        """Lazy load buckets with caching."""
+        if self._buckets_cache is None:
+            self._buckets_cache = get_all_buckets()
+        return self._buckets_cache
+
+    @buckets.setter
+    def buckets(self, value: list[dict[str, Any]]) -> None:
+        self._buckets_cache = value
 
     def log(self, message: str, style: str = "") -> None:
         """Log message with level awareness."""
@@ -62,11 +72,6 @@ class PlaywrightScraper:
     @contextmanager
     def managed_session(self):
         """Context manager for scraping session - creates fresh browser context per operation."""
-        try:
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=self._settings.get("scraper_settings", {}).get(
@@ -207,6 +212,7 @@ class PlaywrightScraper:
 
         Uses ThreadPoolExecutor to run multiple scrapers concurrently.
         Each source gets its own isolated browser context for thread safety.
+        Shares a single browser instance across all workers for efficiency.
         """
         query = query_data["query"]
         bucket = query_data["bucket"]
@@ -230,56 +236,63 @@ class PlaywrightScraper:
             "info",
         )
 
-        def worker(scraper):
+        def worker(scraper, browser):
             """Worker function for single source scraping."""
             try:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=sources_scrape_settings.get("headless", True)
-                    )
-                    context = browser.new_context(
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    )
-                    page = context.new_page()
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
+                page = context.new_page()
 
-                    max_results = scraper.get_max_results()
+                try:
+                    max_results = int(scraper.get_max_results())
                     if bucket_max_results and bucket_max_results < max_results:
-                        max_results = bucket_max_results
+                        max_results = int(bucket_max_results)
 
                     leads = scraper.search(query, page, max_results=max_results)
-
-                    browser.close()
                     return leads
+                finally:
+                    context.close()
             except Exception as e:
                 self.log(f"  [{scraper.SOURCE_NAME}] Worker failed: {e}", "error")
                 return []
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_source = {
-                executor.submit(worker, s): s.SOURCE_NAME for s in enabled_sources
-            }
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=sources_scrape_settings.get("headless", True)
+            )
+            try:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_source = {
+                        executor.submit(worker, s, browser): s.SOURCE_NAME
+                        for s in enabled_sources
+                    }
 
-            from concurrent.futures import as_completed
+                    from concurrent.futures import as_completed
 
-            for future in as_completed(
-                future_to_source, timeout=timeout_seconds * len(enabled_sources)
-            ):
-                source_name = future_to_source[future]
-                try:
-                    leads = future.result(timeout=timeout_seconds)
-                    if leads:
-                        scraper_instance = next(
-                            s for s in enabled_sources if s.SOURCE_NAME == source_name
-                        )
-                        normalized = [
-                            scraper_instance.normalize_lead(
-                                lead, bucket=bucket, query=query
-                            )
-                            for lead in leads
-                        ]
-                        query_leads.extend(normalized)
-                except Exception as e:
-                    self.log(f"  [{source_name}] Failed: {e}", "error")
+                    for future in as_completed(
+                        future_to_source, timeout=timeout_seconds * len(enabled_sources)
+                    ):
+                        source_name = future_to_source[future]
+                        try:
+                            leads = future.result(timeout=timeout_seconds)
+                            if leads:
+                                scraper_instance = next(
+                                    s
+                                    for s in enabled_sources
+                                    if s.SOURCE_NAME == source_name
+                                )
+                                normalized = [
+                                    scraper_instance.normalize_lead(
+                                        lead, bucket=bucket, query=query
+                                    )
+                                    for lead in leads
+                                ]
+                                query_leads.extend(normalized)
+                        except Exception as e:
+                            self.log(f"  [{source_name}] Failed: {e}", "error")
+            finally:
+                browser.close()
 
         self.log(f"  Total: {len(query_leads)} leads from all sources", "success")
         return query_leads, query_perf
@@ -333,7 +346,9 @@ class PlaywrightScraper:
                     (b for b in self.buckets if b["name"] == q["bucket"]), None
                 )
                 bucket_max_results = (
-                    bucket_data.get("max_results") if bucket_data else None
+                    int(bucket_data.get("max_results"))
+                    if bucket_data and bucket_data.get("max_results")
+                    else None
                 )
 
                 bucket_id = get_bucket_id_by_name(q["bucket"])

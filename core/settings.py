@@ -67,7 +67,6 @@ def load_json_section(section: str) -> dict[str, Any]:
 
 _cfg = _load_config()
 
-DB_PATH: Final[str] = str(PROJECT_ROOT / _val(_cfg, "db_path", "leads.db"))
 LOG_LEVEL: Final[str] = _val(_cfg, "log_level", "INFO")
 
 _email = _section("email")
@@ -78,10 +77,24 @@ SMTP_SERVER: Final[str] = _email.get("smtp_server", "smtp.gmail.com")
 SMTP_PORT: Final[int] = _int(_email, "smtp_port", 587)
 
 _llm = _section("llm")
+LLM_MODE: Final[str] = _llm.get("mode", "cloud")  
+PERFORMANCE_MODE: Final[str] = _llm.get(
+    "performance_mode", "fast"
+)  
 DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
 DEFAULT_MODEL: Final[str] = _llm.get("default_model", "llama-3.1-8b-instant")
 FALLBACK_MODEL: Final[str] = _llm.get("fallback_model", "google/gemma-2-2b-it:free")
 LLM_TIMEOUT: Final[int] = _int(_llm, "timeout_seconds", 30)
+
+_local_llm = _llm.get("local", {})
+LOCAL_PROVIDER: Final[str] = _local_llm.get(
+    "provider", "ollama"
+)  
+LOCAL_BASE_URL: Final[str] = _local_llm.get("base_url", "http://localhost:11434/v1")
+LOCAL_MODEL: Final[str] = _local_llm.get("model", "llama3.2:latest")
+LOCAL_HARDWARE_PROFILE: Final[str] = _local_llm.get(
+    "hardware_profile", "auto"
+)  
 
 GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
@@ -122,6 +135,33 @@ GROQ_API_KEY: Final[str] = os.getenv("GROQ_API_KEY", "")
 OPENROUTER_API_KEY: Final[str] = os.getenv("OPENROUTER_API_KEY", "")
 GMAIL_EMAIL: Final[str] = os.getenv("GMAIL_EMAIL", "")
 GMAIL_PASSWORD: Final[str] = os.getenv("GMAIL_PASSWORD", "")
+TELEGRAM_BOT_TOKEN: Final[str] = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID: Final[str] = os.getenv("TELEGRAM_CHAT_ID", "")
+
+MONGODB_URI: Final[str] = os.getenv("MONGODB_URI", "")
+MONGODB_DATABASE: Final[str] = os.getenv("MONGODB_DATABASE", "web_contractor")
+
+
+def _validate_mongodb_uri(uri: str) -> bool:
+    """Basic validation of MongoDB URI format."""
+    if not uri:
+        return False
+    # Check for common MongoDB URI patterns
+    valid_prefixes = (
+        "mongodb://",
+        "mongodb+srv://",
+    )
+    if not any(uri.startswith(prefix) for prefix in valid_prefixes):
+        return False
+    # Basic sanity check - should have @ for authenticated URIs
+    if "mongodb+srv://" in uri or "mongodb://" in uri:
+        # Allow localhost URIs without auth
+        if "localhost" in uri or "127.0.0.1" in uri:
+            return True
+        # Cloud URIs should have credentials
+        if "@" not in uri and "localhost" not in uri:
+            return False
+    return True
 
 
 _ENV_FILE = PROJECT_ROOT / ".env"
@@ -146,6 +186,24 @@ def _validate_secrets() -> None:
     if missing:
         warnings.warn(
             f"Missing secret(s): {', '.join(missing)}. Some features won't work.",
+            RuntimeWarning,
+        )
+
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        warnings.warn(
+            "Telegram notifications not configured. Pipeline will run without notifications.",
+            RuntimeWarning,
+        )
+
+    # Validate MongoDB URI
+    if MONGODB_URI and not _validate_mongodb_uri(MONGODB_URI):
+        warnings.warn(
+            f"MONGODB_URI appears to be invalid. Ensure it starts with 'mongodb://' or 'mongodb+srv://'. Got: {MONGODB_URI[:30]}...",
+            RuntimeWarning,
+        )
+    elif not MONGODB_URI:
+        warnings.warn(
+            "MONGODB_URI not set. Database features will be disabled.",
             RuntimeWarning,
         )
 

@@ -9,6 +9,10 @@ from core.sources import (
     justdial,
     sulekha,
     yellowpages,
+    blogspot_scraper,
+    wordpress_scraper,
+    wix_scraper,
+    website_filter_scraper,
 )
 
 
@@ -81,4 +85,8 @@ __all__ = [
     "justdial",
     "sulekha",
     "yellowpages",
+    "blogspot_scraper",
+    "wordpress_scraper",
+    "wix_scraper",
+    "website_filter_scraper",
 ]

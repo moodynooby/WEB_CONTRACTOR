@@ -2,25 +2,37 @@
 
 import streamlit as st
 import pandas as pd
-from core.db_models import QueryPerformance
-from core import db
+from core.repository import get_query_performance_all
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
+st.set_page_config(layout="wide")
+
 st.title("📊 Query Performance")
 st.caption("Monitor query efficiency and identify stale queries")
 
-with db:
-    query_perf = QueryPerformance.select().dicts()
-    perf_df = pd.DataFrame(query_perf)
+perf_data = get_query_performance_all()
+perf_df = pd.DataFrame(perf_data)
 
 if perf_df.empty:
     st.info("No query performance data yet. Run discovery first.")
 else:
-    st.subheader("📈 Overview")
-    col1, col2, col3, col4 = st.columns(4)
-    
+    if "last_executed_at" in perf_df.columns:
+        perf_df["last_executed_at"] = pd.to_datetime(
+            perf_df["last_executed_at"], errors="coerce"
+        )
+    if "created_at" in perf_df.columns:
+        perf_df["created_at"] = pd.to_datetime(perf_df["created_at"], errors="coerce")
+
+    perf_df["success_rate"] = (
+        perf_df["total_leads_saved"] / perf_df["total_executions"].clip(lower=1) * 100
+    ).round(1)
+
+    st.subheader("📈 Key Metrics")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
     col1.metric("Total Queries", len(perf_df))
     col2.metric("Active Queries", len(perf_df[perf_df["is_active"]]))
     col3.metric("Inactive Queries", len(perf_df[~perf_df["is_active"]]))
@@ -28,74 +40,57 @@ else:
         "Avg Success Rate",
         f"{(perf_df['total_leads_saved'].sum() / max(perf_df['total_executions'].sum(), 1) * 100):.1f}%",
     )
+    col5.metric(
+        "Total Leads Saved",
+        f"{perf_df['total_leads_saved'].sum():,}",
+    )
+
+    st.subheader("🔍 Filter")
 
     col1, col2 = st.columns(2)
     with col1:
-        status_filter = st.radio(
-            "Query Status",
-            ["All", "Active", "Inactive"],
-            horizontal=True,
+        active_filter = st.multiselect(
+            "Status",
+            options=["Active", "Inactive"],
+            default=["Active", "Inactive"],
         )
-    
+
     with col2:
-        min_executions = st.slider("Min Executions", 0, 50, 1)
+        min_executions = st.number_input(
+            "Min Executions", min_value=0, max_value=1000, value=0
+        )
 
-    if status_filter == "Active":
-        filtered = perf_df[perf_df["is_active"]]
-    elif status_filter == "Inactive":
-        filtered = perf_df[~perf_df["is_active"]]
-    else:
-        filtered = perf_df
-    
-    filtered = filtered[filtered["total_executions"] >= min_executions]
+    filtered = perf_df[
+        perf_df["is_active"].isin([s == "Active" for s in active_filter])
+    ]
+    if min_executions > 0:
+        filtered = filtered[filtered["total_executions"] >= min_executions]
 
-    filtered = filtered.copy()
-    filtered["success_rate"] = (
-        filtered["total_leads_saved"] / filtered["total_executions"].clip(lower=1) * 100
-    ).round(1)
+    st.write(f"**{len(filtered)}** queries shown")
 
-    st.subheader("📋 Query Performance Details")
-    st.dataframe(
-        filtered[[
+    tab1, tab2 = st.tabs(["📊 Table", "📈 Analytics"])
+
+    with tab1:
+        display_cols = [
             "query_pattern",
             "city",
             "is_active",
             "total_executions",
             "total_leads_found",
-            "total_leads_saved",
-            "consecutive_failures",
             "success_rate",
-        ]],
-        use_container_width=True,
-        height=500,
-    )
-
-    st.subheader("📉 Analytics")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.bar_chart(
-            filtered.groupby("is_active")["total_executions"].sum(),
-            horizontal=True,
-        )
-        st.caption("Total executions by active/inactive status")
-    
-    with col2:
-        st.bar_chart(
-            filtered.nlargest(10, "total_leads_saved")[["query_pattern", "total_leads_saved"]].set_index("query_pattern"),
-            horizontal=True,
-        )
-        st.caption("Top 10 queries by leads saved")
-
-    stale = perf_df[perf_df["consecutive_failures"] >= 3]
-    if not stale.empty:
-        st.subheader("⚠️ Stale Queries (3+ consecutive failures)")
+            "consecutive_failures",
+        ]
         st.dataframe(
-            stale[[
-                "query_pattern",
-                "city",
-                "consecutive_failures",
-                "total_executions",
-            ]],
+            filtered[display_cols]
+            if all(c in filtered.columns for c in display_cols)
+            else filtered,
             use_container_width=True,
+        )
+
+    with tab2:
+        st.bar_chart(
+            filtered.head(10).set_index("query_pattern")["success_rate"]
+            if "query_pattern" in filtered.columns
+            and "success_rate" in filtered.columns
+            else filtered[["success_rate"]].head(10)
         )

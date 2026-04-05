@@ -1,4 +1,4 @@
-"""LLM Client Module - Groq + OpenRouter with fallback support"""
+"""LLM Client Module - Groq + OpenRouter with local provider support"""
 
 import threading
 import time
@@ -15,7 +15,13 @@ from core.settings import (
     GROQ_BASE_URL,
     OPENROUTER_BASE_URL,
     DEFAULT_USER_AGENT,
+    LLM_MODE,
+    PERFORMANCE_MODE,
+    LOCAL_PROVIDER,
+    LOCAL_BASE_URL,
+    LOCAL_MODEL,
 )
+from core.mode_config import get_mode_profile
 from core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -37,6 +43,12 @@ PROVIDERS = {
             "HTTP-Referer": "https://github.com/web-contractor",
             "X-Title": "Web Contractor",
         },
+    },
+    "local": {
+        "api_key": "",  
+        "base_url": LOCAL_BASE_URL,
+        "default_model": LOCAL_MODEL,
+        "extra_headers": {},
     },
 }
 
@@ -63,7 +75,19 @@ def get_session() -> requests.Session:
 
 def is_available() -> bool:
     """Test if at least one LLM provider is available"""
+    if LLM_MODE == "local":
+        try:
+            session = get_session()
+            response = session.get(f"{LOCAL_BASE_URL}", timeout=5)
+            if response.status_code == 200:
+                return True
+        except requests.exceptions.RequestException:
+            pass
+        return False
+    
     for name, config in PROVIDERS.items():
+        if name == "local":
+            continue  
         if config["api_key"]:
             try:
                 session = get_session()
@@ -138,11 +162,18 @@ def _generate_with_config(
 
     messages = _build_messages(prompt, system)
 
+    mode_profile = get_mode_profile(PERFORMANCE_MODE)
+    temperature = mode_profile.get("temperature", 0.1 if format_json else 0.3)
+    max_tokens = mode_profile.get("max_tokens", 2048)
+    
+    timeout_multiplier = mode_profile.get("timeout_multiplier", 1.0)
+    adjusted_timeout = int(timeout * timeout_multiplier)
+
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.1 if format_json else 0.3,
-        "max_tokens": 2048,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
 
     if format_json:
@@ -152,7 +183,7 @@ def _generate_with_config(
         response = session.post(
             f"{base_url}/chat/completions",
             json=payload,
-            timeout=timeout,
+            timeout=adjusted_timeout,
         )
         return _handle_api_response(response, provider_name, format_json)
 
@@ -164,16 +195,25 @@ def _generate_with_config(
 
 def _get_provider_order(provider: str | None):
     """Get ordered list of (provider_name, model) to try."""
-    primary = provider or DEFAULT_PROVIDER
-    primary_config = PROVIDERS[primary]
-    primary_model = primary_config["default_model"]
+    if provider:
+        if provider in PROVIDERS:
+            config = PROVIDERS[provider]
+            yield (provider, config["default_model"])
+            return
+    
+    if LLM_MODE == "local":
+        if LOCAL_BASE_URL:
+            yield ("local", LOCAL_MODEL)
+    else:
+        primary = provider or DEFAULT_PROVIDER
+        if primary in PROVIDERS and primary != "local":
+            primary_config = PROVIDERS[primary]
+            if primary_config["api_key"]:
+                yield (primary, primary_config["default_model"])
 
-    if primary_config["api_key"]:
-        yield (primary, primary_model)
-
-    for name, config in PROVIDERS.items():
-        if name != primary and config["api_key"]:
-            yield (name, config["default_model"])
+        for name, config in PROVIDERS.items():
+            if name != primary and name != "local" and config["api_key"]:
+                yield (name, config["default_model"])
 
 
 def generate(
@@ -224,8 +264,7 @@ def generate(
 
     raise ProviderError(
         f"All providers failed. Errors: {'; '.join(errors)}. "
-        f"Groq key: {'yes' if GROQ_API_KEY else 'no'}, "
-        f"OpenRouter key: {'yes' if OPENROUTER_API_KEY else 'no'}"
+        f"Mode: {LLM_MODE}, Performance: {PERFORMANCE_MODE}"
     )
 
 
@@ -310,10 +349,19 @@ def _compact_system(system: str, max_length: int = 500) -> str:
 
 def get_provider_info() -> dict:
     """Get current provider configuration."""
-    return {
-        "primary_provider": DEFAULT_PROVIDER,
+    info = {
+        "mode": LLM_MODE,
+        "performance_mode": PERFORMANCE_MODE,
+        "primary_provider": DEFAULT_PROVIDER if LLM_MODE == "cloud" else LOCAL_PROVIDER,
         "groq_configured": bool(GROQ_API_KEY),
         "openrouter_configured": bool(OPENROUTER_API_KEY),
-        "default_model": DEFAULT_MODEL,
+        "default_model": DEFAULT_MODEL if LLM_MODE == "cloud" else LOCAL_MODEL,
         "fallback_model": FALLBACK_MODEL,
     }
+    
+    if LLM_MODE == "local":
+        info["local_provider"] = LOCAL_PROVIDER
+        info["local_base_url"] = LOCAL_BASE_URL
+        info["local_model"] = LOCAL_MODEL
+    
+    return info

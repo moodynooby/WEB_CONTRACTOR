@@ -5,15 +5,16 @@ All modules should import from here to ensure dotenv is loaded first.
 """
 
 from dotenv import load_dotenv
-load_dotenv()  # noqa: E402
 
-from core.settings import load_json_section  # noqa: E402
-from core.logging import get_logger, setup_root_logger  # noqa: E402
+load_dotenv()
 
-from core.audit import AuditOrchestrator  # noqa: E402
-from core.discovery import PlaywrightScraper  # noqa: E402
-from core.email import EmailSender, EmailGenerator  # noqa: E402
-from core.llm import (  # noqa: E402
+from core.settings import load_json_section
+from core.logging import get_logger, setup_root_logger
+
+from core.audit import AuditOrchestrator
+from core.discovery import PlaywrightScraper
+from core.email import EmailSender, EmailGenerator
+from core.llm import (
     is_available,
     generate,
     generate_with_retry,
@@ -21,17 +22,24 @@ from core.llm import (  # noqa: E402
     ProviderError,
     get_provider_info,
 )
-from core.app_core import WebContractorApp  # noqa: E402
-from core.db_models import (  # noqa: E402
-    db,
-    Bucket,
-    Lead,
-    EmailCampaign,
-    QueryPerformance,
-)
-from core.db_repository import (  # noqa: E402
+from core.app_core import WebContractorApp
+from core.db import (
+    get_database,
+    get_client,
     init_db,
     close_db,
+    is_connected,
+    is_healthy,
+    queue_pending_write,
+    flush_pending_writes,
+    cleanup_old_pending_writes,
+    get_circuit_breaker_state,
+    get_email_campaign_stats,
+    get_recent_email_campaigns,
+    count_email_campaigns,
+)
+from core.models import Bucket, Lead, EmailCampaign, QueryPerformance
+from core.repository import (
     save_bucket,
     get_all_buckets,
     get_bucket_id_by_name,
@@ -47,6 +55,10 @@ from core.db_repository import (  # noqa: E402
     delete_email,
     mark_email_sent,
     cleanup_stale_queries,
+    get_all_leads,
+    count_leads,
+    get_query_performance_all,
+    get_email_campaigns,
 )
 
 __all__ = [
@@ -64,9 +76,19 @@ __all__ = [
     "LLMError",
     "ProviderError",
     "get_provider_info",
-    "db",
+    "get_database",
+    "get_client",
     "init_db",
     "close_db",
+    "is_connected",
+    "is_healthy",
+    "queue_pending_write",
+    "flush_pending_writes",
+    "cleanup_old_pending_writes",
+    "get_circuit_breaker_state",
+    "get_email_campaign_stats",
+    "get_recent_email_campaigns",
+    "count_email_campaigns",
     "Bucket",
     "Lead",
     "EmailCampaign",
@@ -86,4 +108,8 @@ __all__ = [
     "delete_email",
     "mark_email_sent",
     "cleanup_stale_queries",
+    "get_all_leads",
+    "count_leads",
+    "get_query_performance_all",
+    "get_email_campaigns",
 ]
