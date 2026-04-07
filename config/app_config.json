@@ -8,7 +8,7 @@
   "llm": {
     "provider": "groq",
     "mode": "cloud",
-    "performance_mode": "fast",
+    "performance_mode": "cloud_standard",
     "default_model": "llama-3.1-8b-instant",
     "fallback_model": "google/gemma-2-2b-it:free",
     "timeout_seconds": 30,

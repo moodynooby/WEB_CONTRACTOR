@@ -303,21 +303,42 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
 
     st.markdown("**Performance Mode:**")
     modes = get_all_modes()
-    mode_options = [m["key"] for m in modes]
+    
+    # Filter modes based on LLM mode selection
+    if llm_mode_option == "cloud":
+        visible_modes = [m for m in modes if m.get("mode_type") == "cloud"]
+    else:
+        visible_modes = [m for m in modes if m.get("mode_type") == "local"]
+    
+    mode_options = [m["key"] for m in visible_modes]
 
     current_perf_idx = 0
     if PERFORMANCE_MODE in mode_options:
         current_perf_idx = mode_options.index(PERFORMANCE_MODE)
 
-    mode_cols = st.columns(4)
+    mode_cols = st.columns(len(visible_modes))
     selected_perf_mode = None
 
     for idx, (col, mode_key) in enumerate(zip(mode_cols, mode_options)):
-        mode_data = modes[idx]
+        mode_data = visible_modes[idx]
         with col:
             is_selected = idx == current_perf_idx
+            
+            # Check if hardware meets requirements for local_server mode
+            show_warning = False
+            if mode_key == "local_server":
+                hw_info = mode_mgr.hardware_info
+                ram_gb = hw_info.get("total_ram_gb", 0)
+                vram_gb = hw_info.get("gpu_vram_gb", 0)
+                if ram_gb < 64 or vram_gb < 6:
+                    show_warning = True
+            
+            button_label = f"{mode_data['icon']} {mode_data['label'].split()[-1]}"
+            if show_warning:
+                button_label = f"⚠️ {button_label}"
+            
             if st.button(
-                f"{mode_data['icon']} {mode_data['label'].split()[-1]}",
+                button_label,
                 key=f"perf_mode_{mode_key}",
                 type="primary" if is_selected else "secondary",
                 help=f"{mode_data['description']}\nModel: {mode_data['model_size']}",
@@ -328,7 +349,7 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
     if selected_perf_mode is None:
         selected_perf_mode = PERFORMANCE_MODE
 
-    selected_mode_data = next(m for m in modes if m["key"] == selected_perf_mode)
+    selected_mode_data = next(m for m in visible_modes if m["key"] == selected_perf_mode)
     with st.expander("ℹ️ Mode Details", expanded=False):
         st.markdown(f"""
         **{selected_mode_data["icon"]} {selected_mode_data["label"]}**
@@ -340,6 +361,19 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         - **Context Size:** {selected_mode_data["context_size"]:,}
         - **Description:** {selected_mode_data["description"]}
         """)
+        
+        # Show hardware warning for server mode
+        if selected_perf_mode == "local_server":
+            hw_info = mode_mgr.hardware_info
+            ram_gb = hw_info.get("total_ram_gb", 0)
+            vram_gb = hw_info.get("gpu_vram_gb", 0)
+            if ram_gb < 64 or vram_gb < 6:
+                st.warning(
+                    f"⚠️ **Server Mode Hardware Requirements Not Met:**\n"
+                    f"- Required: 64GB+ RAM, 6GB+ VRAM\n"
+                    f"- Detected: {ram_gb:.1f}GB RAM, {vram_gb:.1f}GB VRAM\n\n"
+                    f"Mode will still function but may experience degraded performance."
+                )
 
     col_hw1, col_hw2, col_hw3 = st.columns(3)
 

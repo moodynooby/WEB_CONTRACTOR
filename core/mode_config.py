@@ -8,28 +8,47 @@ from typing import Any
 
 
 MODE_PROFILES: dict[str, dict[str, Any]] = {
-    "monster": {
-        "label": "🚀 Monster",
-        "icon": "🚀",
-        "model_size": "70B+ or largest available",
+    "cloud_standard": {
+        "label": "☁️ Cloud Standard",
+        "icon": "☁️",
+        "model_size": "Provider default (typically 7B-70B)",
+        "quality_priority": "high",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "gpu_layers": 0,
+        "cpu_threads": 0,
+        "context_size": 4096,
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.0,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Balanced cloud API usage with default provider settings",
+        "mode_type": "cloud",
+    },
+    "cloud_extended": {
+        "label": "☁️ Cloud Extended",
+        "icon": "☁️",
+        "model_size": "Provider default (extended context)",
         "quality_priority": "maximum",
         "temperature": 0.1,
         "max_tokens": 4096,
-        "gpu_layers": -1,  
-        "cpu_threads": 8,
+        "gpu_layers": 0,
+        "cpu_threads": 0,
         "context_size": 8192,
-        "parallel_workers": 8,
-        "timeout_multiplier": 2.0,
-        "quantization": "Q6_K or higher",
-        "min_vram_gb": 16,
-        "min_ram_gb": 32,
-        "description": "Maximum quality, largest models, highest resource usage",
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.5,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Extended token limits for complex cloud analysis",
+        "mode_type": "cloud",
     },
-    "fast": {
-        "label": "⚡ Fast",
-        "icon": "⚡",
-        "model_size": "13B-34B",
-        "quality_priority": "high",
+    "local_standard": {
+        "label": "💻 Local Standard",
+        "icon": "💻",
+        "model_size": "7B-13B",
+        "quality_priority": "medium",
         "temperature": 0.2,
         "max_tokens": 2048,
         "gpu_layers": -1,
@@ -37,44 +56,29 @@ MODE_PROFILES: dict[str, dict[str, Any]] = {
         "context_size": 4096,
         "parallel_workers": 4,
         "timeout_multiplier": 1.0,
-        "quantization": "Q5_K_M",
-        "min_vram_gb": 8,
-        "min_ram_gb": 16,
-        "description": "Quick responses, balanced quality",
-    },
-    "turbo": {
-        "label": "🔥 Turbo",
-        "icon": "🔥",
-        "model_size": "7B-13B",
-        "quality_priority": "medium",
-        "temperature": 0.3,
-        "max_tokens": 1024,
-        "gpu_layers": 35,
-        "cpu_threads": 4,
-        "context_size": 2048,
-        "parallel_workers": 3,
-        "timeout_multiplier": 0.75,
         "quantization": "Q4_K_M",
         "min_vram_gb": 4,
         "min_ram_gb": 8,
-        "description": "Very fast, minimal models, good for testing",
+        "description": "Balanced local LLM performance for typical hardware",
+        "mode_type": "local",
     },
-    "eco": {
-        "label": "🌱 Eco",
-        "icon": "🌱",
-        "model_size": "1B-7B",
-        "quality_priority": "low",
-        "temperature": 0.5,
-        "max_tokens": 512,
-        "gpu_layers": 0,
-        "cpu_threads": 2,
-        "context_size": 1024,
-        "parallel_workers": 1,
-        "timeout_multiplier": 0.5,
-        "quantization": "Q3_K_S or smaller",
-        "min_vram_gb": 0,
-        "min_ram_gb": 4,
-        "description": "Minimum resource usage, CPU-friendly",
+    "local_server": {
+        "label": "🖥️ Server",
+        "icon": "🖥️",
+        "model_size": "70B+ or largest available",
+        "quality_priority": "maximum",
+        "temperature": 0.05,
+        "max_tokens": 8192,
+        "gpu_layers": -1,
+        "cpu_threads": 16,
+        "context_size": 32768,
+        "parallel_workers": 16,
+        "timeout_multiplier": 3.0,
+        "quantization": "Q8_0 or uncompressed",
+        "min_vram_gb": 6,
+        "min_ram_gb": 64,
+        "description": "Maximum performance for server-grade hardware (128GB RAM, RTX A1000+)",
+        "mode_type": "local",
     },
 }
 
@@ -212,25 +216,40 @@ def get_hardware_info() -> dict[str, Any]:
 
 
 def validate_mode_for_hardware(mode: str, hardware: str | None = None) -> tuple[bool, str]:
-    """Validate if a mode is supported by the detected hardware.
-    
+    """Validate if a mode is compatible with the detected hardware.
+
     Returns:
         Tuple of (is_valid, warning_message)
     """
     if hardware is None:
         hardware = detect_hardware()
-    
+
     profile = get_mode_profile(mode)
-    
-    if hardware == "cpu":
-        if profile["min_vram_gb"] > 0:
-            return False, f"⚠️ {profile['label']} mode requires GPU. Switch to Eco mode or add a GPU."
-        if profile["min_ram_gb"] > 0:
-            import psutil
-            available_ram_gb = psutil.virtual_memory().total / (1024**3)
-            if available_ram_gb < profile["min_ram_gb"]:
-                return False, f"⚠️ {profile['label']} mode requires {profile['min_ram_gb']}GB RAM, but only {available_ram_gb:.1f}GB available."
-    
+    mode_type = profile.get("mode_type", "local")
+
+    # Cloud modes don't need hardware validation
+    if mode_type == "cloud":
+        return True, f"✅ {profile['label']} mode uses cloud resources."
+
+    # Local modes need hardware validation (but show warnings, don't block)
+    import psutil
+
+    available_ram_gb = psutil.virtual_memory().total / (1024**3)
+    warnings = []
+
+    # Check RAM requirement
+    if available_ram_gb < profile["min_ram_gb"]:
+        warnings.append(
+            f"⚠️ {profile['label']} mode recommends {profile['min_ram_gb']}GB RAM, "
+            f"but only {available_ram_gb:.1f}GB detected."
+        )
+
+    # Check VRAM requirement for local modes
+    if profile["min_vram_gb"] > 0 and hardware == "cpu":
+        warnings.append(
+            f"⚠️ {profile['label']} mode requires GPU. "
+            f"Switch to a GPU or use CPU-only mode with smaller models."
+        )
     elif hardware == "gpu_nvidia":
         try:
             import subprocess
@@ -244,8 +263,14 @@ def validate_mode_for_hardware(mode: str, hardware: str | None = None) -> tuple[
                 vram_mb = float(result.stdout.strip())
                 vram_gb = vram_mb / 1024
                 if vram_gb < profile["min_vram_gb"]:
-                    return False, f"⚠️ {profile['label']} mode requires {profile['min_vram_gb']}GB VRAM, but only {vram_gb:.1f}GB available."
+                    warnings.append(
+                        f"⚠️ {profile['label']} mode recommends {profile['min_vram_gb']}GB VRAM, "
+                        f"but only {vram_gb:.1f}GB detected."
+                    )
         except Exception:
             pass
-    
+
+    if warnings:
+        return True, "\n".join(warnings)
+
     return True, f"✅ {profile['label']} mode is supported on your hardware."

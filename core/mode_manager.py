@@ -63,7 +63,7 @@ class ModeManager:
 
         Args:
             llm_mode: "cloud" or "local"
-            performance_mode: "monster", "fast", "turbo", "eco"
+            performance_mode: "cloud_standard", "cloud_extended", "local_standard", "local_server"
             local_provider: "ollama", "llama_cpp", "vllm" (if llm_mode is "local")
 
         Returns:
@@ -175,42 +175,40 @@ class ModeManager:
 
         if hardware == "gpu_nvidia":
             vram_gb = self._hardware_info.get("gpu_vram_gb", 0)
-            if vram_gb >= 16:
-                recommendations["recommended"] = "monster"
-                recommendations["message"] = f"🚀 Your GPU has {vram_gb}GB VRAM - Monster mode recommended!"
-            elif vram_gb >= 8:
-                recommendations["recommended"] = "fast"
-                recommendations["message"] = f"⚡ Your GPU has {vram_gb}GB VRAM - Fast mode recommended"
+            ram_gb = self._hardware_info.get("total_ram_gb", 0)
+            
+            # Server mode: 64GB+ RAM and 6GB+ VRAM
+            if ram_gb >= 64 and vram_gb >= 6:
+                recommendations["recommended"] = "local_server"
+                recommendations["message"] = f"🖥️ Server-grade hardware detected ({ram_gb}GB RAM, {vram_gb}GB VRAM) - Server mode recommended!"
             elif vram_gb >= 4:
-                recommendations["recommended"] = "turbo"
-                recommendations["message"] = f"🔥 Your GPU has {vram_gb}GB VRAM - Turbo mode recommended"
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"💻 GPU with {vram_gb}GB VRAM - Local Standard mode recommended"
             else:
-                recommendations["recommended"] = "eco"
-                recommendations["message"] = f"🌱 Limited VRAM ({vram_gb}GB) - Eco mode recommended"
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"⚠️ Limited VRAM ({vram_gb}GB) - Local Standard mode with smaller models recommended"
 
         elif hardware == "apple_silicon":
             ram_gb = self._hardware_info.get("total_ram_gb", 0)
-            if ram_gb >= 32:
-                recommendations["recommended"] = "monster"
-                recommendations["message"] = f"🚀 Apple Silicon with {ram_gb}GB RAM - Monster mode supported!"
+            if ram_gb >= 64:
+                recommendations["recommended"] = "local_server"
+                recommendations["message"] = f"🖥️ Apple Silicon with {ram_gb}GB RAM - Server mode supported!"
             elif ram_gb >= 16:
-                recommendations["recommended"] = "fast"
-                recommendations["message"] = f"⚡ Apple Silicon with {ram_gb}GB RAM - Fast mode recommended"
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"💻 Apple Silicon with {ram_gb}GB RAM - Local Standard mode recommended"
             else:
-                recommendations["recommended"] = "turbo"
-                recommendations["message"] = f"🔥 Apple Silicon with {ram_gb}GB RAM - Turbo/Eco mode recommended"
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"⚠️ Apple Silicon with {ram_gb}GB RAM - Local Standard mode with smaller models"
 
-        else:  
+        else:
+            # CPU-only mode
             ram_gb = self._hardware_info.get("total_ram_gb", 0)
-            if ram_gb >= 32:
-                recommendations["recommended"] = "fast"
-                recommendations["message"] = f"⚡ CPU-only with {ram_gb}GB RAM - Fast mode possible with quantized models"
-            elif ram_gb >= 16:
-                recommendations["recommended"] = "turbo"
-                recommendations["message"] = f"🔥 CPU-only with {ram_gb}GB RAM - Turbo mode recommended"
+            if ram_gb >= 16:
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"💻 CPU-only with {ram_gb}GB RAM - Local Standard mode possible with quantized models"
             else:
-                recommendations["recommended"] = "eco"
-                recommendations["message"] = f"🌱 CPU-only with {ram_gb}GB RAM - Eco mode recommended"
+                recommendations["recommended"] = "local_standard"
+                recommendations["message"] = f"⚠️ CPU-only with limited RAM ({ram_gb}GB) - Consider cloud mode or upgrade hardware"
 
         return recommendations
 
