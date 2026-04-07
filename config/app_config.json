@@ -12,6 +12,102 @@
     "default_model": "llama-3.1-8b-instant",
     "fallback_model": "google/gemma-2-2b-it:free",
     "timeout_seconds": 30,
+    "performance_modes": [
+      {
+        "key": "cloud_standard",
+        "label": "Cloud Standard",
+        "icon": "☁️",
+        "mode_type": "cloud",
+        "model_size": "Provider default (typically 7B-70B)",
+        "quality_priority": "high",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "context_size": 4096,
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.0,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Balanced cloud API usage with default provider settings"
+      },
+      {
+        "key": "cloud_extended",
+        "label": "Cloud Extended",
+        "icon": "☁️",
+        "mode_type": "cloud",
+        "model_size": "Provider default (extended context)",
+        "quality_priority": "maximum",
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "context_size": 8192,
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.5,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Extended token limits for complex cloud analysis"
+      },
+      {
+        "key": "local_standard",
+        "label": "Local Standard",
+        "icon": "💻",
+        "mode_type": "local",
+        "model_size": "7B-13B",
+        "quality_priority": "medium",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "context_size": 4096,
+        "parallel_workers": 4,
+        "timeout_multiplier": 1.0,
+        "quantization": "Q4_K_M",
+        "min_vram_gb": 4,
+        "min_ram_gb": 8,
+        "description": "Balanced local LLM performance for typical hardware"
+      },
+      {
+        "key": "local_server",
+        "label": "Server",
+        "icon": "🖥️",
+        "mode_type": "local",
+        "model_size": "70B+ or largest available",
+        "quality_priority": "maximum",
+        "temperature": 0.05,
+        "max_tokens": 8192,
+        "context_size": 32768,
+        "parallel_workers": 16,
+        "timeout_multiplier": 3.0,
+        "quantization": "Q8_0 or uncompressed",
+        "min_vram_gb": 6,
+        "min_ram_gb": 64,
+        "description": "Maximum performance for server-grade hardware (128GB RAM, RTX A1000+)"
+      }
+    ],
+    "local_providers": [
+      {
+        "key": "ollama",
+        "name": "Ollama",
+        "default_base_url": "http://localhost:11434/v1",
+        "type": "openai_compatible",
+        "description": "Fastest setup: install, pull model, and run",
+        "setup_url": "https://ollama.com"
+      },
+      {
+        "key": "lm_studio",
+        "name": "LM Studio",
+        "default_base_url": "http://localhost:1234/v1",
+        "type": "openai_compatible",
+        "description": "GUI app with OpenAI-compatible API server",
+        "setup_url": "https://lmstudio.ai"
+      },
+      {
+        "key": "vllm",
+        "name": "vLLM",
+        "default_base_url": "http://localhost:8000/v1",
+        "type": "openai_compatible",
+        "description": "High-performance local serving",
+        "setup_url": "https://github.com/vllm-project/vllm"
+      }
+    ],
     "local": {
       "provider": "ollama",
       "base_url": "http://localhost:11434/v1",

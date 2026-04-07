@@ -1,7 +1,6 @@
 """Telegram Notification Service
 
-Sends notifications to Telegram for pipeline events and errors.
-Also provides helpers for querying stats from bot commands.
+Sends critical-only notifications to Telegram for pipeline events.
 """
 
 import requests
@@ -54,7 +53,7 @@ class TelegramNotifier:
             return True
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to send Telegram message: {e}")
-            self.enabled = False  
+            self.enabled = False
             return False
 
     def notify_pipeline_started(self) -> bool:
@@ -98,32 +97,6 @@ class TelegramNotifier:
 
         return self.send_message(text)
 
-    def notify_stage_completed(self, stage_name: str, stats: dict) -> bool:
-        """Send notification that a pipeline stage has completed.
-
-        Args:
-            stage_name: Name of the completed stage
-            stats: Stage execution statistics
-        """
-        stage_emojis = {
-            "Discovery": "🔍",
-            "Audit": "📋",
-            "Email Generation": "📧",
-            "Email Send": "📤",
-        }
-        emoji = stage_emojis.get(stage_name, "⚙️")
-
-        stats_lines = "\n".join([f"• {k}: {v}" for k, v in stats.items()])
-
-        text = f"""🏗️ *Web Contractor Pipeline*
-
-{emoji} *Stage: {stage_name}*
-✅ Completed
-
-{stats_lines}"""
-
-        return self.send_message(text)
-
     def notify_error(
         self,
         stage_name: str,
@@ -157,76 +130,4 @@ class TelegramNotifier:
 
 🔧 Please check logs for full details."""
 
-        return self.send_message(text)
-
-    def notify_stage_failed(self, stage_name: str, error_message: str) -> bool:
-        """Send notification that a stage has failed.
-
-        Args:
-            stage_name: Name of the failed stage
-            error_message: Error description
-        """
-        stage_emojis = {
-            "Discovery": "🔍",
-            "Audit": "📋",
-            "Email Generation": "📧",
-            "Email Send": "📤",
-        }
-        emoji = stage_emojis.get(stage_name, "⚙️")
-
-        text = f"""🏗️ *Web Contractor Pipeline*
-
-{emoji} *Stage: {stage_name}*
-❌ Failed
-
-📝 *Error*: {error_message}
-
-⚠️ Pipeline will continue with remaining stages."""
-
-        return self.send_message(text)
-
-    def notify_discovery_complete(self, leads_found: int, leads_saved: int) -> bool:
-        """Send notification that discovery stage completed.
-
-        Args:
-            leads_found: Number of leads discovered
-            leads_saved: Number of leads saved to database
-        """
-        text = (
-            f"🏗️ *Web Contractor Pipeline*\n\n"
-            f"🔍 *Discovery Complete*\n\n"
-            f"• Leads Found: {leads_found}\n"
-            f"• Leads Saved: {leads_saved}"
-        )
-        return self.send_message(text)
-
-    def notify_audit_complete(self, audited: int, qualified: int) -> bool:
-        """Send notification that audit stage completed.
-
-        Args:
-            audited: Number of leads audited
-            qualified: Number of leads qualified
-        """
-        rate = f"{(qualified / audited * 100):.1f}%" if audited > 0 else "N/A"
-        text = (
-            f"🏗️ *Web Contractor Pipeline*\n\n"
-            f"📋 *Audit Complete*\n\n"
-            f"• Audited: {audited}\n"
-            f"• Qualified: {qualified} ({rate})"
-        )
-        return self.send_message(text)
-
-    def notify_email_batch_sent(self, sent: int, failed: int) -> bool:
-        """Send notification that email batch was sent.
-
-        Args:
-            sent: Number of emails sent successfully
-            failed: Number of emails that failed
-        """
-        text = (
-            f"🏗️ *Web Contractor Pipeline*\n\n"
-            f"📤 *Email Batch Sent*\n\n"
-            f"• Sent: {sent}\n"
-            f"• Failed: {failed}"
-        )
         return self.send_message(text)

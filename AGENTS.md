@@ -61,7 +61,15 @@
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # run app
+uv run python main.py     # launch Streamlit
+
+# Service manager (cross-platform):
+uv run python main.py run       # Launch Streamlit
+uv run python main.py bot       # Start Telegram bot
+uv run python main.py status    # Show service status
+uv run python main.py stop      # Stop all services
+uv run python main.py setup     # Full setup: deps + auth + start all
+uv run python main.py verify    # Health check
 
 # Before every commit:
 uv run ruff check --fix . && uv run uncomment . && uv run mypy .
@@ -80,7 +88,7 @@ uv run ruff check --fix . && uv run uncomment . && uv run mypy .
 
 ### Telegram Notifications (Optional)
 
-Get pipeline execution notifications directly on your phone via Telegram:
+Get **critical-only** pipeline execution notifications directly on your phone via Telegram:
 
 1. **Create a Telegram Bot:**
    - Open Telegram and search for `@BotFather`
@@ -100,11 +108,21 @@ Get pipeline execution notifications directly on your phone via Telegram:
    TELEGRAM_CHAT_ID=your_chat_id_here
    ```
 
-4. **Notifications you'll receive:**
-   - ✅ Pipeline started
-   - ✅ Each stage completion (with metrics)
-   - ✅ Pipeline fully completed (summary)
-   - ❌ Stage failures (with error details)
-   - ❌ Pipeline-level errors
+4. **Start the bot:**
+   ```bash
+   uv run python main.py bot
+   ```
 
-> **Note:** Pipeline will run without notifications if Telegram is not configured.
+5. **Notifications you'll receive (critical only):**
+   - ✅ Pipeline started
+   - ✅ Pipeline completed (full summary)
+   - ❌ Errors / stage failures
+
+6. **Interactive bot commands:**
+   - `/status` — Show current pipeline stats
+   - `/run <limit>` — Run full pipeline remotely
+   - `/audit <n>` — Audit N pending leads
+   - `/cancel` — Cancel running pipeline
+   - `/help` — Show all commands
+
+> **Note:** Pipeline will run without notifications if Telegram is not configured. The bot is optional — critical notifications are sent from the pipeline itself even without the interactive bot.

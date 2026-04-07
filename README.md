@@ -1,31 +1,51 @@
-# Web Contractor - Agent Guidelines
+# Web Contractor
 
-## Development
-
-### Commands
+## Quick Start
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # run app
-
-# Before every commit:
-uv run ruff check --fix . && uv run uncomment . && uv run mypy .
+uv run python main.py     # launch Streamlit
 ```
 
-### Type Hints Philosophy
+## Service Manager (Cross-Platform)
 
-- **Pragmatic approach**: This is an app, not a library
-- Use simple types: `list`, `dict`, `str | None` instead of `List[Dict]`, `Optional[str]`
-- Mypy configured to ignore ORM/framework dynamic attributes
-- Type hints help IDE autocomplete, not fight the type system
+`main.py` is the single entry point for all services — works on Linux, macOS, and Windows.
 
----
+```bash
+uv run python main.py run       # Launch Streamlit (default)
+uv run python main.py bot       # Start Telegram bot (background)
+uv run python main.py status    # Show service status
+uv run python main.py stop      # Stop all services
+uv run python main.py setup     # Full setup: deps + auth + start all
+uv run python main.py verify    # Health check
+```
 
-## Configuration
+## Telegram Integration
 
-### Telegram Notifications (Optional)
+### Critical-Only Notifications
 
-Get pipeline execution notifications directly on your phone via Telegram:
+Get pipeline execution notifications directly on your phone via Telegram. Only **critical** events are sent:
+
+- ✅ Pipeline started
+- ✅ Pipeline completed (full summary with all stage metrics)
+- ❌ Errors / stage failures (with traceback)
+
+### Interactive Bot Commands
+
+The Telegram bot also provides interactive commands for remote control:
+
+| Command | Description |
+|---|---|
+| `/status` | Show current pipeline stats |
+| `/run <limit>` | Run full pipeline remotely |
+| `/audit <n>` | Audit N pending leads |
+| `/discovery <n>` | Run discovery with N queries |
+| `/cancel` | Cancel running pipeline |
+| `/leads` | Show lead counts by status |
+| `/buckets` | Show bucket summary |
+| `/help` | Show all commands |
+
+### Setup
 
 1. **Create a Telegram Bot:**
    - Open Telegram and search for `@BotFather`
@@ -45,11 +65,9 @@ Get pipeline execution notifications directly on your phone via Telegram:
    TELEGRAM_CHAT_ID=your_chat_id_here
    ```
 
-4. **Notifications you'll receive:**
-   - ✅ Pipeline started
-   - ✅ Each stage completion (with metrics)
-   - ✅ Pipeline fully completed (summary)
-   - ❌ Stage failures (with error details)
-   - ❌ Pipeline-level errors
+4. **Start the bot:**
+   ```bash
+   uv run python main.py bot
+   ```
 
-> **Note:** Pipeline will run without notifications if Telegram is not configured.
+> **Note:** Pipeline will run without notifications if Telegram is not configured. The bot is optional — you get critical notifications from the pipeline even without running the bot separately.

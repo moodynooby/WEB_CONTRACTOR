@@ -119,8 +119,17 @@ def test_connection(llm_mode: str, local_provider: str | None = None) -> list[di
                 })
             except Exception as e:
                 results.append({"name": "vLLM", "status": "error", "message": f"Cannot connect to {url}: {e}"})
-        elif local_provider == "llama_cpp":
-            results.append({"name": "llama-cpp-python", "status": "success", "message": "Python library (no server needed)"})
+        elif local_provider == "lm_studio":
+            url = "http://localhost:1234"
+            try:
+                response = requests.get(f"{url}/v1/models", timeout=5)
+                results.append({
+                    "name": "LM Studio",
+                    "status": "success" if response.status_code == 200 else "error",
+                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
+                })
+            except Exception as e:
+                results.append({"name": "LM Studio", "status": "error", "message": f"Cannot connect to {url}: {e}"})
 
     return results
 
@@ -795,9 +804,6 @@ if st.session_state.pipeline_running:
             st.session_state.pipeline_stage_status[stage["key"]] = "completed"
             st.session_state.pipeline_results[stage["key"]] = all_stats[stage["key"]]
 
-            if telegram:
-                telegram.notify_stage_completed(stage["name"], all_stats[stage["key"]])
-
         except Exception as e:
             error_msg = str(e)
             tb = traceback.format_exc()
@@ -826,8 +832,6 @@ if st.session_state.pipeline_running:
                 status_text.warning(
                     f"⚠️ {stage['name']} failed, continuing with next stage..."
                 )
-                if telegram:
-                    telegram.notify_stage_failed(stage["name"], error_msg)
 
         st.rerun()
 
