@@ -79,7 +79,7 @@ SMTP_PORT: Final[int] = _int(_email, "smtp_port", 587)
 _llm = _section("llm")
 LLM_MODE: Final[str] = _llm.get("mode", "cloud")  
 PERFORMANCE_MODE: Final[str] = _llm.get(
-    "performance_mode", "fast"
+    "performance_mode", "cloud_standard"
 )  
 DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
 DEFAULT_MODEL: Final[str] = _llm.get("default_model", "llama-3.1-8b-instant")

@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from typing import Any
 
 import requests
 
@@ -22,12 +23,113 @@ from core.settings import (
     LOCAL_BASE_URL,
     LOCAL_MODEL,
 )
-from core.mode_config import get_mode_profile
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
 _local = threading.local()
+
+# Performance Mode Profiles
+MODE_PROFILES: dict[str, dict[str, Any]] = {
+    "cloud_standard": {
+        "label": "☁️ Cloud Standard",
+        "icon": "☁️",
+        "model_size": "Provider default (typically 7B-70B)",
+        "quality_priority": "high",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "gpu_layers": 0,
+        "cpu_threads": 0,
+        "context_size": 4096,
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.0,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Balanced cloud API usage with default provider settings",
+        "mode_type": "cloud",
+    },
+    "cloud_extended": {
+        "label": "☁️ Cloud Extended",
+        "icon": "☁️",
+        "model_size": "Provider default (extended context)",
+        "quality_priority": "maximum",
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "gpu_layers": 0,
+        "cpu_threads": 0,
+        "context_size": 8192,
+        "parallel_workers": 0,
+        "timeout_multiplier": 1.5,
+        "quantization": "N/A (cloud)",
+        "min_vram_gb": 0,
+        "min_ram_gb": 0,
+        "description": "Extended token limits for complex cloud analysis",
+        "mode_type": "cloud",
+    },
+    "local_standard": {
+        "label": "💻 Local Standard",
+        "icon": "💻",
+        "model_size": "7B-13B",
+        "quality_priority": "medium",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "gpu_layers": -1,
+        "cpu_threads": 4,
+        "context_size": 4096,
+        "parallel_workers": 4,
+        "timeout_multiplier": 1.0,
+        "quantization": "Q4_K_M",
+        "min_vram_gb": 4,
+        "min_ram_gb": 8,
+        "description": "Balanced local LLM performance for typical hardware",
+        "mode_type": "local",
+    },
+    "local_server": {
+        "label": "🖥️ Server",
+        "icon": "🖥️",
+        "model_size": "70B+ or largest available",
+        "quality_priority": "maximum",
+        "temperature": 0.05,
+        "max_tokens": 8192,
+        "gpu_layers": -1,
+        "cpu_threads": 16,
+        "context_size": 32768,
+        "parallel_workers": 16,
+        "timeout_multiplier": 3.0,
+        "quantization": "Q8_0 or uncompressed",
+        "min_vram_gb": 6,
+        "min_ram_gb": 64,
+        "description": "Maximum performance for server-grade hardware (128GB RAM, RTX A1000+)",
+        "mode_type": "local",
+    },
+}
+
+# Local LLM Providers
+LOCAL_PROVIDERS: dict[str, dict[str, Any]] = {
+    "ollama": {
+        "name": "Ollama",
+        "default_base_url": "http://localhost:11434/v1",
+        "type": "openai_compatible",
+        "description": "Easy to use, supports many models",
+        "setup_url": "https://ollama.com",
+    },
+    "llama_cpp": {
+        "name": "llama-cpp-python",
+        "default_base_url": None,
+        "type": "native",
+        "description": "Direct GGUF model loading, more control",
+        "setup_url": "https://github.com/abetlen/llama-cpp-python",
+    },
+    "vllm": {
+        "name": "vLLM",
+        "default_base_url": "http://localhost:8000/v1",
+        "type": "openai_compatible",
+        "description": "High-performance local serving",
+        "setup_url": "https://github.com/vllm-project/vllm",
+    },
+}
+
 
 PROVIDERS = {
     "groq": {
@@ -470,3 +572,37 @@ IMPORTANT:
         raise
     except Exception as e:
         raise LLMError(f"Bucket generation failed: {e}")
+
+
+# Mode Management Helper Functions
+
+def get_mode_profile(mode: str) -> dict[str, Any]:
+    """Get a performance mode profile by name."""
+    if mode not in MODE_PROFILES:
+        raise ValueError(
+            f"Unknown mode: {mode}. Available: {list(MODE_PROFILES.keys())}"
+        )
+    return MODE_PROFILES[mode]
+
+
+def get_local_provider_config(provider: str) -> dict[str, Any]:
+    """Get local provider configuration by name."""
+    if provider not in LOCAL_PROVIDERS:
+        raise ValueError(
+            f"Unknown provider: {provider}. Available: {list(LOCAL_PROVIDERS.keys())}"
+        )
+    return LOCAL_PROVIDERS[provider]
+
+
+def get_all_modes() -> list[dict[str, Any]]:
+    """Get all available performance modes."""
+    return [
+        {"key": key, **value} for key, value in MODE_PROFILES.items()
+    ]
+
+
+def get_all_local_providers() -> list[dict[str, Any]]:
+    """Get all available local providers."""
+    return [
+        {"key": key, **value} for key, value in LOCAL_PROVIDERS.items()
+    ]

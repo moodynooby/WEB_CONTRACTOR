@@ -5,19 +5,124 @@ import time
 import traceback
 from pathlib import Path
 
+import requests
 import streamlit as st
 
 from core import settings
-from core.settings import LOCAL_PROVIDER, PERFORMANCE_MODE
+from core.settings import LOCAL_PROVIDER, PERFORMANCE_MODE, LLM_MODE
 from core.logging import get_logger
 from core.streamlit_utils import get_app
 from core.telegram import TelegramNotifier
-from core.mode_manager import get_mode_manager
-from core.mode_config import get_all_modes, get_all_local_providers
+from core.llm import get_all_modes, get_all_local_providers
 
 logger = get_logger(__name__)
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "app_config.json"
+
+
+def get_current_settings() -> dict:
+    """Get current mode settings from configuration."""
+    from core.llm import get_mode_profile
+
+    perf_profile = get_mode_profile(PERFORMANCE_MODE)
+    return {
+        "llm_mode": LLM_MODE,
+        "performance_mode": PERFORMANCE_MODE,
+        "local_provider": LOCAL_PROVIDER if LLM_MODE == "local" else None,
+        "profile": perf_profile,
+        "is_local": LLM_MODE == "local",
+    }
+
+
+def save_mode_settings(llm_mode: str, perf_mode: str, local_provider: str | None = None) -> tuple[bool, str]:
+    """Save mode settings to configuration file."""
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            config = json.load(f)
+
+        config.setdefault("llm", {})["mode"] = llm_mode
+        config["llm"]["performance_mode"] = perf_mode
+
+        if llm_mode == "local" and local_provider:
+            config["llm"].setdefault("local", {})["provider"] = local_provider
+
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+
+        return True, "Settings saved successfully"
+    except Exception as e:
+        return False, f"Failed to save settings: {e}"
+
+
+def test_connection(llm_mode: str, local_provider: str | None = None) -> list[dict]:
+    """Test connection for current mode. Returns list of test results."""
+    results = []
+
+    if llm_mode == "cloud":
+        # Test Groq
+        if settings.GROQ_API_KEY:
+            try:
+                response = requests.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                    timeout=5,
+                )
+                results.append({
+                    "name": "Groq API",
+                    "status": "success" if response.status_code == 200 else "error",
+                    "message": f"Connected (status {response.status_code})" if response.status_code == 200 else f"Failed (status {response.status_code})"
+                })
+            except Exception as e:
+                results.append({"name": "Groq API", "status": "error", "message": str(e)})
+        else:
+            results.append({"name": "Groq API", "status": "warning", "message": "API key not configured"})
+
+        # Test OpenRouter
+        if settings.OPENROUTER_API_KEY:
+            try:
+                response = requests.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"},
+                    timeout=5,
+                )
+                results.append({
+                    "name": "OpenRouter API",
+                    "status": "success" if response.status_code == 200 else "error",
+                    "message": f"Connected (status {response.status_code})" if response.status_code == 200 else f"Failed (status {response.status_code})"
+                })
+            except Exception as e:
+                results.append({"name": "OpenRouter API", "status": "error", "message": str(e)})
+        else:
+            results.append({"name": "OpenRouter API", "status": "warning", "message": "API key not configured"})
+
+    elif llm_mode == "local" and local_provider:
+        # Test local provider
+        if local_provider == "ollama":
+            url = "http://localhost:11434"
+            try:
+                response = requests.get(f"{url}", timeout=5)
+                results.append({
+                    "name": "Ollama",
+                    "status": "success" if response.status_code == 200 else "error",
+                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
+                })
+            except Exception as e:
+                results.append({"name": "Ollama", "status": "error", "message": f"Cannot connect to {url}: {e}"})
+        elif local_provider == "vllm":
+            url = "http://localhost:8000"
+            try:
+                response = requests.get(f"{url}/v1/models", timeout=5)
+                results.append({
+                    "name": "vLLM",
+                    "status": "success" if response.status_code == 200 else "error",
+                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
+                })
+            except Exception as e:
+                results.append({"name": "vLLM", "status": "error", "message": f"Cannot connect to {url}: {e}"})
+        elif local_provider == "llama_cpp":
+            results.append({"name": "llama-cpp-python", "status": "success", "message": "Python library (no server needed)"})
+
+    return results
 
 st.set_page_config(
     page_title="Pipeline",
@@ -242,25 +347,23 @@ with st.expander("🔧 Feature Toggles", expanded=True):
             help="Generate personalized cold emails for qualified leads",
         )
 
-mode_mgr = get_mode_manager()
-current_mode = mode_mgr.get_current_mode()
+current_settings = get_current_settings()
 
 with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
     st.info(
         "💡 **Tip:** Switch between Cloud and Local LLM inference, and choose your performance mode"
     )
 
-    mode_icon = "☁️" if not current_mode["is_local"] else "🖥️"
+    mode_icon = "☁️" if not current_settings["is_local"] else "🖥️"
     mode_label = (
         "Cloud"
-        if not current_mode["is_local"]
-        else f"Local ({current_mode['local_provider']})"
+        if not current_settings["is_local"]
+        else f"Local ({current_settings['local_provider']})"
     )
-    perf_mode = current_mode["profile"]
+    perf_mode = current_settings["profile"]
 
     st.markdown(
-        f"**Current:** {mode_icon} {mode_label} | {perf_mode['icon']} {perf_mode['label']} | "
-        f"Hardware: {current_mode['hardware'].replace('_', ' ').upper()}"
+        f"**Current:** {mode_icon} {mode_label} | {perf_mode['icon']} {perf_mode['label']}"
     )
 
     col_mode1, col_mode2 = st.columns(2)
@@ -273,7 +376,7 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
             format_func=lambda x: "☁️ Cloud (Groq/OpenRouter)"
             if x == "cloud"
             else "🖥️ Local (On-device)",
-            index=0 if current_mode["llm_mode"] == "cloud" else 1,
+            index=0 if current_settings["llm_mode"] == "cloud" else 1,
             horizontal=True,
             label_visibility="collapsed",
             key="llm_mode_radio",
@@ -323,22 +426,8 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         mode_data = visible_modes[idx]
         with col:
             is_selected = idx == current_perf_idx
-            
-            # Check if hardware meets requirements for local_server mode
-            show_warning = False
-            if mode_key == "local_server":
-                hw_info = mode_mgr.hardware_info
-                ram_gb = hw_info.get("total_ram_gb", 0)
-                vram_gb = hw_info.get("gpu_vram_gb", 0)
-                if ram_gb < 64 or vram_gb < 6:
-                    show_warning = True
-            
-            button_label = f"{mode_data['icon']} {mode_data['label'].split()[-1]}"
-            if show_warning:
-                button_label = f"⚠️ {button_label}"
-            
             if st.button(
-                button_label,
+                f"{mode_data['icon']} {mode_data['label'].split()[-1]}",
                 key=f"perf_mode_{mode_key}",
                 type="primary" if is_selected else "secondary",
                 help=f"{mode_data['description']}\nModel: {mode_data['model_size']}",
@@ -347,9 +436,13 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
                 selected_perf_mode = mode_key
 
     if selected_perf_mode is None:
-        selected_perf_mode = PERFORMANCE_MODE
+        # Fallback: use current config mode if it matches visible modes, otherwise first visible
+        if PERFORMANCE_MODE in mode_options:
+            selected_perf_mode = PERFORMANCE_MODE
+        else:
+            selected_perf_mode = mode_options[0]
 
-    selected_mode_data = next(m for m in visible_modes if m["key"] == selected_perf_mode)
+    selected_mode_data = next((m for m in visible_modes if m["key"] == selected_perf_mode), visible_modes[0])
     with st.expander("ℹ️ Mode Details", expanded=False):
         st.markdown(f"""
         **{selected_mode_data["icon"]} {selected_mode_data["label"]}**
@@ -361,64 +454,20 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         - **Context Size:** {selected_mode_data["context_size"]:,}
         - **Description:** {selected_mode_data["description"]}
         """)
-        
-        # Show hardware warning for server mode
-        if selected_perf_mode == "local_server":
-            hw_info = mode_mgr.hardware_info
-            ram_gb = hw_info.get("total_ram_gb", 0)
-            vram_gb = hw_info.get("gpu_vram_gb", 0)
-            if ram_gb < 64 or vram_gb < 6:
-                st.warning(
-                    f"⚠️ **Server Mode Hardware Requirements Not Met:**\n"
-                    f"- Required: 64GB+ RAM, 6GB+ VRAM\n"
-                    f"- Detected: {ram_gb:.1f}GB RAM, {vram_gb:.1f}GB VRAM\n\n"
-                    f"Mode will still function but may experience degraded performance."
-                )
 
-    col_hw1, col_hw2, col_hw3 = st.columns(3)
-
-    with col_hw1:
-        if st.button("🔍 Detect Hardware", use_container_width=True):
-            hw_info = mode_mgr.hardware_info
-            st.session_state.hardware_detected = True
-            st.session_state.hardware_info = hw_info
-
-    with col_hw2:
-        if st.button("✅ Validate Mode", use_container_width=True):
-            is_valid, message = mode_mgr.validate_mode(selected_perf_mode)
-            if is_valid:
-                st.success(message)
-            else:
-                st.warning(message)
-
-    with col_hw3:
-        if llm_mode_option == "local" and selected_provider:
-            if st.button("🔌 Test Connection", use_container_width=True):
-                with st.spinner("Testing local provider..."):
-                    is_available, message = mode_mgr.test_local_provider(
-                        selected_provider
-                    )
-                    if is_available:
-                        st.success(message)
-                    else:
-                        st.error(message)
-
-    if st.session_state.get("hardware_detected"):
-        hw_info = st.session_state.get("hardware_info", {})
-        st.info(
-            f"**Hardware Detected:** {hw_info.get('profile', 'unknown').replace('_', ' ').upper()}\n"
-            f"- CPU Threads: {hw_info.get('cpu_threads', 'N/A')}\n"
-            f"- RAM: {hw_info.get('total_ram_gb', 'N/A')} GB\n"
-            + (
-                f"- GPU: {hw_info.get('gpu_name', 'N/A')} ({hw_info.get('gpu_vram_gb', 'N/A')} GB VRAM)\n"
-                if hw_info.get("gpu_name")
-                else ""
-            )
-        )
-
-    recommendations = mode_mgr.get_mode_recommendations()
-    if recommendations:
-        st.info(f"**Recommendation:** {recommendations.get('message', '')}")
+    # Test Connection button - works for both cloud and local
+    if st.button("🔌 Test Connection", use_container_width=True):
+        with st.spinner("Testing connection(s)..."):
+            local_prov = selected_provider if llm_mode_option == "local" else None
+            results = test_connection(llm_mode_option, local_prov)
+            
+            for result in results:
+                if result["status"] == "success":
+                    st.success(f"✅ **{result['name']}:** {result['message']}")
+                elif result["status"] == "warning":
+                    st.warning(f"⚠️ **{result['name']}:** {result['message']}")
+                else:
+                    st.error(f"❌ **{result['name']}:** {result['message']}")
 
     st.divider()
     col_apply1, col_apply2, col_apply3 = st.columns([1, 2, 1])
@@ -427,7 +476,7 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
             "💾 Apply Mode Settings", type="primary", use_container_width=True
         ):
             local_prov = selected_provider if llm_mode_option == "local" else None
-            success, message = mode_mgr.apply_mode(
+            success, message = save_mode_settings(
                 llm_mode=llm_mode_option,
                 performance_mode=selected_perf_mode,
                 local_provider=local_prov,
