@@ -171,6 +171,7 @@ class WebContractorApp:
         subject: str,
         body: str,
         campaign_id: Optional[int] = None,
+        lead_id: Optional[str] = None,
     ) -> bool:
         """Send single email."""
         try:
@@ -179,6 +180,7 @@ class WebContractorApp:
                 subject=subject,
                 body=body,
                 campaign_id=campaign_id,
+                lead_id=lead_id,
             )
             if success:
                 self.logger.info(f"Email sent to {to_email}")

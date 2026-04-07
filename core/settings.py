@@ -146,19 +146,15 @@ def _validate_mongodb_uri(uri: str) -> bool:
     """Basic validation of MongoDB URI format."""
     if not uri:
         return False
-    # Check for common MongoDB URI patterns
     valid_prefixes = (
         "mongodb://",
         "mongodb+srv://",
     )
     if not any(uri.startswith(prefix) for prefix in valid_prefixes):
         return False
-    # Basic sanity check - should have @ for authenticated URIs
     if "mongodb+srv://" in uri or "mongodb://" in uri:
-        # Allow localhost URIs without auth
         if "localhost" in uri or "127.0.0.1" in uri:
             return True
-        # Cloud URIs should have credentials
         if "@" not in uri and "localhost" not in uri:
             return False
     return True
@@ -195,7 +191,6 @@ def _validate_secrets() -> None:
             RuntimeWarning,
         )
 
-    # Validate MongoDB URI
     if MONGODB_URI and not _validate_mongodb_uri(MONGODB_URI):
         warnings.warn(
             f"MONGODB_URI appears to be invalid. Ensure it starts with 'mongodb://' or 'mongodb+srv://'. Got: {MONGODB_URI[:30]}...",

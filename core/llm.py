@@ -1,5 +1,6 @@
 """LLM Client Module - Groq + OpenRouter with local provider support"""
 
+import json
 import threading
 import time
 
@@ -358,10 +359,114 @@ def get_provider_info() -> dict:
         "default_model": DEFAULT_MODEL if LLM_MODE == "cloud" else LOCAL_MODEL,
         "fallback_model": FALLBACK_MODEL,
     }
-    
+
     if LLM_MODE == "local":
         info["local_provider"] = LOCAL_PROVIDER
         info["local_base_url"] = LOCAL_BASE_URL
         info["local_model"] = LOCAL_MODEL
-    
+
     return info
+
+
+def generate_bucket_config(
+    business_type: str,
+    target_locations: list[str],
+    max_queries: int = 10,
+    max_results: int = 50,
+) -> dict:
+    """Generate bucket configuration using LLM.
+
+    Args:
+        business_type: Type of business (e.g., "dentists", "yoga studios")
+        target_locations: List of target cities/regions
+        max_queries: Maximum queries per run (default: 10)
+        max_results: Maximum results per query (default: 50)
+
+    Returns:
+        Dictionary with bucket configuration including:
+        - name: Bucket name
+        - categories: List of business categories
+        - search_patterns: List of search query patterns
+        - geographic_segments: List of locations
+        - intent_profile: User intent description
+        - priority: Priority level (1-5)
+        - monthly_target: Target leads per month
+        - daily_email_limit: Daily email limit
+
+    Raises:
+        LLMError: If LLM generation fails
+    """
+    system_message = """You are an expert at creating search bucket configurations for lead generation. 
+Your job is to analyze a business type and generate optimal search patterns that potential clients would use to find such businesses.
+
+Rules:
+1. Search patterns should be realistic queries people actually type
+2. Include variations with location modifiers
+3. Categories should cover related business types
+4. Keep it practical - max 10 search patterns
+5. All output MUST be valid JSON"""
+
+    locations_str = ", ".join(target_locations) if target_locations else "All India"
+
+    prompt = f"""Generate a bucket configuration for '{business_type}' businesses targeting: {locations_str}
+
+Return ONLY a JSON object with this exact structure (no markdown, no explanation):
+{{
+  "name": "{business_type.lower().replace(' ', '_')}",
+  "categories": ["{business_type}", "related category 1", "related category 2"],
+  "search_patterns": [
+    "best {{service}} in {{city}}",
+    "top rated {{service}} near me",
+    "affordable {{service}} {{city}}"
+  ],
+  "geographic_segments": {json.dumps(target_locations)},
+  "intent_profile": "Looking for professional {{service}} services in {{location}}",
+  "priority": 3,
+  "monthly_target": 100,
+  "max_queries": {max_queries},
+  "max_results": {max_results},
+  "daily_email_limit": 50
+}}
+
+IMPORTANT: 
+- Replace {{service}} with actual service terms for {business_type}
+- Include 5-10 realistic search patterns
+- Make categories specific to the business type
+- Return ONLY valid JSON, no other text"""
+
+    try:
+        response = generate(
+            prompt=prompt,
+            system=system_message,
+            format_json=True,
+            timeout=LLM_TIMEOUT * 2,  # Give more time for complex generation
+        )
+        
+        config = json.loads(response)
+        
+        # Validate required fields
+        required_fields = ["name", "categories", "search_patterns", "geographic_segments"]
+        missing_fields = [f for f in required_fields if f not in config]
+        
+        if missing_fields:
+            raise LLMError(f"LLM response missing required fields: {', '.join(missing_fields)}")
+        
+        # Ensure name is safe
+        config["name"] = config["name"].lower().replace(" ", "_").replace("-", "_")
+        
+        # Set defaults for optional fields
+        config.setdefault("intent_profile", f"Looking for {business_type} services")
+        config.setdefault("priority", 3)
+        config.setdefault("monthly_target", 100)
+        config.setdefault("max_queries", max_queries)
+        config.setdefault("max_results", max_results)
+        config.setdefault("daily_email_limit", 50)
+        
+        return config
+        
+    except json.JSONDecodeError as e:
+        raise LLMError(f"Failed to parse LLM response as JSON: {e}")
+    except LLMError:
+        raise
+    except Exception as e:
+        raise LLMError(f"Bucket generation failed: {e}")

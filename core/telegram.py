@@ -1,6 +1,7 @@
 """Telegram Notification Service
 
 Sends notifications to Telegram for pipeline events and errors.
+Also provides helpers for querying stats from bot commands.
 """
 
 import requests
@@ -182,4 +183,50 @@ class TelegramNotifier:
 
 ⚠️ Pipeline will continue with remaining stages."""
 
+        return self.send_message(text)
+
+    def notify_discovery_complete(self, leads_found: int, leads_saved: int) -> bool:
+        """Send notification that discovery stage completed.
+
+        Args:
+            leads_found: Number of leads discovered
+            leads_saved: Number of leads saved to database
+        """
+        text = (
+            f"🏗️ *Web Contractor Pipeline*\n\n"
+            f"🔍 *Discovery Complete*\n\n"
+            f"• Leads Found: {leads_found}\n"
+            f"• Leads Saved: {leads_saved}"
+        )
+        return self.send_message(text)
+
+    def notify_audit_complete(self, audited: int, qualified: int) -> bool:
+        """Send notification that audit stage completed.
+
+        Args:
+            audited: Number of leads audited
+            qualified: Number of leads qualified
+        """
+        rate = f"{(qualified / audited * 100):.1f}%" if audited > 0 else "N/A"
+        text = (
+            f"🏗️ *Web Contractor Pipeline*\n\n"
+            f"📋 *Audit Complete*\n\n"
+            f"• Audited: {audited}\n"
+            f"• Qualified: {qualified} ({rate})"
+        )
+        return self.send_message(text)
+
+    def notify_email_batch_sent(self, sent: int, failed: int) -> bool:
+        """Send notification that email batch was sent.
+
+        Args:
+            sent: Number of emails sent successfully
+            failed: Number of emails that failed
+        """
+        text = (
+            f"🏗️ *Web Contractor Pipeline*\n\n"
+            f"📤 *Email Batch Sent*\n\n"
+            f"• Sent: {sent}\n"
+            f"• Failed: {failed}"
+        )
         return self.send_message(text)

@@ -1,9 +1,10 @@
 """Web Contractor - Streamlit Web UI Entry Point."""
 
+import hashlib
 import traceback
+
 import streamlit as st
 from core.app_core import WebContractorApp
-from core.mode_manager import get_mode_manager
 
 st.set_page_config(
     page_title="Web Contractor",
@@ -11,6 +12,47 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Authentication ──────────────────────────────────────────────────────
+VALID_USERNAME = "admin"
+VALID_PASSWORD_HASH = hashlib.sha256("changeme".encode()).hexdigest()
+
+
+def show_login() -> bool:
+    """Show login form and return True if authenticated."""
+    st.title("🔐 Web Contractor Login")
+
+    with st.form("login_form"):
+        username = st.text_input("Username", autocomplete="username")
+        password = st.text_input("Password", type="password", autocomplete="current-password")
+        submitted = st.form_submit_button("Login", use_container_width=True)
+
+        if submitted:
+            if username and password:
+                pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+                if username == VALID_USERNAME and pwd_hash == VALID_PASSWORD_HASH:
+                    st.session_state["logged_in"] = True
+                    st.session_state["username"] = username
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+            else:
+                st.error("Please enter both username and password")
+
+    return False
+
+
+if not st.session_state.get("logged_in"):
+    show_login()
+    st.stop()
+
+# Authenticated UI
+with st.sidebar:
+    st.caption(f"👤 Logged in as: **{st.session_state.get('username', 'User')}**")
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.pop("logged_in", None)
+        st.session_state.pop("username", None)
+        st.rerun()
 
 
 def setup_global_error_handler():
@@ -82,26 +124,6 @@ setup_global_error_handler()
 if "app" not in st.session_state:
     st.session_state.app = WebContractorApp()
     st.session_state.app.initialize()
-
-with st.sidebar:
-    st.markdown("---")
-    mode_mgr = get_mode_manager()
-    current_mode = mode_mgr.get_current_mode()
-
-    mode_icon = "☁️" if not current_mode["is_local"] else "🖥️"
-    mode_label = (
-        "Cloud"
-        if not current_mode["is_local"]
-        else f"Local ({current_mode['local_provider']})"
-    )
-    perf_mode = current_mode["profile"]
-
-    st.markdown(f"### {mode_icon} {mode_label}")
-    st.markdown(f"**{perf_mode['icon']} {perf_mode['label']}**")
-    st.caption(f"Hardware: {current_mode['hardware'].replace('_', ' ').upper()}")
-
-    st.markdown("---")
-    st.caption("💡 Configure modes in Pipeline page → LLM Mode & Performance Settings")
 
 pg = st.navigation(
     [

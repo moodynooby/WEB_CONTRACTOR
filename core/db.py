@@ -10,6 +10,8 @@ Features:
 """
 
 import json
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -23,7 +25,6 @@ from core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ─── Globals ───────────────────────────────────────────────────────────────
 
 _client: MongoClient | None = None
 _database: Any | None = None
@@ -31,12 +32,11 @@ _db_lock = threading.Lock()
 _is_initialized = False
 _is_healthy = False
 
-# ─── Circuit Breaker ───────────────────────────────────────────────────────
 
 class CircuitState(Enum):
-    CLOSED = "closed"       # Normal operation
-    OPEN = "open"           # Failing fast, not calling MongoDB
-    HALF_OPEN = "half_open" # Testing if MongoDB is back
+    CLOSED = "closed"       
+    OPEN = "open"           
+    HALF_OPEN = "half_open" 
 
 class CircuitBreaker:
     """Simple circuit breaker to prevent hammering a failing MongoDB."""
@@ -91,35 +91,32 @@ class CircuitBreaker:
 
 _circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30)
 
-# ─── Disk-based fallback for when DB is unreachable ────────
 
 _PENDING_WRITES_DIR = Path(__file__).parent.parent / "data" / "pending_writes"
 _PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
 _pending_writes_lock = threading.Lock()
-PENDING_WRITES_TTL_DAYS = 7  # Cleanup writes older than 7 days
+PENDING_WRITES_TTL_DAYS = 7  
 
 
-# ─── Connection Configuration ──────────────────────────────────────────────
 
 def _create_configured_client() -> MongoClient:
     """Create MongoDB client with production-grade connection pooling."""
     return MongoClient(
         MONGODB_URI,
-        maxPoolSize=50,           # Max concurrent connections
-        minPoolSize=5,            # Keep minimum connections alive
-        maxIdleTimeMS=300000,     # Close idle connections after 5 min
-        serverSelectionTimeoutMS=5000,  # Fail fast if unreachable
+        maxPoolSize=50,           
+        minPoolSize=5,            
+        maxIdleTimeMS=300000,     
+        serverSelectionTimeoutMS=5000,  
         connectTimeoutMS=10000,
         socketTimeoutMS=30000,
-        retryWrites=True,         # Auto-retry writes on transient errors
-        retryReads=True,          # Auto-retry reads on transient errors
-        tls=True,                 # Enforce TLS for security
+        retryWrites=True,         
+        retryReads=True,          
+        tls=True,                 
         tlsAllowInvalidCertificates=False,
         uuidRepresentation="standard",
     )
 
 
-# ─── Health Check ──────────────────────────────────────────────────────────
 
 def _ping_database() -> bool:
     """Check if MongoDB is reachable with a ping command."""
@@ -141,35 +138,69 @@ def is_healthy() -> bool:
     return _is_healthy and _database is not None
 
 
-# ─── Index Creation ────────────────────────────────────────────────────────
 
 def _create_indexes(db: Any) -> None:
     """Create required indexes for collections."""
-    # Leads collection
     db.leads.create_index("website", unique=True)
     db.leads.create_index("status")
     db.leads.create_index("bucket_id")
     db.leads.create_index("created_at")
 
-    # Buckets collection
-    db.buckets.create_index("name", unique=True)
+    db.leads.create_index([("status", 1), ("website", 1)])
+    db.leads.create_index([("status", 1), ("bucket_id", 1)])
+    db.leads.create_index([("status", 1), ("created_at", -1)])
 
-    # Query performance collection
+    # Handle buckets.name index - drop if exists without collation
+    try:
+        existing_indexes = db.buckets.list_indexes()
+        for idx in existing_indexes:
+            if idx.get("key") == {"name": 1}:
+                if not idx.get("collation"):
+                    # Drop old index without collation
+                    db.buckets.drop_index(idx["name"])
+                    logger.info(f"Dropped old index '{idx['name']}' from buckets collection")
+                break
+    except Exception as e:
+        logger.warning(f"Error checking buckets indexes: {e}")
+
+    db.buckets.create_index(
+        "name",
+        unique=True,
+        collation={"locale": "en", "strength": 2},
+    )
+
     db.query_performance.create_index(
         [("bucket_id", 1), ("query_pattern", 1), ("city", 1)], unique=True
     )
     db.query_performance.create_index("is_active")
     db.query_performance.create_index("consecutive_failures")
+    db.query_performance.create_index(
+        "last_executed_at", expireAfterSeconds=2592000
+    )  
 
-    # Email campaigns collection
     db.email_campaigns.create_index([("lead_id", 1), ("status", 1)])
     db.email_campaigns.create_index("status")
-    db.email_campaigns.create_index("sent_at")
+    db.email_campaigns.create_index([("status", 1), ("sent_at", -1)])
+    
+    # TTL index on sent_at (90 days retention)
+    # Note: Must be created alone, not with other indexes
+    try:
+        db.email_campaigns.create_index(
+            "sent_at", expireAfterSeconds=7776000
+        )
+    except Exception as e:
+        if "IndexOptionsConflict" in str(e) or "already exists" in str(e):
+            # Index exists with different options - drop and recreate
+            db.email_campaigns.drop_index("sent_at_1")
+            db.email_campaigns.create_index(
+                "sent_at", expireAfterSeconds=7776000
+            )
+        else:
+            raise  
 
     logger.info("MongoDB indexes created/verified")
 
 
-# ─── Initialization ────────────────────────────────────────────────────────
 
 def init_db() -> None:
     """Initialize MongoDB connection and create indexes (thread-safe, idempotent)."""
@@ -190,10 +221,8 @@ def init_db() -> None:
             _client = _create_configured_client()
             _database = _client[MONGODB_DATABASE]
 
-            # Run index creation
             _create_indexes(_database)
 
-            # Run health check
             health = _ping_database()
             if health:
                 logger.info(f"Connected to MongoDB: {MONGODB_DATABASE}")
@@ -207,11 +236,10 @@ def init_db() -> None:
             logger.error(f"Failed to initialize MongoDB: {e}")
             _client = None
             _database = None
-            _is_initialized = True  # Mark as attempted
+            _is_initialized = True  
             _is_healthy = False
 
 
-# ─── Public API ────────────────────────────────────────────────────────────
 
 def get_client() -> MongoClient | None:
     """Get the MongoDB client instance."""
@@ -253,7 +281,6 @@ def close_db() -> None:
                 _is_healthy = False
 
 
-# ─── Pending Writes (Disk-based Fallback) ──────────────────────────────────
 
 def queue_pending_write(operation: str, data: dict) -> None:
     """Queue a database write to disk when DB is unreachable.
@@ -271,8 +298,17 @@ def queue_pending_write(operation: str, data: dict) -> None:
         }
         write_file = _PENDING_WRITES_DIR / f"write_{timestamp}.json"
         try:
-            with open(write_file, "w") as f:
-                json.dump(write_entry, f)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(_PENDING_WRITES_DIR), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w") as tmp_f:
+                    json.dump(write_entry, tmp_f)
+                os.replace(tmp_path, str(write_file))
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
             logger.warning(f"Queued pending write to disk: {write_file.name}")
         except Exception as e:
             logger.error(f"Failed to queue pending write: {e}")
@@ -303,7 +339,7 @@ def flush_pending_writes() -> int:
                 if db is None:
                     break
 
-                collection_name = entry["data"].pop("collection", None)
+                collection_name = entry["data"].get("collection")
                 if not collection_name:
                     continue
 
@@ -362,31 +398,42 @@ def cleanup_old_pending_writes(max_age_days: int = PENDING_WRITES_TTL_DAYS) -> i
         return cleaned
 
 
-# ─── Email Campaign Helper Functions ───────────────────────────────────────
 
 def get_email_campaign_stats() -> dict[str, Any]:
-    """Get overall email campaign statistics.
-    
-    Returns:
-        Dictionary with campaign metrics (total, sent, pending, failed, etc.)
+    """Get overall email campaign statistics using single aggregation pipeline.
+
+    Uses MongoDB's $group to count by status in one query instead of 5 separate calls.
     """
     if not is_connected():
         return {}
-    
+
     try:
         db = _database
-        total = db.email_campaigns.count_documents({})
-        sent = db.email_campaigns.count_documents({"status": "sent"})
-        pending = db.email_campaigns.count_documents({"status": "needs_review"})
-        failed = db.email_campaigns.count_documents({"status": "failed"})
-        approved = db.email_campaigns.count_documents({"status": "approved"})
-        
+        if db is None:
+            return {}
+
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$status",
+                    "count": {"$sum": 1},
+                }
+            }
+        ]
+
+        status_counts = {}
+        for doc in db.email_campaigns.aggregate(pipeline):
+            status_counts[doc["_id"]] = doc["count"]
+
+        total = sum(status_counts.values())
+        sent = status_counts.get("sent", 0)
+
         return {
             "total": total,
             "sent": sent,
-            "pending_review": pending,
-            "failed": failed,
-            "approved": approved,
+            "pending_review": status_counts.get("needs_review", 0),
+            "failed": status_counts.get("failed", 0),
+            "approved": status_counts.get("approved", 0),
             "success_rate": round((sent / total * 100) if total > 0 else 0, 2),
         }
     except Exception as e:
@@ -396,18 +443,20 @@ def get_email_campaign_stats() -> dict[str, Any]:
 
 def get_recent_email_campaigns(limit: int = 50) -> list[dict]:
     """Get recent email campaigns sorted by creation time.
-    
+
     Args:
         limit: Maximum number of campaigns to return
-        
+
     Returns:
         List of campaign dictionaries
     """
     if not is_connected():
         return []
-    
+
     try:
         db = _database
+        if db is None:
+            return []
         campaigns = list(
             db.email_campaigns.find()
             .sort("sent_at", -1)
@@ -425,9 +474,11 @@ def count_email_campaigns() -> int:
     """Get total count of email campaigns."""
     if not is_connected():
         return 0
-    
+
     try:
         db = _database
+        if db is None:
+            return 0
         return db.email_campaigns.count_documents({})
     except Exception as e:
         logger.error(f"Error counting email campaigns: {e}")

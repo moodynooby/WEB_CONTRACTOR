@@ -254,7 +254,7 @@ class EmailSender:
             self.logger.debug(message)
 
     def send_email(
-        self, to_email: str, subject: str, body: str, campaign_id: int | None = None
+        self, to_email: str, subject: str, body: str, campaign_id: int | None = None, lead_id: str | None = None
     ) -> bool:
         """Send single email via SMTP"""
         try:
@@ -272,13 +272,13 @@ class EmailSender:
                 server.send_message(msg)
 
             if campaign_id:
-                mark_email_sent(campaign_id, True)
+                mark_email_sent(campaign_id, lead_id or "", True)
 
             return True  # type: ignore[no-any-return]
         except Exception as e:
             self.log(f"Email send error: {e}", "error")
             if campaign_id:
-                mark_email_sent(campaign_id, False, str(e))
+                mark_email_sent(campaign_id, lead_id or "", False, str(e))
             return False
 
 

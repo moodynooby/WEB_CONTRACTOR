@@ -1,4 +1,5 @@
-"""Performance Page - Query Performance Analytics."""
+"""Performance Page — Query Performance Analytics with auto-refresh support."""
+
 
 import streamlit as st
 import pandas as pd
@@ -8,6 +9,36 @@ from core.logging import get_logger
 logger = get_logger(__name__)
 
 st.set_page_config(layout="wide")
+
+# ── Auto-refresh toggle ─────────────────────────────────────────────────
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = False
+if "refresh_interval" not in st.session_state:
+    st.session_state.refresh_interval = 30
+
+with st.sidebar:
+    st.subheader("🔄 Auto-Refresh")
+    st.session_state.auto_refresh = st.toggle(
+        "Enable auto-refresh",
+        value=st.session_state.auto_refresh,
+        help="Automatically refresh this page to see live stats",
+    )
+    if st.session_state.auto_refresh:
+        st.session_state.refresh_interval = st.selectbox(
+            "Interval (seconds)",
+            options=[10, 30, 60, 120, 300],
+            index=1,
+            key="refresh_interval_select",
+        )
+        st.caption(f"Refreshing every {st.session_state.refresh_interval}s")
+
+        # Meta-refresh via HTML
+        st.html(
+            f'<meta http-equiv="refresh" content="{st.session_state.refresh_interval}">'
+        )
+    else:
+        if st.button("🔄 Refresh Now"):
+            st.rerun()
 
 st.title("📊 Query Performance")
 st.caption("Monitor query efficiency and identify stale queries")

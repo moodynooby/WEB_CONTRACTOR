@@ -181,7 +181,6 @@ class AuditOrchestrator:
                                 should_exit = True
 
                 if should_exit:
-                    # Cancel remaining futures to avoid wasted LLM API calls
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
 

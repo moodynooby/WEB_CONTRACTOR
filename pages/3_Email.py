@@ -121,6 +121,7 @@ if st.session_state.review_mode and unreviewed:
                     subject=subject,
                     body=body,
                     campaign_id=email.get("id"),
+                    lead_id=email.get("lead_id"),
                 )
                 if success:
                     st.success("✅ Approved & sent!")

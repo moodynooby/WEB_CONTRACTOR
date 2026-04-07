@@ -467,39 +467,7 @@ def save_feature_toggles(settings_dict: dict):
         return False
 
 
-st.divider()
-
-st.markdown(
-    """
-<style>
-.big-red-button > button {
-    background-color: #dc2626 !important;
-    color: white !important;
-    font-size: 24px !important;
-    font-weight: bold !important;
-    padding: 20px 40px !important;
-    border-radius: 12px !important;
-    border: 3px solid #991b1b !important;
-    width: 100% !important;
-    transition: all 0.3s ease !important;
-}
-.big-red-button > button:hover {
-    background-color: #b91c1c !important;
-    border-color: #7f1d1d !important;
-    transform: scale(1.02) !important;
-}
-.big-red-button > button:disabled {
-    background-color: #9ca3af !important;
-    border-color: #6b7280 !important;
-    cursor: not-allowed !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-col_btn1, col_btn2, col_btn3 = st.columns([1, 3, 1])
-with col_btn2:
+with st.sidebar:
     if st.session_state.pipeline_running:
         st.markdown(
             '<div class="big-red-button">',
@@ -521,7 +489,7 @@ with col_btn2:
             unsafe_allow_html=True,
         )
         if st.button(
-            "🚀 RUN ALL PIPELINE",
+            "🚀 RUN  PIPELINE",
             type="primary",
             key="run_all_btn",
             help="Execute all pipeline stages in sequence",
@@ -718,6 +686,7 @@ if st.session_state.pipeline_running:
                                 subject=email.get("subject", ""),
                                 body=email.get("body", ""),
                                 campaign_id=email.get("id"),
+                                lead_id=email.get("lead_id"),
                             )
                             if success:
                                 sent_count += 1
@@ -841,17 +810,3 @@ if st.session_state.pipeline_running:
         status_text.warning("⚠️ Pipeline was cancelled by user")
     else:
         status_text.error("❌ Pipeline failed - check error messages above")
-
-if not st.session_state.pipeline_running:
-    st.divider()
-    st.info(
-        "💡 **Tip:** Configure your pipeline settings above, then click the big red button to run all stages."
-    )
-
-    if st.session_state.pipeline_results:
-        with st.expander("📊 Last Pipeline Results"):
-            for stage_name, stats in st.session_state.pipeline_results.items():
-                st.markdown(f"**{stage_name.replace('_', ' ').title()}:**")
-                for key, value in stats.items():
-                    st.write(f"  - {key.replace('_', ' ').title()}: {value}")
-                st.write("")

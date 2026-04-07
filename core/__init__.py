@@ -12,7 +12,7 @@ from core.settings import load_json_section
 from core.logging import get_logger, setup_root_logger
 
 from core.audit import AuditOrchestrator
-from core.discovery import PlaywrightScraper
+from core.discovery import PlaywrightScraper, BucketGenerator
 from core.email import EmailSender, EmailGenerator
 from core.llm import (
     is_available,
@@ -21,6 +21,7 @@ from core.llm import (
     LLMError,
     ProviderError,
     get_provider_info,
+    generate_bucket_config,
 )
 from core.app_core import WebContractorApp
 from core.db import (
@@ -42,6 +43,7 @@ from core.models import Bucket, Lead, EmailCampaign, QueryPerformance
 from core.repository import (
     save_bucket,
     get_all_buckets,
+    get_bucket_by_name,
     get_bucket_id_by_name,
     save_lead,
     save_leads_batch,
@@ -54,6 +56,10 @@ from core.repository import (
     update_email_content,
     delete_email,
     mark_email_sent,
+    mark_emails_sent_batch,
+    get_or_create_query_performance,
+    update_query_performance,
+    get_query_performance_stats,
     cleanup_stale_queries,
     get_all_leads,
     count_leads,
@@ -67,6 +73,7 @@ __all__ = [
     "setup_root_logger",
     "WebContractorApp",
     "PlaywrightScraper",
+    "BucketGenerator",
     "EmailSender",
     "EmailGenerator",
     "AuditOrchestrator",
@@ -76,6 +83,7 @@ __all__ = [
     "LLMError",
     "ProviderError",
     "get_provider_info",
+    "generate_bucket_config",
     "get_database",
     "get_client",
     "init_db",
@@ -95,6 +103,7 @@ __all__ = [
     "QueryPerformance",
     "save_bucket",
     "get_all_buckets",
+    "get_bucket_by_name",
     "get_bucket_id_by_name",
     "save_lead",
     "save_leads_batch",
@@ -107,6 +116,10 @@ __all__ = [
     "update_email_content",
     "delete_email",
     "mark_email_sent",
+    "mark_emails_sent_batch",
+    "get_or_create_query_performance",
+    "update_query_performance",
+    "get_query_performance_stats",
     "cleanup_stale_queries",
     "get_all_leads",
     "count_leads",
