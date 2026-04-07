@@ -1,9 +1,9 @@
 """Email Campaign Page - Generate, Review, and Send Emails."""
 
 import streamlit as st
-from core.repository import get_emails_for_review, delete_email, update_email_content
-from core.logging import get_logger
-from core.streamlit_utils import get_app
+from database.repository import get_emails_for_review, delete_email, update_email_content
+from infra.logging import get_logger
+from ui.utils import get_app
 
 logger = get_logger(__name__)
 

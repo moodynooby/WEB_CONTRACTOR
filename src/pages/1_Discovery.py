@@ -1,9 +1,10 @@
 """Discovery Page - Lead Discovery Pipeline."""
 
 import streamlit as st
-from core import get_all_buckets, BucketGenerator
-from core.logging import get_logger
-from core.streamlit_utils import get_app
+from database.repository import get_all_buckets
+from discovery.engine import BucketGenerator
+from infra.logging import get_logger
+from ui.utils import get_app
 
 logger = get_logger(__name__)
 
@@ -17,9 +18,8 @@ if "discovery_running" not in st.session_state:
 if "discovery_result" not in st.session_state:
     st.session_state.discovery_result = None
 
-# Bucket Generator state
 if "bucket_gen_step" not in st.session_state:
-    st.session_state.bucket_gen_step = 0  # 0=closed, 1-4=wizard steps
+    st.session_state.bucket_gen_step = 0  
 if "bucket_gen_data" not in st.session_state:
     st.session_state.bucket_gen_data = {}
 if "bucket_gen_result" not in st.session_state:
@@ -30,20 +30,16 @@ if "bucket_gen_error" not in st.session_state:
 buckets = get_all_buckets()
 bucket_names = [b["name"] for b in buckets]
 
-# ── Bucket Generation Modal ─────────────────────────────────────────────
 def render_bucket_generator():
     """Render the multi-step bucket generation wizard."""
     
-    # Initialize generator
     if "bucket_generator" not in st.session_state:
         st.session_state.bucket_generator = BucketGenerator()
     
     generator = st.session_state.bucket_generator
     
-    # Modal container with border
     st.markdown("---")
     
-    # Step indicator
     if st.session_state.bucket_gen_step > 0:
         current = st.session_state.bucket_gen_step
         
@@ -52,7 +48,6 @@ def render_bucket_generator():
         ]))
         st.markdown("---")
     
-    # Step 1: Business Type Input
     if st.session_state.bucket_gen_step == 1:
         st.subheader("✨ Step 1: What type of business?")
         st.caption("Enter the business type you want to target (e.g., 'dentists', 'yoga studios', 'restaurants')")
@@ -64,7 +59,6 @@ def render_bucket_generator():
             placeholder="e.g., dentists, yoga studios, photographers",
         )
         
-        # Common examples
         st.markdown("**Common examples:**")
         examples_cols = st.columns(3)
         examples = [
@@ -99,12 +93,10 @@ def render_bucket_generator():
                 st.session_state.bucket_gen_error = None
                 st.rerun()
     
-    # Step 2: Location Selection
     elif st.session_state.bucket_gen_step == 2:
         st.subheader("📍 Step 2: Where to search?")
         st.caption("Select target cities and regions for this bucket")
         
-        # Pre-defined geographic segments from config
         geographic_segments = {
             "Tier-1 Metros": ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"],
             "Tier-2 Cities": ["Ahmedabad", "Jaipur", "Lucknow", "Indore", "Surat", "Nagpur", "Bhopal"],
@@ -112,7 +104,6 @@ def render_bucket_generator():
             "Business Districts": ["Bandra-Mumbai", "Connaught Place-Delhi", "MG Road-Bangalore", "Banjara Hills-Hyderabad"],
         }
         
-        # Quick select buttons
         st.markdown("**Quick Select:**")
         quick_cols = st.columns(2)
         
@@ -128,7 +119,6 @@ def render_bucket_generator():
         
         st.markdown("---")
         
-        # Multi-select for individual cities
         all_cities = list(set([city for cities in geographic_segments.values() for city in cities]))
         all_cities.sort()
         
@@ -139,7 +129,6 @@ def render_bucket_generator():
             help="Select one or more cities to target",
         )
         
-        # Custom locations input
         st.markdown("**Custom Locations:**")
         custom_locations = st.text_area(
             "Add custom locations (one per line):",
@@ -148,7 +137,6 @@ def render_bucket_generator():
             height=100,
         )
         
-        # Merge selections
         final_locations = list(set(selected_from_multiselect))
         if custom_locations.strip():
             custom_list = [loc.strip() for loc in custom_locations.strip().split("\n") if loc.strip()]
@@ -157,7 +145,6 @@ def render_bucket_generator():
         
         st.session_state.bucket_gen_data["locations"] = final_locations
         
-        # Settings
         st.markdown("---")
         st.expander("⚙️ Advanced Settings", expanded=False)
         with st.expander("⚙️ Advanced Settings"):
@@ -186,7 +173,6 @@ def render_bucket_generator():
                 "max_results": max_results,
             }
         
-        # Navigation buttons
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
             if st.button("← Back", use_container_width=True):
@@ -214,7 +200,6 @@ def render_bucket_generator():
                             logger.error(f"Bucket generation error: {e}")
                             st.rerun()
     
-    # Step 3: Review & Edit
     elif st.session_state.bucket_gen_step == 3:
         if st.session_state.bucket_gen_result:
             st.subheader("📝 Step 3: Review & Edit Generated Bucket")
@@ -222,7 +207,6 @@ def render_bucket_generator():
             
             config = st.session_state.bucket_gen_result
             
-            # Editable fields in a form
             with st.form("bucket_review_form"):
                 col1, col2 = st.columns(2)
                 
@@ -297,12 +281,10 @@ def render_bucket_generator():
                         step=10,
                     )
                 
-                # Parse edited values
                 edited_categories = [c.strip() for c in categories_str.strip().split("\n") if c.strip()]
                 edited_search_patterns = [p.strip() for p in search_patterns_str.strip().split("\n") if p.strip()]
                 edited_locations = [loc.strip() for loc in locations_str.strip().split("\n") if loc.strip()]
                 
-                # Update config with edited values
                 updated_config = config.copy()
                 updated_config["name"] = new_name
                 updated_config["categories"] = edited_categories
@@ -314,16 +296,13 @@ def render_bucket_generator():
                 updated_config["max_results"] = max_results_edit
                 updated_config["daily_email_limit"] = daily_email_limit
                 
-                # Store updated config
                 st.session_state.bucket_gen_result = updated_config
                 
-                # Form buttons (must use form_submit_button)
                 col_btn1, col_btn2 = st.columns([1, 2])
                 
                 with col_btn1:
                     save_clicked = st.form_submit_button("💾 Save Bucket", type="primary")
                     if save_clicked:
-                        # Validate before saving
                         is_valid, errors = generator.validate_config(updated_config)
                         
                         if not is_valid:
@@ -331,7 +310,6 @@ def render_bucket_generator():
                             for error in errors:
                                 st.error(f"• {error}")
                         else:
-                            # Save to database
                             success, message = generator.save_config(updated_config)
                             
                             if success:
@@ -358,12 +336,10 @@ def render_bucket_generator():
                                 st.session_state.bucket_gen_error = str(e)
                                 st.rerun()
             
-            # Back button (outside form)
             if st.button("← Back", key="back_from_review"):
                 st.session_state.bucket_gen_step = 2
                 st.rerun()
     
-    # Step 4: Success
     elif st.session_state.bucket_gen_step == 4:
         st.success("🎉 Bucket created successfully!")
         st.balloons()
@@ -383,7 +359,6 @@ def render_bucket_generator():
                 st.session_state.bucket_gen_error = None
                 st.rerun()
     
-    # Error display
     if st.session_state.bucket_gen_error:
         st.error(f"❌ {st.session_state.bucket_gen_error}")
         if st.button("Clear Error"):
@@ -394,13 +369,11 @@ def render_bucket_generator():
 buckets = get_all_buckets()
 bucket_names = [b["name"] for b in buckets]
 
-# Bucket Generator button
 if st.button("✨ Generate New Bucket", type="secondary", use_container_width=True):
     if st.session_state.bucket_gen_step == 0:
         st.session_state.bucket_gen_step = 1
         st.rerun()
 
-# Show wizard if active
 if st.session_state.bucket_gen_step > 0:
     with st.container(border=True):
         render_bucket_generator()

@@ -3,14 +3,13 @@
 
 import streamlit as st
 import pandas as pd
-from core.repository import get_query_performance_all
-from core.logging import get_logger
+from database.repository import get_query_performance_all
+from infra.logging import get_logger
 
 logger = get_logger(__name__)
 
 st.set_page_config(layout="wide")
 
-# ── Auto-refresh toggle ─────────────────────────────────────────────────
 if "auto_refresh" not in st.session_state:
     st.session_state.auto_refresh = False
 if "refresh_interval" not in st.session_state:
@@ -32,7 +31,6 @@ with st.sidebar:
         )
         st.caption(f"Refreshing every {st.session_state.refresh_interval}s")
 
-        # Meta-refresh via HTML
         st.html(
             f'<meta http-equiv="refresh" content="{st.session_state.refresh_interval}">'
         )

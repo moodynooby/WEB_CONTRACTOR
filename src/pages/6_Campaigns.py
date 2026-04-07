@@ -3,8 +3,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from core.repository import get_email_campaigns
-from core.logging import get_logger
+from database.repository import get_email_campaigns
+from infra.logging import get_logger
 
 logger = get_logger(__name__)
 

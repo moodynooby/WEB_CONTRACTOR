@@ -1,8 +1,8 @@
 """Audit Page - Lead Audit Pipeline."""
 
 import streamlit as st
-from core.logging import get_logger
-from core.streamlit_utils import get_app
+from infra.logging import get_logger
+from ui.utils import get_app
 
 logger = get_logger(__name__)
 

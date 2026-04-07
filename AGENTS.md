@@ -72,7 +72,8 @@ uv run python main.py setup     # Full setup: deps + auth + start all
 uv run python main.py verify    # Health check
 
 # Before every commit:
-uv run ruff check --fix .&& uv run ty check .
+uv run ruff check --fix .
+uv run ty check 
 ```
 
 ### Type Hints Philosophy

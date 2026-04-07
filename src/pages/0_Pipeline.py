@@ -8,12 +8,12 @@ from pathlib import Path
 import requests
 import streamlit as st
 
-from core import settings
-from core.settings import LOCAL_PROVIDER, PERFORMANCE_MODE, LLM_MODE
-from core.logging import get_logger
-from core.streamlit_utils import get_app
-from core.telegram import TelegramNotifier
-from core.llm import get_all_modes, get_all_local_providers
+from infra import settings
+from infra.settings import LOCAL_PROVIDER, PERFORMANCE_MODE, LLM_MODE
+from infra.logging import get_logger
+from ui.utils import get_app
+from infra.notifications.telegram import TelegramNotifier
+from infra.llm import get_all_modes, get_all_local_providers
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "app_config.json"
 
 def get_current_settings() -> dict:
     """Get current mode settings from configuration."""
-    from core.llm import get_mode_profile
+    from infra.llm import get_mode_profile
 
     perf_profile = get_mode_profile(PERFORMANCE_MODE)
     return {
@@ -59,7 +59,6 @@ def test_connection(llm_mode: str, local_provider: str | None = None) -> list[di
     results = []
 
     if llm_mode == "cloud":
-        # Test Groq
         if settings.GROQ_API_KEY:
             try:
                 response = requests.get(
@@ -77,7 +76,6 @@ def test_connection(llm_mode: str, local_provider: str | None = None) -> list[di
         else:
             results.append({"name": "Groq API", "status": "warning", "message": "API key not configured"})
 
-        # Test OpenRouter
         if settings.OPENROUTER_API_KEY:
             try:
                 response = requests.get(
@@ -96,7 +94,6 @@ def test_connection(llm_mode: str, local_provider: str | None = None) -> list[di
             results.append({"name": "OpenRouter API", "status": "warning", "message": "API key not configured"})
 
     elif llm_mode == "local" and local_provider:
-        # Test local provider
         if local_provider == "ollama":
             url = "http://localhost:11434"
             try:
@@ -416,7 +413,6 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
     st.markdown("**Performance Mode:**")
     modes = get_all_modes()
     
-    # Filter modes based on LLM mode selection
     if llm_mode_option == "cloud":
         visible_modes = [m for m in modes if m.get("mode_type") == "cloud"]
     else:
@@ -445,7 +441,6 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
                 selected_perf_mode = mode_key
 
     if selected_perf_mode is None:
-        # Fallback: use current config mode if it matches visible modes, otherwise first visible
         if PERFORMANCE_MODE in mode_options:
             selected_perf_mode = PERFORMANCE_MODE
         else:
@@ -464,7 +459,6 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         - **Description:** {selected_mode_data["description"]}
         """)
 
-    # Test Connection button - works for both cloud and local
     if st.button("🔌 Test Connection", use_container_width=True):
         with st.spinner("Testing connection(s)..."):
             local_prov = selected_provider if llm_mode_option == "local" else None
@@ -749,7 +743,7 @@ if st.session_state.pipeline_running:
                 }
 
             elif stage["function"] == "send_emails":
-                from core.repository import get_emails_for_review, update_email_content
+                from database.repository import get_emails_for_review, update_email_content
 
                 emails = get_emails_for_review()
                 emails_to_send = [
