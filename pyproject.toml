@@ -38,15 +38,12 @@ include = ["*.py"]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.0.0",
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
     "ruff>=0.15.0",
-    "uncomment>=2.11.0",
     "types-requests>=2.32.4.20260107",
     "types-beautifulsoup4>=4.12.0.20250516",
     "types-PyYAML>=6.0",
     "hatchling>=1.0.0",
+    "ty>=0.0.29",
 ]
 
 
