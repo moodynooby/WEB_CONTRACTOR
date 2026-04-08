@@ -110,7 +110,7 @@ def plot_lead_timeline(leads_df: pd.DataFrame, freq: str = "D") -> go.Figure:
     leads_df["created_at"] = pd.to_datetime(leads_df["created_at"])
     leads_df["date"] = leads_df["created_at"].dt.to_period(freq).astype(str)
 
-    daily_counts = leads_df.groupby("date").size().reset_index(name="leads")  # ty: ignore[no-matching-overload]
+    daily_counts = leads_df.groupby("date").size().reset_index(name="leads")
 
     fig = px.line(
         daily_counts, x="date", y="leads", markers=True, title="Leads Created Over Time"
@@ -197,7 +197,7 @@ def plot_email_campaign_funnel(campaigns_df: pd.DataFrame) -> go.Figure:
         Plotly Figure object.
     """
     stages = {
-        "sent": campaigns_df.get("status").eq("sent").sum()
+        "sent": campaigns_df["status"].eq("sent").sum()
         if "status" in campaigns_df.columns
         else 0,
         "opened": campaigns_df["opened_at"].notna().sum()

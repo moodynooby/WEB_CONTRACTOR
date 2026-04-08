@@ -19,7 +19,6 @@ if "audit_running" not in st.session_state:
 if "audit_result" not in st.session_state:
     st.session_state.audit_result = None
 
-# --- Sidebar ---
 pending_count = len(get_pending_audits(limit=1))
 qualified_count = len(get_qualified_leads(limit=1))
 total_leads = count_leads()

@@ -29,7 +29,6 @@ if "bucket_gen_result" not in st.session_state:
 if "bucket_gen_error" not in st.session_state:
     st.session_state.bucket_gen_error = None
 
-# --- Sidebar ---
 buckets = get_all_buckets()
 bucket_names = [b["name"] for b in buckets]
 total_leads = count_leads()

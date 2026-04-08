@@ -24,7 +24,6 @@ st.session_state.setdefault("email_gen_running", False)
 st.session_state.setdefault("review_idx", 0)
 st.session_state.setdefault("review_mode", False)
 
-# --- Sidebar ---
 emails_for_stats = get_emails_for_review(limit=1000)
 pending_review = len([e for e in emails_for_stats if e.get("status") == "needs_review"])
 sent_count = len([e for e in emails_for_stats if e.get("status") == "sent"])

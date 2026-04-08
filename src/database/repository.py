@@ -708,20 +708,23 @@ def update_query_performance(
         return
 
     try:
-        update = {
-            "$inc": {
-                "total_executions": 1,
-                "total_leads_found": leads_found,
-                "total_leads_saved": leads_saved,
-                "total_qualified": qualified_count,
-            },
-            "$set": {"last_executed_at": datetime.now(timezone.utc)},
+        inc_data: dict[str, Any] = {
+            "total_executions": 1,
+            "total_leads_found": leads_found,
+            "total_leads_saved": leads_saved,
+            "total_qualified": qualified_count,
         }
+        set_data: dict[str, Any] = {"last_executed_at": datetime.now(timezone.utc)}
 
         if success and leads_found > 0:
-            update["$set"]["consecutive_failures"] = 0  # ty: ignore[invalid-assignment]
+            set_data["consecutive_failures"] = 0
         else:
-            update["$inc"]["consecutive_failures"] = 1
+            inc_data["consecutive_failures"] = 1
+
+        update: dict[str, Any] = {
+            "$inc": inc_data,
+            "$set": set_data,
+        }
 
         oid = _to_object_id(qp_id)
         db.query_performance.update_one({"_id": oid}, update)

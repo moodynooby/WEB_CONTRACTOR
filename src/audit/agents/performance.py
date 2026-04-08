@@ -128,10 +128,13 @@ class PerformanceAgent(BaseAgent):
 
         head = soup.find("head")
         render_blocking_scripts = []
-        if head and hasattr(head, "find_all"):
-            for script in head.find_all("script", src=True):  # ty: ignore[call-non-callable]
-                if not script.get("async") and not script.get("defer"):
-                    render_blocking_scripts.append(script.get("src"))
+        if head:
+            # head is a Tag which supports find_all at runtime
+            head_find_all = getattr(head, "find_all", None)
+            if head_find_all:
+                for script in head_find_all("script", src=True):
+                    if not script.get("async") and not script.get("defer"):
+                        render_blocking_scripts.append(script.get("src"))
 
         if render_blocking_scripts:
             issues.append(

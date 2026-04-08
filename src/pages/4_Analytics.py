@@ -15,7 +15,6 @@ logger = get_logger(__name__)
 
 st.set_page_config(page_title="Analytics", layout="wide")
 
-# --- Sidebar ---
 with st.sidebar:
     st.subheader("🔄 Auto-Refresh")
     auto_refresh = st.toggle(
@@ -66,11 +65,9 @@ with st.sidebar:
                 use_container_width=True,
             )
 
-# --- Title ---
 st.title("📊 Analytics Dashboard")
 st.caption("Unified view of lead discovery, audit, email, and query performance")
 
-# --- Fetch Data ---
 with st.spinner("Loading analytics..."):
     leads = get_all_leads(limit=10000)
     campaigns = get_email_campaigns(limit=5000)
@@ -84,7 +81,6 @@ if leads_df.empty and camp_df.empty and query_df.empty:
     st.info("No data available yet. Run the pipeline first to populate data.")
     st.stop()
 
-# --- Parse timestamps ---
 if not leads_df.empty:
     if "created_at" in leads_df.columns:
         leads_df["created_at"] = pd.to_datetime(leads_df["created_at"], errors="coerce")
@@ -96,7 +92,6 @@ if not query_df.empty:
     if "last_executed_at" in query_df.columns:
         query_df["last_executed_at"] = pd.to_datetime(query_df["last_executed_at"], errors="coerce")
 
-# --- Tabs ---
 tab_overview, tab_leads, tab_email, tab_queries = st.tabs([
     "📊 Overview",
     "🔍 Leads",
@@ -104,9 +99,7 @@ tab_overview, tab_leads, tab_email, tab_queries = st.tabs([
     "⚡ Query Performance",
 ])
 
-# ===== OVERVIEW TAB =====
 with tab_overview:
-    # KPI cards
     total_leads = len(leads_df) if not leads_df.empty else 0
     qualified = (leads_df["status"] == "qualified").sum() if not leads_df.empty and "status" in leads_df.columns else 0
     total_campaigns = len(camp_df) if not camp_df.empty else 0
@@ -124,7 +117,6 @@ with tab_overview:
 
     st.divider()
 
-    # Two charts side by side: Lead Funnel + Email Funnel
     col_left, col_right = st.columns(2)
 
     with col_left:
@@ -170,7 +162,6 @@ with tab_overview:
         else:
             st.info("No email data yet")
 
-    # Lead status pie
     if not leads_df.empty and "status" in leads_df.columns:
         status_counts = leads_df["status"].value_counts()
         fig_pie = go.Figure(data=[go.Pie(
@@ -187,7 +178,6 @@ with tab_overview:
         fig_pie.update_traces(textposition="inside", textinfo="value+percent")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-# ===== LEADS TAB =====
 with tab_leads:
     if leads_df.empty:
         st.info("No lead data available")
@@ -236,7 +226,6 @@ with tab_leads:
             else:
                 st.info("No platform data")
 
-        # Lead timeline
         st.subheader("📅 Leads Over Time")
         if "created_at" in leads_df.columns:
             valid_dates = leads_df["created_at"].dropna()
@@ -265,7 +254,6 @@ with tab_leads:
         else:
             st.info("No created_at column")
 
-        # Location distribution
         st.subheader("📍 Top Locations")
         if "location" in leads_df.columns:
             loc_counts = leads_df["location"].value_counts().head(10)
@@ -283,12 +271,10 @@ with tab_leads:
             )
             st.plotly_chart(fig_loc, use_container_width=True)
 
-# ===== EMAIL CAMPAIGNS TAB =====
 with tab_email:
     if camp_df.empty:
         st.info("No email campaign data. Generate and send emails first.")
     else:
-        # Email gauges
         sent_total = (camp_df["status"] == "sent").sum() if "status" in camp_df.columns else 0
         opened_total = camp_df["opened_at"].notna().sum() if "opened_at" in camp_df.columns else 0
         clicked_total = camp_df["clicked_at"].notna().sum() if "clicked_at" in camp_df.columns else 0
@@ -325,7 +311,6 @@ with tab_email:
         fig_gauges.update_layout(height=220, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_gauges, use_container_width=True)
 
-        # Status distribution
         st.subheader("📋 Campaign Status")
         if "status" in camp_df.columns:
             status_counts = camp_df["status"].value_counts()
@@ -337,7 +322,6 @@ with tab_email:
             fig_status.update_layout(height=280, margin=dict(l=40, r=20, t=20, b=40))
             st.plotly_chart(fig_status, use_container_width=True)
 
-        # Engagement over time
         st.subheader("📈 Engagement Over Time")
         if "sent_at" in camp_df.columns:
             sent_dates = camp_df["sent_at"].dropna()
@@ -368,7 +352,6 @@ with tab_email:
         else:
             st.info("No sent_at column")
 
-        # Data table (collapsed by default)
         with st.expander("📋 Raw Campaign Data"):
             display_cols = ["id", "status", "sent_at", "bounce_reason"]
             available = [c for c in display_cols if c in camp_df.columns]
@@ -383,7 +366,6 @@ with tab_queries:
             query_df["total_leads_saved"] / query_df["total_executions"].clip(lower=1) * 100
         ).round(1)
 
-        # KPI row
         st.subheader("📈 Query Summary")
         col_q1, col_q2, col_q3, col_q4 = st.columns(4)
         col_q1.metric("Total Queries", f"{len(query_df):,}")
@@ -396,7 +378,6 @@ with tab_queries:
 
         st.divider()
 
-        # Top queries by leads saved
         st.subheader("🏆 Top Queries")
         top_n = st.slider("Show top N queries", 5, 30, 10)
         top_queries = query_df.nlargest(top_n, "total_leads_saved")
@@ -419,7 +400,6 @@ with tab_queries:
             fig_top.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig_top, use_container_width=True)
 
-        # Active vs Inactive pie
         col_pie1, col_pie2 = st.columns(2)
         with col_pie1:
             active_count = query_df["is_active"].sum() if "is_active" in query_df.columns else 0
@@ -434,7 +414,6 @@ with tab_queries:
             fig_pie.update_traces(textposition="inside", textinfo="value+percent")
             st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Data table
         with col_pie2:
             st.subheader("📋 Query Details")
             display_cols = [

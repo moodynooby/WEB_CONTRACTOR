@@ -14,7 +14,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Project root is parent of scripts/
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -121,7 +120,6 @@ class SetupWizard:
                 overwrite = self.prompt(".env already exists. Overwrite?", "n")
                 if overwrite.lower() not in ["y", "yes"]:
                     print("  Using existing .env file")
-                    # Load existing vars
                     with open(self.env_file) as f:
                         for line in f:
                             if "=" in line and not line.startswith("#"):
@@ -129,11 +127,9 @@ class SetupWizard:
                                 self.env_vars[key] = value
                     return
 
-            # Create new .env from example
             print("  Creating .env from .env.example...")
             self.env_file.write_text(env_example.read_text())
 
-        # Prompt for values
         print("\n  Configure environment variables (press Enter for defaults):")
 
         mongodb_uri = self.prompt("  MongoDB URI", "mongodb://localhost:27017")
@@ -160,7 +156,6 @@ class SetupWizard:
         if telegram_chat_id:
             self.env_vars["TELEGRAM_CHAT_ID"] = telegram_chat_id
 
-        # Write .env file
         env_content = "# Web Contractor Environment Configuration\n\n"
         for key, value in self.env_vars.items():
             env_content += f"{key}={value}\n"
@@ -174,7 +169,6 @@ class SetupWizard:
 
         print("  Testing MongoDB connection...")
         try:
-            # Load env vars
             for key, value in self.env_vars.items():
                 os.environ[key] = value
 
@@ -189,7 +183,6 @@ class SetupWizard:
 
             print("  ✓ Connected to MongoDB successfully")
 
-            # Initialize database
             print("  Initializing database...")
             sys.path.insert(0, str(PROJECT_ROOT / "src"))
             from database.connection import init_db
@@ -234,7 +227,6 @@ class SetupWizard:
         if start_streamlit.lower() in ["y", "yes", ""]:
             print("\n  Starting Streamlit...")
             try:
-                # Use the main.py entry point
                 subprocess.Popen(
                     [sys.executable, str(PROJECT_ROOT / "main.py"), "run"],
                     cwd=str(PROJECT_ROOT),

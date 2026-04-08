@@ -587,7 +587,6 @@ def save_feature_toggles(settings_dict: dict):
 
 
 with st.sidebar:
-    # Quick stats
     from database.repository import count_leads, get_pending_audits, get_qualified_leads, get_emails_for_review
     total_leads = count_leads()
     pending_audit = len(get_pending_audits(limit=1))
@@ -602,7 +601,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Quick actions
     st.subheader("⚡ Quick Actions")
     if st.button("🧹 Clear Cache", use_container_width=True):
         st.cache_data.clear()
@@ -622,7 +620,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Pipeline control
     if st.session_state.pipeline_running:
         st.markdown(
             '<div class="big-red-button">',

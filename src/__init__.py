@@ -23,7 +23,7 @@ from infra.llm import (
     get_provider_info,
     generate_bucket_config,
 )
-from gui import App
+from app import App
 from database.connection import (
     get_database,
     get_client,
