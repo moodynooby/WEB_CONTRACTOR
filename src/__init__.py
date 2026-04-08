@@ -23,7 +23,7 @@ from infra.llm import (
     get_provider_info,
     generate_bucket_config,
 )
-from app import WebContractorApp
+from gui import App
 from database.connection import (
     get_database,
     get_client,
@@ -71,7 +71,7 @@ __all__ = [
     "load_json_section",
     "get_logger",
     "setup_root_logger",
-    "WebContractorApp",
+    "App",
     "PlaywrightScraper",
     "BucketGenerator",
     "EmailSender",

@@ -40,10 +40,10 @@ _pipeline_state: dict[str, Any] = {
 
 
 def _get_app():
-    """Get WebContractorApp instance (avoids circular imports)."""
-    from app import WebContractorApp
+    """Get App instance (avoids circular imports)."""
+    from gui import App
 
-    app = WebContractorApp()
+    app = App()
     app.initialize()
     return app
 

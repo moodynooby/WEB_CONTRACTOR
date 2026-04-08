@@ -21,20 +21,27 @@ CONFIG = {
 
 ```bash
 uv sync                   # install deps
-uv run python cli.py     # launch Streamlit
+uv run python main.py     # launch Streamlit
 ```
 
 ## Service Manager (Cross-Platform)
 
-`cli.py` is the single entry point for all services — works on Linux, macOS, and Windows.
+`main.py` is the service manager — works on Linux, macOS, and Windows.
 
 ```bash
-uv run python cli.py run       # Launch Streamlit (default)
-uv run python cli.py bot       # Start Telegram bot (background)
-uv run python cli.py status    # Show service status
-uv run python cli.py stop      # Stop all services
-uv run python cli.py setup     # Full setup: deps + auth + start all
-uv run python cli.py verify    # Health check
+uv run python main.py run       # Launch Streamlit (default)
+uv run python main.py bot       # Start Telegram bot (background)
+uv run python main.py status    # Show service status
+uv run python main.py stop      # Stop all services
+```
+
+## Scripts
+
+Additional utility scripts for setup and diagnostics:
+
+```bash
+uv run python scripts/setup.py        # Interactive setup wizard
+uv run python scripts/diagnostic.py   # Comprehensive diagnostics
 ```
 
 ## Telegram Integration
@@ -84,7 +91,7 @@ The Telegram bot also provides interactive commands for remote control:
 4. **Start the bot:**
 
    ```bash
-   uv run python cli.py bot
+   uv run python main.py bot
    ```
 
 > **Note:** Pipeline will run without notifications if Telegram is not configured. The bot is optional — you get critical notifications from the pipeline even without running the bot separately.

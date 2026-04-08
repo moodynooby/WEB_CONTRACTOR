@@ -6,19 +6,21 @@
 
 ```bash
 uv sync                   # install deps
-uv run python cli.py     # launch Streamlit
+uv run python main.py     # launch Streamlit
 
 # Service manager (cross-platform):
-uv run python cli.py run       # Launch Streamlit
-uv run python cli.py bot       # Start Telegram bot
-uv run python cli.py status    # Show service status
-uv run python cli.py stop      # Stop all services
-uv run python cli.py setup     # Full setup: deps + auth + start all
-uv run python cli.py verify    # Health check
+uv run python main.py run       # Launch Streamlit
+uv run python main.py bot       # Start Telegram bot
+uv run python main.py status    # Show service status
+uv run python main.py stop      # Stop all services
+
+# Scripts:
+uv run python scripts/setup.py        # Interactive setup wizard
+uv run python scripts/diagnostic.py   # Comprehensive diagnostics
 
 # Before every commit:
 uv run ruff check --fix .
-uv run ty check 
+uv run ty check
 ```
 
 ### Type Hints Philosophy
@@ -57,7 +59,7 @@ Get **critical-only** pipeline execution notifications directly on your phone vi
 4. **Start the bot:**
 
    ```bash
-   uv run python cli.py bot
+   uv run python main.py bot
    ```
 
 5. **Notifications you'll receive (critical only):**
