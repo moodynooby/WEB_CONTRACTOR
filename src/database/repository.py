@@ -9,23 +9,33 @@ Features:
 - Better error handling with explicit logging
 - Projection to limit returned fields
 - Centralized document sanitization helpers
+- Index management for query performance
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from bson import ObjectId
-from pymongo import UpdateOne, ReturnDocument
+from pymongo import UpdateOne, ReturnDocument, ASCENDING, DESCENDING
 
-from database.connection import get_database, queue_pending_write
+from database.connection import get_database, queue_pending_write, DatabaseUnavailableError
 from infra.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 def _get_db():
-    """Get the database instance from db module."""
-    return get_database()
+    """Get the database instance from db module.
+
+    Raises DatabaseUnavailableError if the database is not available.
+    Callers should catch this exception to show proper error messages.
+    """
+    db = get_database()
+    if db is None:
+        raise DatabaseUnavailableError(
+            "Database is not connected. Check MONGODB_URI configuration."
+        )
+    return db
 
 
 def _to_object_id(id_str: str) -> ObjectId:
@@ -40,12 +50,13 @@ def _to_object_id(id_str: str) -> ObjectId:
 
 def _sanitize_document(doc: dict[str, Any]) -> dict[str, Any]:
     """Convert MongoDB document to API-friendly format.
-    
+
     - Converts _id ObjectId to string 'id' field
     - Handles nested ObjectId in common fields
     """
-    doc["id"] = str(doc.pop("_id"))
-    return doc
+    result = doc.copy()
+    result["id"] = str(result.pop("_id"))
+    return result
 
 
 def _sanitize_documents(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -58,12 +69,10 @@ def save_bucket(data: dict[str, Any]) -> dict[str, Any]:
     """Save or update bucket. Returns the saved bucket data with id.
 
     Uses upsert to reduce the check-then-insert pattern to a single operation.
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        queue_pending_write("find_one_and_update", {"collection": "buckets", **data})
-        return {}
 
     try:
         bucket_data = {k: v for k, v in data.items() if k != "id"}
@@ -88,12 +97,12 @@ def save_bucket(data: dict[str, Any]) -> dict[str, Any]:
 
 def get_all_buckets() -> list[dict[str, Any]]:
     """Get all buckets with projection to reduce data transfer.
-    
+
     Only fetches fields needed by the UI (name, priority, daily_email_limit).
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        return []
 
     try:
         buckets = list(db.buckets.find(
@@ -106,11 +115,26 @@ def get_all_buckets() -> list[dict[str, Any]]:
         return []
 
 
-def get_bucket_by_name(name: str) -> dict[str, Any] | None:
-    """Get bucket by name using collation for case-insensitive matching."""
+def count_buckets() -> int:
+    """Get total count of buckets.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        return None
+
+    try:
+        return db.buckets.count_documents({})
+    except Exception as e:
+        logger.error(f"Error counting buckets: {e}")
+        return 0
+
+
+def get_bucket_by_name(name: str) -> dict[str, Any] | None:
+    """Get bucket by name using collation for case-insensitive matching.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
 
     try:
         bucket = db.buckets.find_one(
@@ -133,51 +157,96 @@ def get_bucket_id_by_name(name: str) -> str | None:
     return None
 
 
+def ensure_indexes() -> None:
+    """Create MongoDB indexes for frequently queried fields.
 
-def save_lead(data: dict[str, Any]) -> str:
-    """Save single lead. Returns lead ID as string or empty string on error."""
+    Called once at application startup to ensure optimal query performance.
+    Index creation is idempotent — safe to call multiple times.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        queue_pending_write("insert_one", {"collection": "leads", **data})
-        return ""
 
     try:
-        lead_data = {
-            "business_name": data.get("business_name"),
-            "category": data.get("category"),
-            "location": data.get("location"),
-            "phone": data.get("phone"),
-            "email": data.get("email"),
-            "website": data.get("website"),
-            "source": data.get("source"),
-            "bucket_id": data.get("bucket_id"),
-            "quality_score": data.get("quality_score", 0.5),
-            "social_links": data.get("social_links", {}),
-            "contact_form_url": data.get("contact_form_url"),
-            "tech_stack": data.get("tech_stack"),
-            "metadata": data.get("metadata", {}),
-            "status": data.get("status", "pending_audit"),
-            "created_at": datetime.now(timezone.utc),
-        }
+        db.leads.create_index([("status", ASCENDING)])
+        db.leads.create_index([("bucket_id", ASCENDING)])
+        db.leads.create_index([("website", ASCENDING)])
+        db.leads.create_index([("created_at", DESCENDING)])
+        db.leads.create_index([("status", ASCENDING), ("website", ASCENDING)])
 
-        result = db.leads.insert_one(lead_data)
-        logger.debug(f"Saved lead: {data.get('business_name')}")
-        return str(result.inserted_id)
+        db.email_campaigns.create_index([("status", ASCENDING)])
+        db.email_campaigns.create_index([("lead_id", ASCENDING)])
+        db.email_campaigns.create_index([("sent_at", DESCENDING)])
+
+        db.query_performance.create_index([("bucket_id", ASCENDING)])
+        db.query_performance.create_index([("is_active", ASCENDING)])
+        db.query_performance.create_index([("consecutive_failures", ASCENDING)])
+        db.query_performance.create_index([("last_executed_at", DESCENDING)])
+        db.query_performance.create_index(
+            [("is_active", ASCENDING), ("consecutive_failures", ASCENDING)]
+        )
+
+        logger.info("Database indexes ensured")
     except Exception as e:
-        logger.error(f"Error saving lead: {e}")
-        queue_pending_write("insert_one", {"collection": "leads", **data})
-        return ""
+        logger.error(f"Error ensuring indexes: {e}")
+
+
+def count_pending_audits() -> int:
+    """Count leads pending audit (lightweight, no aggregation pipeline).
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
+
+    try:
+        return db.leads.count_documents({"status": "pending_audit", "website": {"$ne": None}})
+    except Exception as e:
+        logger.error(f"Error counting pending audits: {e}")
+        return 0
+
+
+def count_qualified_leads() -> int:
+    """Count qualified leads without emails (lightweight, no aggregation pipeline).
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
+
+    try:
+        qualified_count = db.leads.count_documents({"status": "qualified"})
+        if qualified_count == 0:
+            return 0
+
+        lead_ids_with_campaigns = set(
+            db.email_campaigns.distinct("lead_id", {"status": {"$ne": "needs_review"}})
+        )
+        return max(0, qualified_count - len(lead_ids_with_campaigns))
+    except Exception as e:
+        logger.error(f"Error counting qualified leads: {e}")
+        return 0
+
+
+def count_emails_for_review() -> int:
+    """Count email campaigns needing review (lightweight, no aggregation pipeline).
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
+
+    try:
+        return db.email_campaigns.count_documents({"status": "needs_review"})
+    except Exception as e:
+        logger.error(f"Error counting emails for review: {e}")
+        return 0
+
 
 
 def save_leads_batch(leads: list[dict[str, Any]]) -> int:
-    """Save multiple leads in batch."""
+    """Save multiple leads in batch.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        for lead in leads:
-            queue_pending_write("insert_one", {"collection": "leads", **lead})
-        return 0
 
     try:
         bucket_map = {}
@@ -219,47 +288,14 @@ def save_leads_batch(leads: list[dict[str, Any]]) -> int:
         return 0
 
 
-def update_lead_contact_info(lead_id: str, info: dict[str, Any]) -> None:
-    """Update lead contact info."""
-    db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
-
-    update_data = {}
-
-    if info.get("email"):
-        update_data["email"] = info["email"]
-    if info.get("phone"):
-        update_data["phone"] = info["phone"]
-    if "social_links" in info:
-        update_data["social_links"] = info["social_links"]
-    if "contact_form_url" in info:
-        update_data["contact_form_url"] = info["contact_form_url"]
-    if "tech_stack" in info:
-        update_data["tech_stack"] = info["tech_stack"]
-    if "metadata" in info:
-        update_data["metadata"] = info["metadata"]
-
-    if update_data:
-        try:
-            oid = _to_object_id(lead_id)
-            db.leads.update_one({"_id": oid}, {"$set": update_data})
-            logger.debug(f"Updated lead contact info: {lead_id}")
-        except ValueError as e:
-            logger.error(f"Invalid lead ID: {e}")
-        except Exception as e:
-            logger.error(f"Error updating lead contact info: {e}")
-
-
 def get_pending_audits(limit: int = 50) -> list[dict[str, Any]]:
     """Get leads pending audit using aggregation with $lookup.
 
     Single query replaces N+1 pattern: joins leads with buckets via $lookup.
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        return []
 
     try:
         pipeline = [
@@ -301,10 +337,10 @@ def get_qualified_leads(limit: int = 50) -> list[dict[str, Any]]:
     Single query replaces the 2+N pattern:
     - Uses $lookup to join buckets
     - Uses $match to exclude leads with sent emails
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        return []
 
     try:
         pipeline = [
@@ -363,11 +399,10 @@ def save_audits_batch(audits: list[dict[str, Any]]) -> int:
     """Save audit results using bulk_write for efficient batch updates.
 
     Uses PyMongo's bulk_write instead of individual update_one calls in a loop.
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return 0
 
     try:
         operations = []
@@ -408,13 +443,11 @@ def save_audits_batch(audits: list[dict[str, Any]]) -> int:
 
 
 def save_emails_batch(emails: list[dict[str, Any]]) -> int:
-    """Save multiple email campaigns."""
+    """Save multiple email campaigns.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        for email in emails:
-            queue_pending_write("insert_one", {"collection": "email_campaigns", **email})
-        return 0
 
     try:
         insert_data = []
@@ -443,10 +476,10 @@ def get_emails_for_review(limit: int = 50) -> list[dict[str, Any]]:
     """Get emails needing review using aggregation with $lookup.
 
     Single query replaces N+1 pattern: joins email_campaigns with leads.
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        return []
 
     try:
         pipeline = [
@@ -496,11 +529,11 @@ def get_emails_for_review(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def update_email_content(campaign_id: str, subject: str, body: str) -> None:
-    """Update email content."""
+    """Update email content.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         oid = _to_object_id(campaign_id)
@@ -516,11 +549,11 @@ def update_email_content(campaign_id: str, subject: str, body: str) -> None:
 
 
 def delete_email(campaign_id: str) -> None:
-    """Delete email campaign."""
+    """Delete email campaign.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         oid = _to_object_id(campaign_id)
@@ -547,11 +580,10 @@ def mark_email_sent(
         success: Whether the email was sent successfully
         error: Error message if failed
         bucket_id: Optional bucket ID to skip the lead lookup (optimization)
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         oid = _to_object_id(campaign_id)
@@ -598,64 +630,17 @@ def mark_email_sent(
         logger.error(f"Error marking email sent: {e}")
 
 
-def mark_emails_sent_batch(
-    campaign_ids: list[str],
-    success: bool,
-    error: str | None = None,
-) -> int:
-    """Mark multiple emails as sent/failed in a single bulk operation.
-
-    Args:
-        campaign_ids: List of campaign IDs to update
-        success: Whether the emails were sent successfully
-        error: Error message if failed
-
-    Returns:
-        Number of successfully updated campaigns
-    """
-    db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return 0
-
-    if not campaign_ids:
-        return 0
-
-    try:
-        oids = [_to_object_id(cid) for cid in campaign_ids]
-        now = datetime.now(timezone.utc)
-
-        if success:
-            update = {"$set": {"status": "sent", "sent_at": now, "bounce_reason": None}}
-        else:
-            update = {
-                "$set": {"status": "failed", "bounce_reason": error},
-                "$inc": {"retry_count": 1},
-            }
-
-        result = db.email_campaigns.update_many(
-            {"_id": {"$in": oids}}, update
-        )
-        logger.info(f"Batch marked {result.modified_count} emails as {'sent' if success else 'failed'}")
-        return result.modified_count
-    except Exception as e:
-        logger.error(f"Error batch marking emails sent: {e}")
-        return 0
-
-
-
 def get_or_create_query_performance(
     bucket_id: str, query_pattern: str, city: str
 ) -> dict | None:
     """Get or create query performance tracking record using upsert.
-    
+
     Uses find_one_and_update with upsert=True to eliminate race condition
     under concurrent access. This replaces the unsafe find_one + insert_one pattern.
+
+    Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return None
 
     try:
         filter_doc = {
@@ -701,11 +686,11 @@ def update_query_performance(
     qualified_count: int = 0,
     success: bool = True,
 ) -> None:
-    """Update query performance metrics."""
+    """Update query performance metrics.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         inc_data: dict[str, Any] = {
@@ -735,11 +720,11 @@ def update_query_performance(
 
 
 def mark_query_as_stale(qp_id: str) -> None:
-    """Mark a query as stale."""
+    """Mark a query as stale.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         oid = _to_object_id(qp_id)
@@ -753,10 +738,11 @@ def mark_query_as_stale(qp_id: str) -> None:
 def get_stale_queries(
     max_failures: int = 3, bucket_id: str | None = None
 ) -> list[dict]:
-    """Get queries that have exceeded failure threshold."""
+    """Get queries that have exceeded failure threshold.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        return []
 
     try:
         query: dict = {"is_active": True, "consecutive_failures": {"$gte": max_failures}}
@@ -771,10 +757,11 @@ def get_stale_queries(
 
 
 def cleanup_stale_queries(days_threshold: int = 30) -> int:
-    """Clean up very old stale queries."""
+    """Clean up very old stale queries.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        return 0
 
     try:
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
@@ -793,93 +780,7 @@ def cleanup_stale_queries(days_threshold: int = 30) -> int:
         return 0
 
 
-def get_query_performance_stats(bucket_id: str | None = None) -> dict[str, Any]:
-    """Get overall query performance statistics using single $facet aggregation.
-    
-    Replaces 3 separate count_documents calls + 1 aggregation with a single
-    aggregation pipeline, reducing DB calls from 4 to 1.
-    """
-    db = _get_db()
-    if db is None:
-        return {}
-
-    try:
-        match_stage = {}
-        if bucket_id:
-            match_stage["bucket_id"] = bucket_id
-
-        pipeline = [
-            {"$match": match_stage} if match_stage else {"$match": {}},
-            {
-                "$facet": {
-                    "counts": [
-                        {
-                            "$group": {
-                                "_id": None,
-                                "total_queries": {"$sum": 1},
-                                "active_queries": {
-                                    "$sum": {"$cond": ["$is_active", 1, 0]}
-                                },
-                                "stale_queries": {
-                                    "$sum": {
-                                        "$cond": [
-                                            {
-                                                "$and": [
-                                                    "$is_active",
-                                                    {"$gte": ["$consecutive_failures", 3]},
-                                                ]
-                                            },
-                                            1,
-                                            0,
-                                        ]
-                                    }
-                                },
-                                "total_executions": {"$sum": "$total_executions"},
-                                "total_leads": {"$sum": "$total_leads_found"},
-                                "total_qualified": {"$sum": "$total_qualified"},
-                            }
-                        }
-                    ],
-                }
-            },
-        ]
-
-        result = list(db.query_performance.aggregate(pipeline))
-
-        if result and result[0].get("counts"):
-            stats = result[0]["counts"][0]
-            avg_success = (
-                (stats["total_leads"] / stats["total_executions"] * 100)
-                if stats["total_executions"] > 0
-                else 0
-            )
-        else:
-            stats = {
-                "total_queries": 0,
-                "active_queries": 0,
-                "stale_queries": 0,
-                "total_executions": 0,
-                "total_leads": 0,
-                "total_qualified": 0,
-            }
-            avg_success = 0
-
-        return {
-            "total_queries": stats["total_queries"],
-            "active_queries": stats["active_queries"],
-            "stale_queries": stats["stale_queries"],
-            "total_executions": stats["total_executions"],
-            "total_leads_found": stats["total_leads"],
-            "total_qualified": stats["total_qualified"],
-            "average_success_rate": round(avg_success, 2),
-        }
-    except Exception as e:
-        logger.error(f"Error getting query performance stats: {e}")
-        return {}
-
-
-
-def get_all_leads(limit: int = 1000, cursor: str | None = None) -> list[dict]:
+def get_all_leads(limit: int = 1000, cursor: str | None = None) -> list[dict[str, Any]]:
     """Get all leads with cursor-based pagination for better performance.
 
     Uses range queries on _id instead of skip/limit which degrades with large offsets.
@@ -892,8 +793,7 @@ def get_all_leads(limit: int = 1000, cursor: str | None = None) -> list[dict]:
         List of lead dictionaries with next_cursor for pagination
     """
     db = _get_db()
-    if db is None:
-        return []
+
 
     try:
         query = {}
@@ -915,24 +815,25 @@ def get_all_leads(limit: int = 1000, cursor: str | None = None) -> list[dict]:
 
 
 def count_leads() -> int:
-    """Get total count of leads."""
+    """Get total count of leads.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        return 0
 
     try:
         return db.leads.count_documents({})
     except Exception as e:
         logger.error(f"Error counting leads: {e}")
-        return 0
+        raise
 
 
 def update_lead_status(lead_id: str, status: str) -> None:
-    """Update lead status."""
+    """Update lead status.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
     db = _get_db()
-    if db is None:
-        logger.error("Database not initialized")
-        return
 
     try:
         oid = _to_object_id(lead_id)
@@ -948,8 +849,7 @@ def update_lead_status(lead_id: str, status: str) -> None:
 def get_email_campaigns(limit: int = 500) -> list[dict]:
     """Get email campaigns with limit to prevent memory issues."""
     db = _get_db()
-    if db is None:
-        return []
+
 
     try:
         results = list(db.email_campaigns.find().limit(limit))
@@ -962,8 +862,7 @@ def get_email_campaigns(limit: int = 500) -> list[dict]:
 def get_query_performance_all() -> list[dict]:
     """Get all query performance records with limit."""
     db = _get_db()
-    if db is None:
-        return []
+
 
     try:
         results = list(db.query_performance.find().limit(1000))

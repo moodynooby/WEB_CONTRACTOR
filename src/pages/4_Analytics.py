@@ -9,13 +9,23 @@ from database.repository import (
     get_email_campaigns,
     get_query_performance_all,
 )
+from database.connection import get_connection_status
 from infra.logging import get_logger
+from ui.utils import check_db_status
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="Analytics", layout="wide")
 
+db_ok = check_db_status()
+db_status = get_connection_status()
+
 with st.sidebar:
+    if db_status["connected"] and db_status["healthy"]:
+        st.success("🟢 Database Connected")
+    else:
+        st.error("🔴 Database Disconnected")
+
     st.subheader("🔄 Auto-Refresh")
     auto_refresh = st.toggle(
         "Enable",
@@ -35,35 +45,41 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    if st.button("📥 Export Summary", use_container_width=True):
-        with st.spinner("Preparing export..."):
-            leads = get_all_leads(limit=10000)
-            campaigns = get_email_campaigns(limit=5000)
-            queries = get_query_performance_all()
-            import io
-            buf = io.StringIO()
-            buf.write("=== LEADS SUMMARY ===\n")
-            leads_df = pd.DataFrame(leads)
-            if not leads_df.empty:
-                buf.write(f"Total leads: {len(leads_df)}\n")
-                buf.write(f"By status:\n{leads_df['status'].value_counts().to_string()}\n\n")
-            buf.write("=== EMAIL CAMPAIGNS ===\n")
-            camp_df = pd.DataFrame(campaigns)
-            if not camp_df.empty:
-                buf.write(f"Total campaigns: {len(camp_df)}\n")
-                buf.write(f"By status:\n{camp_df['status'].value_counts().to_string()}\n\n")
-            buf.write("=== QUERY PERFORMANCE ===\n")
-            q_df = pd.DataFrame(queries)
-            if not q_df.empty:
-                buf.write(f"Total queries: {len(q_df)}\n")
-                buf.write(f"Active: {q_df['is_active'].sum()}, Inactive: {(~q_df['is_active']).sum()}\n")
-            st.download_button(
-                "⬇️ Download Summary",
-                data=buf.getvalue(),
-                file_name="analytics_summary.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
+    if db_ok:
+        if st.button("📥 Export Summary", use_container_width=True):
+            with st.spinner("Preparing export..."):
+                leads = get_all_leads(limit=10000)
+                campaigns = get_email_campaigns(limit=5000)
+                queries = get_query_performance_all()
+                import io
+                buf = io.StringIO()
+                buf.write("=== LEADS SUMMARY ===\n")
+                leads_df = pd.DataFrame(leads)
+                if not leads_df.empty:
+                    buf.write(f"Total leads: {len(leads_df)}\n")
+                    buf.write(f"By status:\n{leads_df['status'].value_counts().to_string()}\n\n")
+                buf.write("=== EMAIL CAMPAIGNS ===\n")
+                camp_df = pd.DataFrame(campaigns)
+                if not camp_df.empty:
+                    buf.write(f"Total campaigns: {len(camp_df)}\n")
+                    buf.write(f"By status:\n{camp_df['status'].value_counts().to_string()}\n\n")
+                buf.write("=== QUERY PERFORMANCE ===\n")
+                q_df = pd.DataFrame(queries)
+                if not q_df.empty:
+                    buf.write(f"Total queries: {len(q_df)}\n")
+                    buf.write(f"Active: {q_df['is_active'].sum()}, Inactive: {(~q_df['is_active']).sum()}\n")
+                st.download_button(
+                    "⬇️ Download Summary",
+                    data=buf.getvalue(),
+                    file_name="analytics_summary.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+    else:
+        st.info("Export disabled — database unavailable")
+
+if not db_ok:
+    st.stop()
 
 st.title("📊 Analytics Dashboard")
 st.caption("Unified view of lead discovery, audit, email, and query performance")
@@ -101,6 +117,7 @@ tab_overview, tab_leads, tab_email, tab_queries = st.tabs([
 
 with tab_overview:
     total_leads = len(leads_df) if not leads_df.empty else 0
+
     qualified = (leads_df["status"] == "qualified").sum() if not leads_df.empty and "status" in leads_df.columns else 0
     total_campaigns = len(camp_df) if not camp_df.empty else 0
     emails_sent = (camp_df["status"] == "sent").sum() if not camp_df.empty and "status" in camp_df.columns else 0

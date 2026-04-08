@@ -1,10 +1,11 @@
 """Discovery Page - Lead Discovery Pipeline."""
 
 import streamlit as st
-from database.repository import get_all_buckets, count_leads
+from database.repository import count_buckets, count_leads, get_all_buckets
+from database.connection import get_connection_status, DatabaseUnavailableError
 from discovery.engine import BucketGenerator
 from infra.logging import get_logger
-from ui.utils import get_app
+from ui.utils import get_app, check_db_status
 
 logger = get_logger(__name__)
 
@@ -14,6 +15,7 @@ st.title("🔍 Lead Discovery")
 st.caption("Generate search queries and scrape leads from configured buckets")
 
 app = get_app()
+db_ok = check_db_status()
 
 if "discovery_running" not in st.session_state:
     st.session_state.discovery_running = False
@@ -29,14 +31,36 @@ if "bucket_gen_result" not in st.session_state:
 if "bucket_gen_error" not in st.session_state:
     st.session_state.bucket_gen_error = None
 
-buckets = get_all_buckets()
-bucket_names = [b["name"] for b in buckets]
-total_leads = count_leads()
+buckets_count = None
+total_leads = None
+if db_ok:
+    try:
+        buckets_count = count_buckets()
+        total_leads = count_leads()
+    except DatabaseUnavailableError:
+        db_ok = False
+
+db_status = get_connection_status()
 
 with st.sidebar:
     st.subheader("📊 Quick Stats")
-    st.metric("Total Buckets", f"{len(buckets)}")
-    st.metric("Total Leads", f"{total_leads:,}")
+
+    if db_status["connected"] and db_status["healthy"]:
+        st.success("🟢 Database Connected")
+    else:
+        st.error("🔴 Database Disconnected")
+
+    if not db_ok or buckets_count is None:
+        st.warning("⚠️ Database unavailable — cannot fetch bucket count")
+        st.metric("Total Buckets", "N/A")
+    else:
+        st.metric("Total Buckets", f"{buckets_count}")
+
+    if not db_ok or total_leads is None:
+        st.warning("⚠️ Database unavailable — cannot fetch lead count")
+        st.metric("Total Leads", "N/A")
+    else:
+        st.metric("Total Leads", f"{total_leads:,}")
 
     st.divider()
 

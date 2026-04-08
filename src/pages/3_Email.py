@@ -2,8 +2,9 @@
 
 import streamlit as st
 from database.repository import get_emails_for_review, delete_email, update_email_content
+from database.connection import DatabaseUnavailableError
 from infra.logging import get_logger
-from ui.utils import get_app
+from ui.utils import get_app, check_db_status
 
 logger = get_logger(__name__)
 
@@ -18,25 +19,37 @@ st.set_page_config(page_title="Email", layout="wide")
 st.title("📧 Email Dashboard")
 
 app = get_app()
+db_ok = check_db_status()
 
 st.session_state.setdefault("email_sending", set())
 st.session_state.setdefault("email_gen_running", False)
 st.session_state.setdefault("review_idx", 0)
 st.session_state.setdefault("review_mode", False)
 
-emails_for_stats = get_emails_for_review(limit=1000)
+emails_for_stats = []
+if db_ok:
+    try:
+        emails_for_stats = get_emails_for_review(limit=1000)
+    except DatabaseUnavailableError:
+        db_ok = False
 pending_review = len([e for e in emails_for_stats if e.get("status") == "needs_review"])
 sent_count = len([e for e in emails_for_stats if e.get("status") == "sent"])
 
 with st.sidebar:
     st.subheader("📊 Quick Stats")
-    st.metric("Pending Review", f"{pending_review:,}")
-    st.metric("Sent", f"{sent_count:,}")
+    if not db_ok:
+        st.metric("Pending Review", "N/A")
+        st.metric("Sent", "N/A")
+    else:
+        st.metric("Pending Review", f"{pending_review:,}")
+        st.metric("Sent", f"{sent_count:,}")
 
     st.divider()
 
     st.subheader("⚡ Quick Actions")
-    if st.button("🚀 Generate Emails", type="primary", use_container_width=True):
+    if not db_ok:
+        st.warning("⚠️ Database unavailable — email features disabled")
+    elif st.button("🚀 Generate Emails", type="primary", use_container_width=True):
         gen_limit = 20
         with st.spinner("Generating emails..."):
             try:
@@ -54,15 +67,20 @@ with st.sidebar:
     if st.button("🔄 Reload", use_container_width=True):
         st.rerun()
 
-gen_limit = st.number_input("Max Leads", 1, 100, 20, 5)
+if db_ok:
+    gen_limit = st.number_input("Max Leads", 1, 100, 20, 5)
 
-col_gen1, col_gen2 = st.columns([3, 1])
-with col_gen1:
-    generate_clicked = st.button(
-        "🚀 Generate", type="primary", use_container_width=True
-    )
-with col_gen2:
-    reload_clicked = st.button("🔄 Reload", type="secondary")
+    col_gen1, col_gen2 = st.columns([3, 1])
+    with col_gen1:
+        generate_clicked = st.button(
+            "🚀 Generate", type="primary", use_container_width=True
+        )
+    with col_gen2:
+        reload_clicked = st.button("🔄 Reload", type="secondary")
+else:
+    generate_clicked = False
+    reload_clicked = False
+    gen_limit = 20
 
 if st.session_state.email_gen_running:
     st.warning("⏳ Generation in progress...")
@@ -90,6 +108,9 @@ if generate_clicked and not st.session_state.email_gen_running:
 
 if reload_clicked:
     st.rerun()
+
+if not db_ok:
+    st.stop()
 
 emails = get_emails_for_review()
 logger.info(f"Fetched {len(emails)} emails for review")

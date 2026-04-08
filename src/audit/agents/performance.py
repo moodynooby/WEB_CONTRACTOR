@@ -129,7 +129,6 @@ class PerformanceAgent(BaseAgent):
         head = soup.find("head")
         render_blocking_scripts = []
         if head:
-            # head is a Tag which supports find_all at runtime
             head_find_all = getattr(head, "find_all", None)
             if head_find_all:
                 for script in head_find_all("script", src=True):

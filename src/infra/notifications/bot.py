@@ -51,9 +51,12 @@ def _get_app():
 def _get_stats() -> str:
     """Format current stats as text message."""
     from database.repository import count_leads
-    from database.connection import get_email_campaign_stats
+    from database.connection import get_email_campaign_stats, DatabaseUnavailableError
 
-    total_leads = count_leads()
+    try:
+        total_leads = count_leads()
+    except DatabaseUnavailableError:
+        return "⚠️ Database is not connected. Cannot fetch stats."
 
     try:
         from database.connection import get_database

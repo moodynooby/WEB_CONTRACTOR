@@ -6,6 +6,7 @@ import traceback
 import requests
 import streamlit as st
 
+from database.connection import DatabaseUnavailableError
 from infra import settings
 from infra.settings import (
     LOCAL_PROVIDER,
@@ -18,11 +19,13 @@ from infra.settings import (
     get_config,
 )
 from infra.logging import get_logger
-from ui.utils import get_app
+from ui.utils import get_app, check_db_status
 from infra.notifications.telegram import TelegramNotifier
 from infra.llm import get_all_modes, get_all_local_providers, get_local_provider_config
 
 logger = get_logger(__name__)
+
+db_ok = check_db_status()
 
 
 def get_current_settings() -> dict:
@@ -588,16 +591,44 @@ def save_feature_toggles(settings_dict: dict):
 
 with st.sidebar:
     from database.repository import count_leads, get_pending_audits, get_qualified_leads, get_emails_for_review
-    total_leads = count_leads()
-    pending_audit = len(get_pending_audits(limit=1))
-    qualified = len(get_qualified_leads(limit=1))
-    pending_review = len(get_emails_for_review(limit=1))
+    from database.connection import get_connection_status
+
+    db_status = get_connection_status()
+
+    if db_status["connected"] and db_status["healthy"]:
+        st.success("🟢 Database Connected")
+    else:
+        st.error("🔴 Database Disconnected")
+
+    total_leads = None
+    pending_audit = 0
+    qualified = 0
+    pending_review = 0
+    if db_ok:
+        try:
+            total_leads = count_leads()
+            pending_audit = len(get_pending_audits(limit=1))
+            qualified = len(get_qualified_leads(limit=1))
+            pending_review = len(get_emails_for_review(limit=1))
+        except DatabaseUnavailableError:
+            pass
 
     st.subheader("📊 Quick Stats")
-    st.metric("Total Leads", f"{total_leads:,}")
-    st.metric("Pending Audit", f"{pending_audit:,}")
-    st.metric("Qualified", f"{qualified:,}")
-    st.metric("Pending Email Review", f"{pending_review:,}")
+
+    if total_leads is None:
+        st.warning("⚠️ Database unavailable — cannot fetch lead count")
+        st.metric("Total Leads", "N/A")
+    else:
+        st.metric("Total Leads", f"{total_leads:,}")
+
+    if not db_ok:
+        st.metric("Pending Audit", "N/A")
+        st.metric("Qualified", "N/A")
+        st.metric("Pending Email Review", "N/A")
+    else:
+        st.metric("Pending Audit", f"{pending_audit:,}")
+        st.metric("Qualified", f"{qualified:,}")
+        st.metric("Pending Email Review", f"{pending_review:,}")
 
     st.divider()
 
@@ -641,10 +672,11 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
         if st.button(
-            "🚀 RUN  PIPELINE",
+            "🚀 RUN PIPELINE",
             type="primary",
             key="run_all_btn",
             help="Execute all pipeline stages in sequence",
+            disabled=not db_ok,
         ):
             st.session_state.pipeline_running = True
             st.session_state.pipeline_cancelled = False

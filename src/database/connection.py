@@ -26,6 +26,15 @@ from infra.logging import get_logger
 logger = get_logger(__name__)
 
 
+class DatabaseUnavailableError(Exception):
+    """Raised when a database operation is attempted but the DB is unavailable.
+
+    Unlike returning empty lists/zeros, this makes it explicit to callers
+    that the database is down so they can show proper error messages.
+    """
+    pass
+
+
 _client: MongoClient | None = None
 _database: Any | None = None
 _db_lock = threading.Lock()
@@ -95,7 +104,21 @@ _circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30)
 _PENDING_WRITES_DIR = Path(__file__).parent.parent / "data" / "pending_writes"
 _PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
 _pending_writes_lock = threading.Lock()
-PENDING_WRITES_TTL_DAYS = 7  
+PENDING_WRITES_TTL_DAYS = 7
+
+if not _PENDING_WRITES_DIR.exists():
+    _PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Created pending writes directory: {_PENDING_WRITES_DIR}")
+logger.debug(f"Pending writes directory: {_PENDING_WRITES_DIR}")
+
+
+def is_initialized() -> bool:
+    """Check if the database has been initialized (attempted connection).
+
+    This is True even if the connection attempt failed.
+    Use is_connected() to check if the DB is actually available.
+    """
+    return _is_initialized  
 
 
 
@@ -256,6 +279,21 @@ def get_circuit_breaker_state() -> dict[str, Any]:
     return {
         "state": _circuit_breaker.state.value,
         "can_execute": _circuit_breaker.can_execute(),
+    }
+
+
+def get_connection_status() -> dict[str, Any]:
+    """Get database connection status for UI display.
+
+    Returns:
+        Dict with connected, healthy, and database name info.
+    """
+    from infra.settings import MONGODB_DATABASE
+
+    return {
+        "connected": _is_initialized and _database is not None,
+        "healthy": _is_healthy,
+        "database": MONGODB_DATABASE if _database is not None else None,
     }
 
 

@@ -180,6 +180,18 @@ if "app" not in st.session_state:
     st.session_state.app = App()
     st.session_state.app.initialize()
 
+
+def _on_session_end():
+    """Shut down app and close database connection when Streamlit session ends."""
+    if "app" in st.session_state:
+        st.session_state.app.shutdown()
+
+
+# Register session end handler (available in Streamlit >= 1.40.0)
+_session_end_event = getattr(st, "events", None)
+if _session_end_event is not None:
+    _session_end_event.session_end.connect(_on_session_end)
+
 pg = st.navigation(
     [
         st.Page("pages/0_Pipeline.py", title="🏗️ Pipeline"),

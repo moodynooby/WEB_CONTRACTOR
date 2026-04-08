@@ -56,11 +56,11 @@ class EmailSender:
                 server.send_message(msg)
 
             if campaign_id:
-                mark_email_sent(str(campaign_id), lead_id or "", True)
+                mark_email_sent(str(campaign_id), lead_id, True)
 
             return True
         except Exception as e:
             self.log(f"Email send error: {e}", "error")
             if campaign_id:
-                mark_email_sent(str(campaign_id), lead_id or "", False, str(e))
+                mark_email_sent(str(campaign_id), lead_id, False, str(e))
             return False

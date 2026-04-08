@@ -2,8 +2,9 @@
 
 import streamlit as st
 from database.repository import count_leads, get_pending_audits, get_qualified_leads
+from database.connection import get_connection_status, DatabaseUnavailableError
 from infra.logging import get_logger
-from ui.utils import get_app
+from ui.utils import get_app, check_db_status
 
 logger = get_logger(__name__)
 
@@ -13,21 +14,46 @@ st.title("📋 Lead Audit")
 st.caption("Audit pending leads using multi-agent pipeline")
 
 app = get_app()
+db_ok = check_db_status()
 
 if "audit_running" not in st.session_state:
     st.session_state.audit_running = False
 if "audit_result" not in st.session_state:
     st.session_state.audit_result = None
 
-pending_count = len(get_pending_audits(limit=1))
-qualified_count = len(get_qualified_leads(limit=1))
-total_leads = count_leads()
+pending_count = 0
+qualified_count = 0
+total_leads = None
+if db_ok:
+    try:
+        pending_count = len(get_pending_audits(limit=1))
+        qualified_count = len(get_qualified_leads(limit=1))
+        total_leads = count_leads()
+    except DatabaseUnavailableError:
+        db_ok = False
+
+db_status = get_connection_status()
 
 with st.sidebar:
     st.subheader("📊 Quick Stats")
-    st.metric("Total Leads", f"{total_leads:,}")
-    st.metric("Pending Audit", f"{pending_count:,}")
-    st.metric("Qualified", f"{qualified_count:,}")
+
+    if db_status["connected"] and db_status["healthy"]:
+        st.success("🟢 Database Connected")
+    else:
+        st.error("🔴 Database Disconnected")
+
+    if not db_ok or total_leads is None:
+        st.warning("⚠️ Database unavailable — cannot fetch lead count")
+        st.metric("Total Leads", "N/A")
+    else:
+        st.metric("Total Leads", f"{total_leads:,}")
+
+    if not db_ok:
+        st.metric("Pending Audit", "N/A")
+        st.metric("Qualified", "N/A")
+    else:
+        st.metric("Pending Audit", f"{pending_count:,}")
+        st.metric("Qualified", f"{qualified_count:,}")
 
     st.divider()
 
