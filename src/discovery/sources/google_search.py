@@ -112,7 +112,7 @@ class GoogleSearchScraper(BaseScraper):
 
     def _extract_lead_from_element(
         self, element: Any, query: str, platform: str
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, Any] | None:
         """Extract lead data from a single search result element.
 
         Args:

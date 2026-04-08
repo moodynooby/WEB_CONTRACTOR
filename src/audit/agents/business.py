@@ -3,6 +3,7 @@
 import time
 from typing import Any
 
+import requests
 from bs4 import BeautifulSoup
 
 from infra import llm
@@ -27,10 +28,11 @@ class BusinessAgent(BaseAgent):
     def execute(
         self,
         url: str,
-        business_name: str,
-        bucket: str,
+        business_name: str = "",
+        bucket: str = "",
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
+        response: requests.Response | None = None,
     ) -> AgentResult:
         """Execute business audit."""
         start_time = time.time()

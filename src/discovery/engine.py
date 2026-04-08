@@ -345,11 +345,8 @@ class PlaywrightScraper:
                 bucket_data = next(
                     (b for b in self.buckets if b["name"] == q["bucket"]), None
                 )
-                bucket_max_results = (
-                    int(bucket_data.get("max_results"))
-                    if bucket_data and bucket_data.get("max_results")
-                    else None
-                )
+                max_res = bucket_data.get("max_results") if bucket_data else None
+                bucket_max_results = int(max_res) if max_res is not None else None
 
                 bucket_id = get_bucket_id_by_name(q["bucket"])
                 query_perf = None
@@ -370,17 +367,17 @@ class PlaywrightScraper:
                         leads_found = len(query_leads)
                         success = saved > 0
                         update_query_performance(
-                            query_perf=query_perf,
+                            qp_id=query_perf["id"],
                             leads_found=leads_found,
                             leads_saved=saved,
                             success=success,
                         )
 
-                        if query_perf.consecutive_failures >= stale_threshold:
-                            mark_query_as_stale(query_perf)
+                        if query_perf.get("consecutive_failures", 0) >= stale_threshold:
+                            mark_query_as_stale(query_perf["id"])
                             self.log(
                                 f"  Query marked as STALE: {q['query']} "
-                                f"({query_perf.consecutive_failures} consecutive failures)",
+                                f"({query_perf.get('consecutive_failures', 0)} consecutive failures)",
                                 "error",
                             )
 
@@ -400,17 +397,17 @@ class PlaywrightScraper:
                 else:
                     if query_perf:
                         update_query_performance(
-                            query_perf=query_perf,
+                            qp_id=query_perf["id"],
                             leads_found=0,
                             leads_saved=0,
                             success=False,
                         )
 
-                        if query_perf.consecutive_failures >= stale_threshold:
-                            mark_query_as_stale(query_perf)
+                        if query_perf.get("consecutive_failures", 0) >= stale_threshold:
+                            mark_query_as_stale(query_perf["id"])
                             self.log(
                                 f"  Query marked as STALE: {q['query']} "
-                                f"({query_perf.consecutive_failures} consecutive failures)",
+                                f"({query_perf.get('consecutive_failures', 0)} consecutive failures)",
                                 "error",
                             )
 

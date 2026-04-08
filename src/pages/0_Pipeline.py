@@ -1,23 +1,28 @@
 """Pipeline Orchestration Page - Run All Pipeline Stages."""
 
-import json
 import time
 import traceback
-from pathlib import Path
 
 import requests
 import streamlit as st
 
 from infra import settings
-from infra.settings import LOCAL_PROVIDER, PERFORMANCE_MODE, LLM_MODE
+from infra.settings import (
+    LOCAL_PROVIDER,
+    PERFORMANCE_MODE,
+    LLM_MODE,
+    CONNECTION_TEST_TIMEOUT,
+    PIPELINE_MAX_QUERIES,
+    PIPELINE_AUDIT_LIMIT,
+    PIPELINE_EMAIL_LIMIT,
+    get_config,
+)
 from infra.logging import get_logger
 from ui.utils import get_app
 from infra.notifications.telegram import TelegramNotifier
-from infra.llm import get_all_modes, get_all_local_providers
+from infra.llm import get_all_modes, get_all_local_providers, get_local_provider_config
 
 logger = get_logger(__name__)
-
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "app_config.json"
 
 
 def get_current_settings() -> dict:
@@ -34,11 +39,15 @@ def get_current_settings() -> dict:
     }
 
 
-def save_mode_settings(llm_mode: str, perf_mode: str, local_provider: str | None = None) -> tuple[bool, str]:
-    """Save mode settings to configuration file."""
+def save_mode_settings(
+    llm_mode: str, perf_mode: str, local_provider: str | None = None
+) -> tuple[bool, str]:
+    """Save mode settings to override config."""
     try:
-        with open(CONFIG_PATH, "r") as f:
-            config = json.load(f)
+        from infra.settings import get_config, OVERRIDE_FILE
+        import json
+
+        config = get_config()
 
         config.setdefault("llm", {})["mode"] = llm_mode
         config["llm"]["performance_mode"] = perf_mode
@@ -46,7 +55,7 @@ def save_mode_settings(llm_mode: str, perf_mode: str, local_provider: str | None
         if llm_mode == "local" and local_provider:
             config["llm"].setdefault("local", {})["provider"] = local_provider
 
-        with open(CONFIG_PATH, "w") as f:
+        with open(OVERRIDE_FILE, "w") as f:
             json.dump(config, f, indent=2)
 
         return True, "Settings saved successfully"
@@ -62,73 +71,109 @@ def test_connection(llm_mode: str, local_provider: str | None = None) -> list[di
         if settings.GROQ_API_KEY:
             try:
                 response = requests.get(
-                    "https://api.groq.com/openai/v1/models",
+                    f"{settings.GROQ_BASE_URL}/models",
                     headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
-                    timeout=5,
+                    timeout=CONNECTION_TEST_TIMEOUT,
                 )
-                results.append({
-                    "name": "Groq API",
-                    "status": "success" if response.status_code == 200 else "error",
-                    "message": f"Connected (status {response.status_code})" if response.status_code == 200 else f"Failed (status {response.status_code})"
-                })
+                results.append(
+                    {
+                        "name": "Groq API",
+                        "status": "success" if response.status_code == 200 else "error",
+                        "message": f"Connected (status {response.status_code})"
+                        if response.status_code == 200
+                        else f"Failed (status {response.status_code})",
+                    }
+                )
             except Exception as e:
-                results.append({"name": "Groq API", "status": "error", "message": str(e)})
+                results.append(
+                    {"name": "Groq API", "status": "error", "message": str(e)}
+                )
         else:
-            results.append({"name": "Groq API", "status": "warning", "message": "API key not configured"})
+            results.append(
+                {
+                    "name": "Groq API",
+                    "status": "warning",
+                    "message": "API key not configured",
+                }
+            )
 
         if settings.OPENROUTER_API_KEY:
             try:
                 response = requests.get(
-                    "https://openrouter.ai/api/v1/models",
+                    f"{settings.OPENROUTER_BASE_URL}/models",
                     headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"},
-                    timeout=5,
+                    timeout=CONNECTION_TEST_TIMEOUT,
                 )
-                results.append({
-                    "name": "OpenRouter API",
-                    "status": "success" if response.status_code == 200 else "error",
-                    "message": f"Connected (status {response.status_code})" if response.status_code == 200 else f"Failed (status {response.status_code})"
-                })
+                results.append(
+                    {
+                        "name": "OpenRouter API",
+                        "status": "success" if response.status_code == 200 else "error",
+                        "message": f"Connected (status {response.status_code})"
+                        if response.status_code == 200
+                        else f"Failed (status {response.status_code})",
+                    }
+                )
             except Exception as e:
-                results.append({"name": "OpenRouter API", "status": "error", "message": str(e)})
+                results.append(
+                    {"name": "OpenRouter API", "status": "error", "message": str(e)}
+                )
         else:
-            results.append({"name": "OpenRouter API", "status": "warning", "message": "API key not configured"})
+            results.append(
+                {
+                    "name": "OpenRouter API",
+                    "status": "warning",
+                    "message": "API key not configured",
+                }
+            )
 
     elif llm_mode == "local" and local_provider:
-        if local_provider == "ollama":
-            url = "http://localhost:11434"
-            try:
-                response = requests.get(f"{url}", timeout=5)
-                results.append({
-                    "name": "Ollama",
-                    "status": "success" if response.status_code == 200 else "error",
-                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
-                })
-            except Exception as e:
-                results.append({"name": "Ollama", "status": "error", "message": f"Cannot connect to {url}: {e}"})
-        elif local_provider == "vllm":
-            url = "http://localhost:8000"
-            try:
-                response = requests.get(f"{url}/v1/models", timeout=5)
-                results.append({
-                    "name": "vLLM",
-                    "status": "success" if response.status_code == 200 else "error",
-                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
-                })
-            except Exception as e:
-                results.append({"name": "vLLM", "status": "error", "message": f"Cannot connect to {url}: {e}"})
-        elif local_provider == "lm_studio":
-            url = "http://localhost:1234"
-            try:
-                response = requests.get(f"{url}/v1/models", timeout=5)
-                results.append({
-                    "name": "LM Studio",
-                    "status": "success" if response.status_code == 200 else "error",
-                    "message": f"Running at {url}" if response.status_code == 200 else f"Failed (status {response.status_code})"
-                })
-            except Exception as e:
-                results.append({"name": "LM Studio", "status": "error", "message": f"Cannot connect to {url}: {e}"})
+        try:
+            provider_config = get_local_provider_config(local_provider)
+            base_url = provider_config.get("default_base_url", "")
+            name = provider_config.get("name", local_provider.title())
+
+            if not base_url:
+                results.append(
+                    {
+                        "name": name,
+                        "status": "warning",
+                        "message": "No base URL configured",
+                    }
+                )
+            else:
+                health_url = base_url.replace("/v1", "")
+                try:
+                    response = requests.get(health_url, timeout=CONNECTION_TEST_TIMEOUT)
+                    results.append(
+                        {
+                            "name": name,
+                            "status": "success"
+                            if response.status_code == 200
+                            else "error",
+                            "message": f"Running at {health_url}"
+                            if response.status_code == 200
+                            else f"Failed (status {response.status_code})",
+                        }
+                    )
+                except Exception as e:
+                    results.append(
+                        {
+                            "name": name,
+                            "status": "error",
+                            "message": f"Cannot connect to {health_url}: {e}",
+                        }
+                    )
+        except ValueError:
+            results.append(
+                {
+                    "name": local_provider.title(),
+                    "status": "warning",
+                    "message": "Provider not found in config",
+                }
+            )
 
     return results
+
 
 st.set_page_config(
     page_title="Pipeline",
@@ -168,7 +213,7 @@ with st.expander("⚙️ Pipeline Configuration", expanded=True):
             "Max Discovery Queries",
             min_value=5,
             max_value=100,
-            value=20,
+            value=PIPELINE_MAX_QUERIES,
             step=5,
             help="Maximum number of search queries to execute in discovery",
         )
@@ -178,7 +223,7 @@ with st.expander("⚙️ Pipeline Configuration", expanded=True):
             "Max Leads to Audit",
             min_value=5,
             max_value=100,
-            value=20,
+            value=PIPELINE_AUDIT_LIMIT,
             step=5,
             help="Maximum number of pending leads to audit",
         )
@@ -188,7 +233,7 @@ with st.expander("⚙️ Pipeline Configuration", expanded=True):
             "Max Emails to Generate",
             min_value=5,
             max_value=100,
-            value=20,
+            value=PIPELINE_EMAIL_LIMIT,
             step=5,
             help="Maximum number of emails to generate for qualified leads",
         )
@@ -219,30 +264,14 @@ with st.expander("⚙️ Pipeline Configuration", expanded=True):
 
 with st.expander("🔧 Feature Toggles", expanded=True):
     st.info(
-        "💡 **Tip:** Toggle features on/off here. For advanced settings (timeout, weights, priority, etc.), edit `config/app_config.json`"
+        "💡 **Tip:** Toggle features on/off here. For advanced settings (timeout, weights, priority, etc.), edit `infra/config_defaults.py`"
     )
 
-    config_load_error = None
-    try:
-        with open(CONFIG_PATH, "r") as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        config_load_error = f"Config file not found at {CONFIG_PATH}"
-        config = {}
-    except json.JSONDecodeError as e:
-        config_load_error = f"Invalid JSON in config: {e}"
-        config = {}
-    except Exception as e:
-        config_load_error = f"Failed to load config: {e}"
-        config = {}
-
-    if config_load_error:
-        st.error(f"⚠️ {config_load_error}")
-        st.warning("Feature toggles are disabled. Please fix the config file.")
+    config = get_config()
 
     with st.expander("🌐 Discovery Sources", expanded=True):
         st.caption(
-            "💡 For priority, max_results, and other advanced settings → edit `config/app_config.json` → `discovery_sources`"
+            "💡 For priority, max_results, and other advanced settings → edit `infra/config_defaults.py` → `discovery_sources`"
         )
 
         sources_enabled_master = st.toggle(
@@ -274,7 +303,7 @@ with st.expander("🔧 Feature Toggles", expanded=True):
 
     with st.expander("📊 Query Features", expanded=True):
         st.caption(
-            "💡 For threshold, weights, and other advanced settings → edit `config/app_config.json` → `query_scoring` or `query_performance`"
+            "💡 For threshold, weights, and other advanced settings → edit `infra/config_defaults.py` → `query_scoring` or `query_performance`"
         )
 
         col1, col2 = st.columns(2)
@@ -293,7 +322,7 @@ with st.expander("🔧 Feature Toggles", expanded=True):
 
     with st.expander("🤖 Audit Agents", expanded=True):
         st.caption(
-            "💡 For weights, timeout, system prompts, and other advanced settings → edit `config/app_config.json` → `agents`"
+            "💡 For weights, timeout, system prompts, and other advanced settings → edit `infra/config_defaults.py` → `agents`"
         )
 
         agents_enabled_master = st.toggle(
@@ -344,7 +373,7 @@ with st.expander("🔧 Feature Toggles", expanded=True):
 
     with st.expander("📧 Email Generation", expanded=True):
         st.caption(
-            "💡 For system prompts, templates, and other advanced settings → edit `config/app_config.json` → `email_generation`"
+            "💡 For system prompts, templates, and other advanced settings → edit `infra/config_defaults.py` → `email_generation`"
         )
 
         email_gen_enabled = st.toggle(
@@ -379,9 +408,9 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         llm_mode_option = st.radio(
             "Select LLM Mode",
             options=["cloud", "local"],
-            format_func=lambda x: "☁️ Cloud (Groq/OpenRouter)"
-            if x == "cloud"
-            else "🖥️ Local (On-device)",
+            format_func=lambda x: (
+                "☁️ Cloud (Groq/OpenRouter)" if x == "cloud" else "🖥️ Local (On-device)"
+            ),
             index=0 if current_settings["llm_mode"] == "cloud" else 1,
             horizontal=True,
             label_visibility="collapsed",
@@ -412,12 +441,12 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
 
     st.markdown("**Performance Mode:**")
     modes = get_all_modes()
-    
+
     if llm_mode_option == "cloud":
         visible_modes = [m for m in modes if m.get("mode_type") == "cloud"]
     else:
         visible_modes = [m for m in modes if m.get("mode_type") == "local"]
-    
+
     mode_options = [m["key"] for m in visible_modes]
 
     current_perf_idx = 0
@@ -446,7 +475,9 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         else:
             selected_perf_mode = mode_options[0]
 
-    selected_mode_data = next((m for m in visible_modes if m["key"] == selected_perf_mode), visible_modes[0])
+    selected_mode_data = next(
+        (m for m in visible_modes if m["key"] == selected_perf_mode), visible_modes[0]
+    )
     with st.expander("ℹ️ Mode Details", expanded=False):
         st.markdown(f"""
         **{selected_mode_data["icon"]} {selected_mode_data["label"]}**
@@ -463,7 +494,7 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
         with st.spinner("Testing connection(s)..."):
             local_prov = selected_provider if llm_mode_option == "local" else None
             results = test_connection(llm_mode_option, local_prov)
-            
+
             for result in results:
                 if result["status"] == "success":
                     st.success(f"✅ **{result['name']}:** {result['message']}")
@@ -481,7 +512,7 @@ with st.expander("🎛️ LLM Mode & Performance Settings", expanded=True):
             local_prov = selected_provider if llm_mode_option == "local" else None
             success, message = save_mode_settings(
                 llm_mode=llm_mode_option,
-                performance_mode=selected_perf_mode,
+                perf_mode=selected_perf_mode,
                 local_provider=local_prov,
             )
 
@@ -506,10 +537,12 @@ feature_settings = {
 
 
 def save_feature_toggles(settings_dict: dict):
-    """Save feature toggle settings back to config file."""
+    """Save feature toggle settings to override config."""
     try:
-        with open(CONFIG_PATH, "r") as f:
-            config = json.load(f)
+        from infra.settings import get_config, OVERRIDE_FILE
+        import json
+
+        config = get_config()
 
         if "source_states" in settings_dict:
             for source_name, enabled in settings_dict["source_states"].items():
@@ -544,7 +577,7 @@ def save_feature_toggles(settings_dict: dict):
                 "email_gen_enabled"
             ]
 
-        with open(CONFIG_PATH, "w") as f:
+        with open(OVERRIDE_FILE, "w") as f:
             json.dump(config, f, indent=2)
 
         return True
@@ -642,7 +675,7 @@ if st.session_state.pipeline_running:
 
     if disabled_stages:
         st.info(
-            f"⏭️ Skipping disabled stages: {', '.join([s['name'] for s in disabled_stages])}"
+            f"⏭️ Skipping disabled stages: {', '.join(str(s['name']) for s in disabled_stages)}"
         )
 
     progress_bar = st.progress(0)
@@ -743,7 +776,10 @@ if st.session_state.pipeline_running:
                 }
 
             elif stage["function"] == "send_emails":
-                from database.repository import get_emails_for_review, update_email_content
+                from database.repository import (
+                    get_emails_for_review,
+                    update_email_content,
+                )
 
                 emails = get_emails_for_review()
                 emails_to_send = [
@@ -761,8 +797,11 @@ if st.session_state.pipeline_running:
 
                         status_text.info(f"📤 Sending email {email_idx + 1}/{total}...")
                         try:
+                            eid = email.get("id")
+                            if eid is None:
+                                continue
                             update_email_content(
-                                email.get("id"),
+                                eid,
                                 email.get("subject", ""),
                                 email.get("body", ""),
                             )

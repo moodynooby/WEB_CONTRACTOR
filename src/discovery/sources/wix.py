@@ -65,7 +65,7 @@ class WixScraper(BaseScraper):
 
     def _extract_lead(
         self, element: Any, query: str, page: Page
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, Any] | None:
         """Extract lead data from a search result.
 
         Args:

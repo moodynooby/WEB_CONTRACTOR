@@ -719,7 +719,7 @@ def update_query_performance(
         }
 
         if success and leads_found > 0:
-            update["$set"]["consecutive_failures"] = 0
+            update["$set"]["consecutive_failures"] = 0  # ty: ignore[invalid-assignment]
         else:
             update["$inc"]["consecutive_failures"] = 1
 
@@ -756,7 +756,7 @@ def get_stale_queries(
         return []
 
     try:
-        query = {"is_active": True, "consecutive_failures": {"$gte": max_failures}}
+        query: dict = {"is_active": True, "consecutive_failures": {"$gte": max_failures}}
         if bucket_id:
             query["bucket_id"] = bucket_id
 

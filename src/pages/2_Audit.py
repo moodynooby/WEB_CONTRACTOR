@@ -69,8 +69,10 @@ elif st.button("🔍 Run Audit", type="primary", disabled=st.session_state.audit
         col1.metric("Leads Audited", result["audited"])
         col2.metric("Leads Qualified", result["qualified"])
 
-        if result["audited"] > 0:
-            qual_rate = (result["qualified"] / result["audited"]) * 100
+        audited = int(result.get("audited", 0))
+        qualified = int(result.get("qualified", 0))
+        if audited > 0:
+            qual_rate = (qualified / audited) * 100
             col3.metric("Qualification Rate", f"{qual_rate:.1f}%")
     elif st.session_state.audit_result and "error" in st.session_state.audit_result:
         st.error(f"Audit failed: {st.session_state.audit_result['error']}")

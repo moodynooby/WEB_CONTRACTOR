@@ -18,10 +18,10 @@ class WebContractorApp:
 
     def __init__(self):
         self.logger = get_logger(__name__)
-        self._scraper: Optional[PlaywrightScraper] = None
-        self._email_sender: Optional[EmailSender] = None
-        self._email_generator: Optional[EmailGenerator] = None
-        self._orchestrator: Optional[AuditOrchestrator] = None
+        self._scraper: PlaywrightScraper | None = None
+        self._email_sender: EmailSender | None = None
+        self._email_generator: EmailGenerator | None = None
+        self._orchestrator: AuditOrchestrator | None = None
         self._initialized = False
 
     def initialize(self) -> None:
@@ -56,28 +56,32 @@ class WebContractorApp:
         """Get scraper service, initializing if needed."""
         if not self._initialized:
             self.initialize()
-        return self._scraper  # type: ignore[return-value]
+        assert self._scraper is not None
+        return self._scraper
 
     @property
     def orchestrator(self) -> AuditOrchestrator:
         """Get audit orchestrator service, initializing if needed."""
         if not self._initialized:
             self.initialize()
-        return self._orchestrator  # type: ignore[return-value]
+        assert self._orchestrator is not None
+        return self._orchestrator
 
     @property
     def email_sender(self) -> EmailSender:
         """Get email sender service, initializing if needed."""
         if not self._initialized:
             self.initialize()
-        return self._email_sender  # type: ignore[return-value]
+        assert self._email_sender is not None
+        return self._email_sender
 
     @property
     def email_generator(self) -> EmailGenerator:
         """Get email generator service, initializing if needed."""
         if not self._initialized:
             self.initialize()
-        return self._email_generator  # type: ignore[return-value]
+        assert self._email_generator is not None
+        return self._email_generator
 
     def run_discovery(
         self,

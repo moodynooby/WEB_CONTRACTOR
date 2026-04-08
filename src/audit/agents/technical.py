@@ -28,8 +28,11 @@ class TechnicalAgent(BaseAgent):
     def execute(
         self,
         url: str,
+        business_name: str = "",
+        bucket: str = "",
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
+        response: requests.Response | None = None,
     ) -> AgentResult:
         """Execute technical SEO audit."""
         start_time = time.time()

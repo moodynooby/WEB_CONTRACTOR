@@ -1,10 +1,10 @@
 """Audit Agents Package."""
 
-from audit.agents.base import BaseAgent, AgentResult
-from audit.agents.content import ContentAgent
-from audit.agents.business import BusinessAgent
-from audit.agents.technical import TechnicalAgent
-from audit.agents.performance import PerformanceAgent
+from .base import BaseAgent, AgentResult
+from .content import ContentAgent
+from .business import BusinessAgent
+from .technical import TechnicalAgent
+from .performance import PerformanceAgent
 
 AGENT_REGISTRY: dict[str, type[BaseAgent]] = {
     "content": ContentAgent,

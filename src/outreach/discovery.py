@@ -1,7 +1,7 @@
 """Contact discovery functions for extracting email and phone info from websites."""
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -9,17 +9,21 @@ from bs4 import BeautifulSoup
 try:
     from email_scraper import scrape_emails
 except ImportError:
-    scrape_emails = None
+    scrape_emails: Callable | None = None
 
 try:
     from mailscout import Scout
 except ImportError:
-    Scout = None
+    Scout: type | None = None
 
 import email_validator
 import requests
 
-from infra.settings import DEFAULT_USER_AGENT
+from infra.settings import (
+    DEFAULT_USER_AGENT,
+    EMAIL_SCRAPE_TIMEOUT,
+    EMAIL_COMMON_PREFIXES,
+)
 
 
 def validate_email(email: str) -> Optional[str]:
@@ -110,14 +114,13 @@ def _try_mailscout_fallback(base_url: str) -> Optional[str]:
 
         domain = domain.replace("www.", "")
 
-        common_prefixes = ["info", "contact", "hello", "support", "admin"]
-        for prefix in common_prefixes:
+        for prefix in EMAIL_COMMON_PREFIXES:
             test_email = f"{prefix}@{domain}"
             if validate_email(test_email):
                 return test_email
 
         scout = Scout(check_variants=False, check_prefixes=True)
-        emails = scout.find_emails(domain, common_prefixes)
+        emails = scout.find_emails(domain, EMAIL_COMMON_PREFIXES)
         if emails and hasattr(emails, "__iter__"):
             for em in emails:
                 normalized = validate_email(em)
@@ -156,7 +159,9 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
     """Attempt to scrape email from website URL."""
     try:
         headers = {"User-Agent": DEFAULT_USER_AGENT}
-        response = requests.get(website_url, headers=headers, timeout=10)
+        response = requests.get(
+            website_url, headers=headers, timeout=EMAIL_SCRAPE_TIMEOUT
+        )
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")

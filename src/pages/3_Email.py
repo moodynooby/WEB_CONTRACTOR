@@ -7,6 +7,13 @@ from ui.utils import get_app
 
 logger = get_logger(__name__)
 
+STATUS_EMOJI = {
+    "needs_review": "🟡",
+    "sent": "🟢",
+    "approved": "✅",
+    "rejected": "❌",
+}
+
 st.set_page_config(page_title="Email", layout="wide")
 st.title("Email Dashboard")
 
@@ -81,12 +88,6 @@ if st.session_state.review_mode and unreviewed:
         st.session_state.review_idx = 0
 
     email = unreviewed[idx]
-    status_emoji = {
-        "needs_review": "🟡",
-        "sent": "🟢",
-        "approved": "✅",
-        "rejected": "❌",
-    }
 
     st.subheader(f"🔍 Review Mode ({idx + 1}/{len(unreviewed)})")
     st.progress((idx + 1) / len(unreviewed))
@@ -114,25 +115,31 @@ if st.session_state.review_mode and unreviewed:
 
     with col_actions[0]:
         if st.button("✅ Approve & Send", type="primary", use_container_width=True):
-            try:
-                update_email_content(email.get("id"), subject, body)
-                success = app.send_email(
-                    to_email=email["to_email"],
-                    subject=subject,
-                    body=body,
-                    campaign_id=email.get("id"),
-                    lead_id=email.get("lead_id"),
-                )
-                if success:
-                    st.success("✅ Approved & sent!")
-                    st.session_state.review_idx = idx + 1
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Failed: {e}")
+            campaign_id = email.get("id")
+            if not campaign_id:
+                st.error("Missing campaign ID")
+            else:
+                try:
+                    update_email_content(campaign_id, subject, body)
+                    success = app.send_email(
+                        to_email=email["to_email"],
+                        subject=subject,
+                        body=body,
+                        campaign_id=campaign_id,
+                        lead_id=email.get("lead_id"),
+                    )
+                    if success:
+                        st.success("✅ Approved & sent!")
+                        st.session_state.review_idx = idx + 1
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed: {e}")
 
     with col_actions[1]:
         if st.button("❌ Reject", type="secondary", use_container_width=True):
-            delete_email(email.get("id"))
+            campaign_id = email.get("id")
+            if campaign_id:
+                delete_email(campaign_id)
             st.success("❌ Rejected & deleted")
             st.session_state.review_idx = max(0, min(idx, len(unreviewed) - 2))
             st.rerun()
@@ -175,7 +182,7 @@ else:
         st.caption("REVIEWED")
         for email in reviewed:
             status = email.get("status", "unknown")
-            emoji = status_emoji.get(status, "⚪")
+            emoji = STATUS_EMOJI.get(status, "⚪")
             with st.expander(
                 f"{emoji} {email.get('business_name', 'Unknown')} — {email.get('to_email', 'N/A')} ({status})"
             ):

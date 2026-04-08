@@ -3,7 +3,6 @@
 import json
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 import requests
@@ -23,6 +22,8 @@ from infra.settings import (
     LOCAL_PROVIDER,
     LOCAL_BASE_URL,
     LOCAL_MODEL,
+    CONNECTION_TEST_TIMEOUT,
+    load_json_section,
 )
 from infra.logging import get_logger
 
@@ -30,26 +31,10 @@ logger = get_logger(__name__)
 
 _local = threading.local()
 
-_config_cache: dict[str, Any] | None = None
-
-
-def _load_llm_config() -> dict[str, Any]:
-    """Load LLM config from app_config.json with caching."""
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-    
-    config_path = Path(__file__).parent.parent / "config" / "app_config.json"
-    with open(config_path, "r") as f:
-        config = json.load(f)
-    
-    _config_cache = config.get("llm", {})
-    return _config_cache
-
 
 def get_all_modes() -> list[dict[str, Any]]:
     """Get all available performance modes from config."""
-    config = _load_llm_config()
+    config = load_json_section("llm")
     modes = config.get("performance_modes", [])
     return [{"key": m["key"], **m} for m in modes]
 
@@ -66,7 +51,7 @@ def get_mode_profile(mode: str) -> dict[str, Any]:
 
 def get_all_local_providers() -> list[dict[str, Any]]:
     """Get all available local providers from config."""
-    config = _load_llm_config()
+    config = load_json_section("llm")
     providers = config.get("local_providers", [])
     return [{"key": p["key"], **p} for p in providers]
 
@@ -81,29 +66,35 @@ def get_local_provider_config(provider: str) -> dict[str, Any]:
     raise ValueError(f"Unknown provider: {provider}. Available: {available}")
 
 
-PROVIDERS = {
-    "groq": {
-        "api_key": GROQ_API_KEY,
-        "base_url": GROQ_BASE_URL,
-        "default_model": DEFAULT_MODEL,
-        "extra_headers": {},
-    },
-    "openrouter": {
-        "api_key": OPENROUTER_API_KEY,
-        "base_url": OPENROUTER_BASE_URL,
-        "default_model": FALLBACK_MODEL,
-        "extra_headers": {
-            "HTTP-Referer": "https://github.com/web-contractor",
-            "X-Title": "Web Contractor",
+def _build_providers() -> dict[str, Any]:
+    """Build PROVIDERS dict from config."""
+    from infra.settings import load_json_section
+
+    providers_config = load_json_section("providers")
+    openrouter_headers = providers_config.get("openrouter", {}).get("extra_headers", {})
+    return {
+        "groq": {
+            "api_key": GROQ_API_KEY,
+            "base_url": GROQ_BASE_URL,
+            "default_model": DEFAULT_MODEL,
+            "extra_headers": {},
         },
-    },
-    "local": {
-        "api_key": "",  
-        "base_url": LOCAL_BASE_URL,
-        "default_model": LOCAL_MODEL,
-        "extra_headers": {},
-    },
-}
+        "openrouter": {
+            "api_key": OPENROUTER_API_KEY,
+            "base_url": OPENROUTER_BASE_URL,
+            "default_model": FALLBACK_MODEL,
+            "extra_headers": openrouter_headers,
+        },
+        "local": {
+            "api_key": "",
+            "base_url": LOCAL_BASE_URL,
+            "default_model": LOCAL_MODEL,
+            "extra_headers": {},
+        },
+    }
+
+
+PROVIDERS = _build_providers()
 
 
 class LLMError(Exception):
@@ -131,21 +122,23 @@ def is_available() -> bool:
     if LLM_MODE == "local":
         try:
             session = get_session()
-            response = session.get(f"{LOCAL_BASE_URL}", timeout=5)
+            response = session.get(f"{LOCAL_BASE_URL}", timeout=CONNECTION_TEST_TIMEOUT)
             if response.status_code == 200:
                 return True
         except requests.exceptions.RequestException:
             pass
         return False
-    
+
     for name, config in PROVIDERS.items():
         if name == "local":
-            continue  
+            continue
         if config["api_key"]:
             try:
                 session = get_session()
                 session.headers.update({"Authorization": f"Bearer {config['api_key']}"})
-                response = session.get(f"{config['base_url']}/models", timeout=5)
+                response = session.get(
+                    f"{config['base_url']}/models", timeout=CONNECTION_TEST_TIMEOUT
+                )
                 if response.status_code == 200:
                     return True
             except requests.exceptions.RequestException:
@@ -218,7 +211,7 @@ def _generate_with_config(
     mode_profile = get_mode_profile(PERFORMANCE_MODE)
     temperature = mode_profile.get("temperature", 0.1 if format_json else 0.3)
     max_tokens = mode_profile.get("max_tokens", 2048)
-    
+
     timeout_multiplier = mode_profile.get("timeout_multiplier", 1.0)
     adjusted_timeout = int(timeout * timeout_multiplier)
 
@@ -253,7 +246,7 @@ def _get_provider_order(provider: str | None):
             config = PROVIDERS[provider]
             yield (provider, config["default_model"])
             return
-    
+
     if LLM_MODE == "local":
         if LOCAL_BASE_URL:
             yield ("local", LOCAL_MODEL)
@@ -307,9 +300,9 @@ def generate(
                 format_json=format_json,
                 timeout=timeout,
                 provider_name=provider_name,
-                api_key=config["api_key"],
-                base_url=config["base_url"],
-                extra_headers=config["extra_headers"],
+                api_key=str(config["api_key"]),
+                base_url=str(config["base_url"]),
+                extra_headers=config["extra_headers"] if isinstance(config["extra_headers"], dict) else {},
             )
         except LLMError as e:
             errors.append(f"{provider_name}: {e}")
@@ -376,21 +369,6 @@ def _extract_json(text: str) -> str:
     if start != -1 and end != -1 and end > start:
         return text[start : end + 1]
     return text
-
-
-def _compact_prompt(prompt: str, max_length: int = 1500) -> str:
-    """Compact prompt for small models - truncate to essential info."""
-    if len(prompt) <= max_length:
-        return prompt
-
-    truncated = prompt[:max_length]
-    last_period = truncated.rfind(".")
-    last_newline = truncated.rfind("\n")
-    cutoff = max(last_period, last_newline)
-
-    if cutoff > max_length * 0.8:
-        return truncated[: cutoff + 1].strip()
-    return truncated.strip()
 
 
 def _compact_system(system: str, max_length: int = 500) -> str:
@@ -464,7 +442,7 @@ Rules:
 
 Return ONLY a JSON object with this exact structure (no markdown, no explanation):
 {{
-  "name": "{business_type.lower().replace(' ', '_')}",
+  "name": "{business_type.lower().replace(" ", "_")}",
   "categories": ["{business_type}", "related category 1", "related category 2"],
   "search_patterns": [
     "best {{service}} in {{city}}",
@@ -491,28 +469,35 @@ IMPORTANT:
             prompt=prompt,
             system=system_message,
             format_json=True,
-            timeout=LLM_TIMEOUT * 2,  
+            timeout=LLM_TIMEOUT * 2,
         )
-        
+
         config = json.loads(response)
-        
-        required_fields = ["name", "categories", "search_patterns", "geographic_segments"]
+
+        required_fields = [
+            "name",
+            "categories",
+            "search_patterns",
+            "geographic_segments",
+        ]
         missing_fields = [f for f in required_fields if f not in config]
-        
+
         if missing_fields:
-            raise LLMError(f"LLM response missing required fields: {', '.join(missing_fields)}")
-        
+            raise LLMError(
+                f"LLM response missing required fields: {', '.join(missing_fields)}"
+            )
+
         config["name"] = config["name"].lower().replace(" ", "_").replace("-", "_")
-        
+
         config.setdefault("intent_profile", f"Looking for {business_type} services")
         config.setdefault("priority", 3)
         config.setdefault("monthly_target", 100)
         config.setdefault("max_queries", max_queries)
         config.setdefault("max_results", max_results)
         config.setdefault("daily_email_limit", 50)
-        
+
         return config
-        
+
     except json.JSONDecodeError as e:
         raise LLMError(f"Failed to parse LLM response as JSON: {e}")
     except LLMError:

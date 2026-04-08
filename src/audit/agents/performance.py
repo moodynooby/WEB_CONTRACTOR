@@ -28,6 +28,8 @@ class PerformanceAgent(BaseAgent):
     def execute(
         self,
         url: str,
+        business_name: str = "",
+        bucket: str = "",
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
         response: requests.Response | None = None,
@@ -127,7 +129,7 @@ class PerformanceAgent(BaseAgent):
         head = soup.find("head")
         render_blocking_scripts = []
         if head and hasattr(head, "find_all"):
-            for script in head.find_all("script", src=True):
+            for script in head.find_all("script", src=True):  # ty: ignore[call-non-callable]
                 if not script.get("async") and not script.get("defer"):
                     render_blocking_scripts.append(script.get("src"))
 

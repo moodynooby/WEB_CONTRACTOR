@@ -1,5 +1,22 @@
 # Web Contractor
 
+## Configuration
+
+All config is in Python. Edit directly in `src/infra/config_defaults.py`:
+
+```python
+# Example: Change LLM provider
+CONFIG = {
+    "llm": {
+        "provider": "groq",  # change to "openrouter"
+        "default_model": "llama-3.1-8b-instant",
+        ...
+    }
+}
+```
+
+**Optional override:** Create `src/infra/config_override.json` for user-specific values. These merge with defaults (deep merge).
+
 ## Quick Start
 
 ```bash

@@ -25,7 +25,7 @@ from audit.agents import (
     BaseAgent,
     get_agent,
 )
-from infra.settings import DEFAULT_USER_AGENT, load_json_section
+from infra.settings import DEFAULT_USER_AGENT, PAGE_FETCH_TIMEOUT, load_json_section
 from database.repository import (
     get_pending_audits,
     save_audits_batch,
@@ -273,8 +273,12 @@ class AuditOrchestrator:
         if not url.startswith("http"):
             url = f"https://{url}"
 
+        if self._session is None:
+            self.log("  No HTTP session available", "warning")
+            return None
+
         try:
-            resp = self._session.get(url, timeout=15)
+            resp = self._session.get(url, timeout=PAGE_FETCH_TIMEOUT)
             if resp.status_code == 200:
                 return resp.text, BeautifulSoup(resp.text, "html.parser"), resp
         except Exception as e:
@@ -292,29 +296,15 @@ class AuditOrchestrator:
         response,
         results,
     ):
-        """Run agent in parallel context."""
-        agent_type = type(agent).__name__
-        if agent_type == "PerformanceAgent":
-            result = agent.execute(
-                url=lead["website"],
-                html_content=html_content,
-                soup=soup,
-                response=response,
-            )
-        elif agent_type == "TechnicalAgent":
-            result = agent.execute(
-                url=lead["website"],
-                html_content=html_content,
-                soup=soup,
-            )
-        else:
-            result = agent.execute(
-                url=lead["website"],
-                business_name=lead["business_name"],
-                bucket=lead.get("bucket", "default"),
-                html_content=html_content,
-                soup=soup,
-            )
+        """Run agent with all parameters uniformly."""
+        result = agent.execute(
+            url=lead["website"],
+            business_name=lead.get("business_name", ""),
+            bucket=lead.get("bucket", ""),
+            html_content=html_content,
+            soup=soup,
+            response=response,
+        )
         return agent_name, result
 
     def _aggregate_results(

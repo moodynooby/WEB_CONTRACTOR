@@ -1,35 +1,51 @@
 """Application Settings — single source of truth.
 
-Non-secret config loads from config/app_config.json.
+All config in Python. Edit directly in infra/config_defaults.py.
+Optional override via infra/config_override.json (auto-generated if needed).
 Secrets (API keys, credentials) load from environment variables.
 """
 
+import json
 import os
 import warnings
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Final
 
-PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent
+PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent.parent
+CONFIG_DIR = PROJECT_ROOT / "src" / "infra"
+DEFAULT_CONFIG_FILE = CONFIG_DIR / "config_defaults.py"
+OVERRIDE_FILE = CONFIG_DIR / "config_override.json"
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def _load_config() -> dict[str, Any]:
-    """Load and cache config from app_config.json."""
-    import json
+    """Load config from Python defaults + optional JSON override."""
+    spec = spec_from_file_location("config_defaults", DEFAULT_CONFIG_FILE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load config module from {DEFAULT_CONFIG_FILE}")
 
-    cache_key = "app"
-    _cache: dict[str, Any] = getattr(_load_config, "_cache", {})
-    if cache_key in _cache:
-        return _cache[cache_key]
-    config_file = PROJECT_ROOT / "config" / "app_config.json"
-    try:
-        with open(config_file, "r") as f:
-            data = json.load(f)
-            _cache[cache_key] = data
-            return data
-    except FileNotFoundError:
-        raise RuntimeError(f"Config file not found at {config_file}") from None
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid JSON in {config_file}: {exc}") from exc
+    defaults = module_from_spec(spec)
+    spec.loader.exec_module(defaults)
+
+    config = defaults.CONFIG
+
+    if OVERRIDE_FILE.exists():
+        with open(OVERRIDE_FILE, "r") as f:
+            override = json.load(f)
+        config = _deep_merge(config, override)
+
+    return config
 
 
 def _section(name: str) -> dict[str, Any]:
@@ -39,72 +55,90 @@ def _section(name: str) -> dict[str, Any]:
     return section if isinstance(section, dict) else {}
 
 
-def _val(cfg: dict, key: str, default: Any) -> Any:
-    return cfg.get(key, default)
-
-
-def _int(cfg: dict, key: str, default: int) -> int:
-    v = cfg.get(key, default)
-    try:
-        return int(v)
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError(f"'{key}' must be int, got {v!r}") from exc
-
-
-def _bool(cfg: dict, key: str, default: bool) -> bool:
-    v = cfg.get(key, default)
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, str):
-        return v.lower() in ("true", "1", "yes")
-    return default
-
-
 def load_json_section(section: str) -> dict[str, Any]:
-    """Return a top-level section from app_config.json."""
+    """Return a top-level section from config."""
     return _section(section)
+
+
+def get_config() -> dict[str, Any]:
+    """Return full config dict."""
+    return _load_config()
+
+
+def generate_override_template() -> None:
+    """Generate config_override.json template with current values."""
+    current = _load_config()
+    with open(OVERRIDE_FILE, "w") as f:
+        json.dump(current, f, indent=2)
+    print(f"Generated override template at {OVERRIDE_FILE}")
+
+
+def update_config(section: str, updates: dict) -> None:
+    """Update config section and save to override file."""
+    current = get_config()
+    current.setdefault(section, {}).update(updates)
+    with open(OVERRIDE_FILE, "w") as f:
+        json.dump(current, f, indent=2)
 
 
 _cfg = _load_config()
 
-LOG_LEVEL: Final[str] = _val(_cfg, "log_level", "INFO")
+LOG_LEVEL: Final[str] = _cfg.get("log_level", "INFO")
+
+_server = _section("server")
+STREAMLIT_PORT: Final[int] = _server.get("streamlit_port", 8501)
 
 _email = _section("email")
 EMAIL_SIGNATURE: Final[str] = _email.get(
     "signature", "\n\nBest regards,\nWeb Contractor"
 )
 SMTP_SERVER: Final[str] = _email.get("smtp_server", "smtp.gmail.com")
-SMTP_PORT: Final[int] = _int(_email, "smtp_port", 587)
+SMTP_PORT: Final[int] = _email.get("smtp_port", 587)
 
 _llm = _section("llm")
-LLM_MODE: Final[str] = _llm.get("mode", "cloud")  
-PERFORMANCE_MODE: Final[str] = _llm.get(
-    "performance_mode", "cloud_standard"
-)  
+LLM_MODE: Final[str] = _llm.get("mode", "cloud")
+PERFORMANCE_MODE: Final[str] = _llm.get("performance_mode", "cloud_standard")
 DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
 DEFAULT_MODEL: Final[str] = _llm.get("default_model", "llama-3.1-8b-instant")
 FALLBACK_MODEL: Final[str] = _llm.get("fallback_model", "google/gemma-2-2b-it:free")
-LLM_TIMEOUT: Final[int] = _int(_llm, "timeout_seconds", 30)
+LLM_TIMEOUT: Final[int] = _llm.get("timeout_seconds", 30)
 
 _local_llm = _llm.get("local", {})
-LOCAL_PROVIDER: Final[str] = _local_llm.get(
-    "provider", "ollama"
-)  
+LOCAL_PROVIDER: Final[str] = _local_llm.get("provider", "ollama")
 LOCAL_BASE_URL: Final[str] = _local_llm.get("base_url", "http://localhost:11434/v1")
 LOCAL_MODEL: Final[str] = _local_llm.get("model", "llama3.2:latest")
-LOCAL_HARDWARE_PROFILE: Final[str] = _local_llm.get(
-    "hardware_profile", "auto"
-)  
+LOCAL_HARDWARE_PROFILE: Final[str] = _local_llm.get("hardware_profile", "auto")
 
-GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
-OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
+_providers = _section("providers")
+GROQ_BASE_URL: Final[str] = _providers.get("groq", {}).get(
+    "base_url", "https://api.groq.com/openai/v1"
+)
+OPENROUTER_BASE_URL: Final[str] = _providers.get("openrouter", {}).get(
+    "base_url", "https://openrouter.ai/api/v1"
+)
+
+_timeouts = _section("timeouts")
+CONNECTION_TEST_TIMEOUT: Final[int] = _timeouts.get("connection_test_seconds", 5)
+HTTP_REQUEST_TIMEOUT: Final[int] = _timeouts.get("http_request_seconds", 15)
+PAGE_FETCH_TIMEOUT: Final[int] = _timeouts.get("page_fetch_seconds", 15)
+EMAIL_SCRAPE_TIMEOUT: Final[int] = _timeouts.get("email_scrape_seconds", 10)
+
+_email_discovery = _section("email_discovery")
+EMAIL_COMMON_PREFIXES: Final[list[str]] = _email_discovery.get(
+    "common_prefixes", ["info", "contact", "hello", "support", "admin"]
+)
+
+_pipeline = _section("pipeline")
+PIPELINE_MAX_QUERIES: Final[int] = _pipeline.get("defaults", {}).get("max_queries", 20)
+PIPELINE_AUDIT_LIMIT: Final[int] = _pipeline.get("defaults", {}).get("audit_limit", 20)
+PIPELINE_EMAIL_LIMIT: Final[int] = _pipeline.get("defaults", {}).get("email_limit", 20)
 
 _scraper = _section("scraper")
-SCRAPER_HEADLESS: Final[bool] = _bool(_scraper, "headless", True)
-VERIFY_SSL: Final[bool] = _bool(_scraper, "verify_ssl", True)
-PAGE_LOAD_TIMEOUT_MS: Final[int] = _int(_scraper, "page_load_timeout_ms", 5000)
-SEARCH_WAIT_TIMEOUT_MS: Final[int] = _int(_scraper, "search_wait_timeout_ms", 10000)
-RESULT_CLICK_DELAY_MS: Final[int] = _int(_scraper, "result_click_delay_ms", 2000)
+SCRAPER_HEADLESS: Final[bool] = _scraper.get("headless", True)
+VERIFY_SSL: Final[bool] = _scraper.get("verify_ssl", True)
+PAGE_LOAD_TIMEOUT_MS: Final[int] = _scraper.get("page_load_timeout_ms", 5000)
+SEARCH_WAIT_TIMEOUT_MS: Final[int] = _scraper.get("search_wait_timeout_ms", 10000)
+RESULT_CLICK_DELAY_MS: Final[int] = _scraper.get("result_click_delay_ms", 2000)
 _USER_AGENTS: Final[list[str]] = _scraper.get(
     "user_agents",
     [
@@ -143,13 +177,9 @@ MONGODB_DATABASE: Final[str] = os.getenv("MONGODB_DATABASE", "web_contractor")
 
 
 def _validate_mongodb_uri(uri: str) -> bool:
-    """Basic validation of MongoDB URI format."""
     if not uri:
         return False
-    valid_prefixes = (
-        "mongodb://",
-        "mongodb+srv://",
-    )
+    valid_prefixes = ("mongodb://", "mongodb+srv://")
     if not any(uri.startswith(prefix) for prefix in valid_prefixes):
         return False
     if "mongodb+srv://" in uri or "mongodb://" in uri:
@@ -193,13 +223,12 @@ def _validate_secrets() -> None:
 
     if MONGODB_URI and not _validate_mongodb_uri(MONGODB_URI):
         warnings.warn(
-            f"MONGODB_URI appears to be invalid. Ensure it starts with 'mongodb://' or 'mongodb+srv://'. Got: {MONGODB_URI[:30]}...",
+            f"MONGODB_URI appears to be invalid. Got: {MONGODB_URI[:30]}...",
             RuntimeWarning,
         )
     elif not MONGODB_URI:
         warnings.warn(
-            "MONGODB_URI not set. Database features will be disabled.",
-            RuntimeWarning,
+            "MONGODB_URI not set. Database features will be disabled.", RuntimeWarning
         )
 
 

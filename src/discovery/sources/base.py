@@ -10,7 +10,7 @@ from playwright.sync_api import Page
 try:
     from email_scraper import scrape_emails
 except ImportError:
-    scrape_emails = None
+    scrape_emails: Callable | None = None
 
 
 class ScraperError(Exception):

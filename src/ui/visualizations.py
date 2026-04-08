@@ -1,6 +1,6 @@
 """Visualization components using Plotly for Web Contractor."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pandas as pd
 import plotly.express as px
@@ -15,18 +15,6 @@ def get_plotly_theme() -> Dict[str, Any]:
         "font": {"family": "sans-serif", "size": 12},
         "margin": {"l": 40, "r": 20, "t": 40, "b": 40},
     }
-
-
-def render_kpi_card(
-    fig: go.Figure,
-    value: Any,
-    label: str,
-    delta: Optional[str] = None,
-    col: int = 0,
-    row: int = 0,
-) -> None:
-    """Add a styled KPI card to a subplot."""
-    pass
 
 
 def plot_lead_funnel(leads_df: pd.DataFrame) -> go.Figure:
@@ -122,7 +110,7 @@ def plot_lead_timeline(leads_df: pd.DataFrame, freq: str = "D") -> go.Figure:
     leads_df["created_at"] = pd.to_datetime(leads_df["created_at"])
     leads_df["date"] = leads_df["created_at"].dt.to_period(freq).astype(str)
 
-    daily_counts = leads_df.groupby("date").size().reset_index(name="leads")
+    daily_counts = leads_df.groupby("date").size().reset_index(name="leads")  # ty: ignore[no-matching-overload]
 
     fig = px.line(
         daily_counts, x="date", y="leads", markers=True, title="Leads Created Over Time"

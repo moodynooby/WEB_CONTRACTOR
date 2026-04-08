@@ -44,8 +44,8 @@ class BaseAgent(ABC):
     def execute(
         self,
         url: str,
-        business_name: str,
-        bucket: str,
+        business_name: str = "",
+        bucket: str = "",
         html_content: str | None = None,
         soup: BeautifulSoup | None = None,
         response: requests.Response | None = None,
