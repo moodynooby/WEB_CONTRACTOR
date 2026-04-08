@@ -16,7 +16,6 @@ uv run python main.py stop      # Stop all services
 
 # Scripts:
 uv run python scripts/setup.py        # Interactive setup wizard
-uv run python scripts/diagnostic.py   # Comprehensive diagnostics
 
 # Before every commit:
 uv run ruff check --fix .

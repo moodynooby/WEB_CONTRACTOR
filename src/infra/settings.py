@@ -12,7 +12,14 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Final
 
+from dotenv import load_dotenv
+
 PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent.parent
+_ENV_FILE = PROJECT_ROOT / ".env"
+
+# Load .env file early so all os.getenv() calls work
+load_dotenv(_ENV_FILE, override=True)
+
 CONFIG_DIR = PROJECT_ROOT / "src" / "infra"
 DEFAULT_CONFIG_FILE = CONFIG_DIR / "config_defaults.py"
 OVERRIDE_FILE = CONFIG_DIR / "config_override.json"
@@ -188,9 +195,6 @@ def _validate_mongodb_uri(uri: str) -> bool:
         if "@" not in uri and "localhost" not in uri:
             return False
     return True
-
-
-_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 def _validate_secrets() -> None:

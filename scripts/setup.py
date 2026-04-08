@@ -278,16 +278,9 @@ class SetupWizard:
             print("    • Streamlit UI:  python main.py run")
             print("    • Telegram bot:  python main.py bot")
             print("    • Status check:  python main.py status")
-            print("    • Diagnostics:   python scripts/diagnostic.py")
             print("    • Stop all:      python main.py stop")
             print()
 
-            username = self.env_vars.get("STREAMLIT_USERNAME", "admin")
-            password = self.env_vars.get("STREAMLIT_PASSWORD", "changeme")
-            print(f"  🔐 Default login: {username} / {password}")
-            print("  💡 Change credentials in .env file")
-            print()
-            print("=" * 70 + "\n")
 
         except KeyboardInterrupt:
             print("\n\n⚠️  Setup interrupted.")
@@ -295,7 +288,6 @@ class SetupWizard:
         except Exception as e:
             print(f"\n\n❌ Setup failed: {e}")
             print("💡 Check the error above and try again")
-            print("💡 Run diagnostics: python scripts/diagnostic.py")
             sys.exit(1)
 
 

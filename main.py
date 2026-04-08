@@ -9,9 +9,8 @@ Usage:
     python main.py status       # Show running services
     python main.py stop         # Stop all services
 
-For setup and diagnostics, use the scripts:
+For setup  , use the scripts:
     python scripts/setup.py         # Interactive setup wizard
-    python scripts/diagnostic.py    # Comprehensive health checks
 """
 
 import argparse
@@ -225,9 +224,7 @@ def show_status() -> None:
     else:
         print("[→] Telegram bot not configured (set TELEGRAM_BOT_TOKEN in .env)")
 
-    print()
-    print("[→] For comprehensive diagnostics, run: python scripts/diagnostic.py")
-    print()
+ 
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -243,7 +240,6 @@ Examples:
 
 Scripts:
   python scripts/setup.py         Interactive setup wizard
-  python scripts/diagnostic.py    Comprehensive diagnostics
         """,
     )
     parser.add_argument(
