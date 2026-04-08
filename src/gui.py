@@ -1,6 +1,8 @@
 """Web Contractor - Streamlit Web UI Entry Point."""
 
 import hashlib
+import os
+import time
 import traceback
 
 import streamlit as st
@@ -13,13 +15,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-VALID_USERNAME = "admin"
-VALID_PASSWORD_HASH = hashlib.sha256("changeme".encode()).hexdigest()
+VALID_USERNAME = os.getenv("STREAMLIT_USERNAME", "admin")
+VALID_PASSWORD_HASH = hashlib.sha256(
+    os.getenv("STREAMLIT_PASSWORD", "changeme").encode()
+).hexdigest()
+SESSION_TIMEOUT_MINUTES = int(os.getenv("SESSION_TIMEOUT_MINUTES", "30"))
 
 
 def show_login() -> bool:
     """Show login form and return True if authenticated."""
-    st.title("🔐 Web Contractor Login")
+    st.markdown(
+        """
+        <div style="text-align: center; margin-top: 10vh;">
+            <h1 style="font-size: 4rem;">🏗️</h1>
+            <h1>Web Contractor</h1>
+            <p style="color: #888;">Lead Discovery & Outreach Platform</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.form("login_form"):
         username = st.text_input("Username", autocomplete="username")
@@ -32,6 +46,7 @@ def show_login() -> bool:
                 if username == VALID_USERNAME and pwd_hash == VALID_PASSWORD_HASH:
                     st.session_state["logged_in"] = True
                     st.session_state["username"] = username
+                    st.session_state["last_activity"] = time.time()
                     st.rerun()
                 else:
                     st.error("Invalid username or password")
@@ -45,11 +60,51 @@ if not st.session_state.get("logged_in"):
     show_login()
     st.stop()
 
+# Session timeout check
+last_activity = st.session_state.get("last_activity", 0)
+if time.time() - last_activity > SESSION_TIMEOUT_MINUTES * 60:
+    st.session_state.pop("logged_in", None)
+    st.session_state.pop("username", None)
+    st.session_state.pop("last_activity", None)
+    st.warning("⏰ Session expired due to inactivity. Please log in again.")
+    st.rerun()
+
+st.session_state["last_activity"] = time.time()
+
 with st.sidebar:
     st.caption(f"👤 Logged in as: **{st.session_state.get('username', 'User')}**")
+    st.caption(f"⏰ Session timeout: {SESSION_TIMEOUT_MINUTES} min")
+    st.divider()
+
+    # Change password section
+    with st.expander("🔑 Change Password"):
+        with st.form("change_password_form"):
+            current_pw = st.text_input("Current Password", type="password")
+            new_pw = st.text_input("New Password", type="password")
+            confirm_pw = st.text_input("Confirm Password", type="password")
+            change_submitted = st.form_submit_button("Update Password", use_container_width=True)
+
+            if change_submitted:
+                if current_pw and new_pw and confirm_pw:
+                    current_hash = hashlib.sha256(current_pw.encode()).hexdigest()
+                    if current_hash == VALID_PASSWORD_HASH:
+                        if new_pw == confirm_pw:
+                            st.success(
+                                "✅ Password changed! Edit your `.env` file to make it permanent:\n"
+                                f"```\nSTREAMLIT_PASSWORD={new_pw}\n```"
+                            )
+                        else:
+                            st.error("New passwords don't match")
+                    else:
+                        st.error("Current password is incorrect")
+                else:
+                    st.error("Please fill in all fields")
+
+    st.divider()
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.pop("logged_in", None)
         st.session_state.pop("username", None)
+        st.session_state.pop("last_activity", None)
         st.rerun()
 
 
@@ -129,7 +184,7 @@ pg = st.navigation(
         st.Page("pages/1_Discovery.py", title="🔍 Discovery"),
         st.Page("pages/2_Audit.py", title="📋 Audit"),
         st.Page("pages/3_Email.py", title="📧 Email"),
-        st.Page("pages/5_Performance.py", title="📊 Performance"),
+        st.Page("pages/4_Analytics.py", title="📊 Analytics"),
     ]
 )
 

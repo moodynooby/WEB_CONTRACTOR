@@ -15,8 +15,7 @@ STATUS_EMOJI = {
 }
 
 st.set_page_config(page_title="Email", layout="wide")
-st.title("Email Dashboard")
-
+st.title("📧 Email Dashboard")
 
 app = get_app()
 
@@ -24,6 +23,37 @@ st.session_state.setdefault("email_sending", set())
 st.session_state.setdefault("email_gen_running", False)
 st.session_state.setdefault("review_idx", 0)
 st.session_state.setdefault("review_mode", False)
+
+# --- Sidebar ---
+emails_for_stats = get_emails_for_review(limit=1000)
+pending_review = len([e for e in emails_for_stats if e.get("status") == "needs_review"])
+sent_count = len([e for e in emails_for_stats if e.get("status") == "sent"])
+
+with st.sidebar:
+    st.subheader("📊 Quick Stats")
+    st.metric("Pending Review", f"{pending_review:,}")
+    st.metric("Sent", f"{sent_count:,}")
+
+    st.divider()
+
+    st.subheader("⚡ Quick Actions")
+    if st.button("🚀 Generate Emails", type="primary", use_container_width=True):
+        gen_limit = 20
+        with st.spinner("Generating emails..."):
+            try:
+                result = app.generate_emails(limit=gen_limit)
+                st.success(f"✅ {result.get('generated', 0)} emails generated")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Failed: {e}")
+
+    if st.button("🔍 Start Review Mode", type="secondary", use_container_width=True):
+        st.session_state.review_mode = True
+        st.session_state.review_idx = 0
+        st.rerun()
+
+    if st.button("🔄 Reload", use_container_width=True):
+        st.rerun()
 
 gen_limit = st.number_input("Max Leads", 1, 100, 20, 5)
 

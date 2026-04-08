@@ -1,12 +1,14 @@
 """Discovery Page - Lead Discovery Pipeline."""
 
 import streamlit as st
-from database.repository import get_all_buckets
+from database.repository import get_all_buckets, count_leads
 from discovery.engine import BucketGenerator
 from infra.logging import get_logger
 from ui.utils import get_app
 
 logger = get_logger(__name__)
+
+st.set_page_config(page_title="Discovery", layout="wide")
 
 st.title("🔍 Lead Discovery")
 st.caption("Generate search queries and scrape leads from configured buckets")
@@ -19,7 +21,7 @@ if "discovery_result" not in st.session_state:
     st.session_state.discovery_result = None
 
 if "bucket_gen_step" not in st.session_state:
-    st.session_state.bucket_gen_step = 0  
+    st.session_state.bucket_gen_step = 0
 if "bucket_gen_data" not in st.session_state:
     st.session_state.bucket_gen_data = {}
 if "bucket_gen_result" not in st.session_state:
@@ -27,8 +29,41 @@ if "bucket_gen_result" not in st.session_state:
 if "bucket_gen_error" not in st.session_state:
     st.session_state.bucket_gen_error = None
 
+# --- Sidebar ---
 buckets = get_all_buckets()
 bucket_names = [b["name"] for b in buckets]
+total_leads = count_leads()
+
+with st.sidebar:
+    st.subheader("📊 Quick Stats")
+    st.metric("Total Buckets", f"{len(buckets)}")
+    st.metric("Total Leads", f"{total_leads:,}")
+
+    st.divider()
+
+    st.subheader("⚡ Quick Actions")
+    if st.button("✨ Generate New Bucket", use_container_width=True):
+        if st.session_state.bucket_gen_step == 0:
+            st.session_state.bucket_gen_step = 1
+            st.rerun()
+
+    if st.session_state.discovery_running:
+        st.warning("⏳ Discovery in progress...")
+        if st.button("⏹️ Cancel Discovery", type="secondary", use_container_width=True):
+            st.session_state.discovery_running = False
+            st.rerun()
+    elif st.button("🚀 Run Discovery", type="primary", use_container_width=True):
+        st.session_state.discovery_running = True
+        st.session_state.discovery_result = None
+        st.rerun()
+
+    if st.button("🔄 Reset Generator", use_container_width=True):
+        st.session_state.bucket_gen_step = 0
+        st.session_state.bucket_gen_data = {}
+        st.session_state.bucket_gen_result = None
+        st.session_state.bucket_gen_error = None
+        st.rerun()
+
 
 def render_bucket_generator():
     """Render the multi-step bucket generation wizard."""

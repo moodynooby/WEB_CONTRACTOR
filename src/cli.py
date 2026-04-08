@@ -3,13 +3,13 @@
 Cross-platform service manager for Streamlit, Cloudflare Tunnel, and Telegram Bot.
 
 Usage:
-    python main.py                  # Launch Streamlit (default)
-    python main.py run              # Same as above
-    python main.py bot              # Start Telegram bot (background)
-    python main.py status           # Show running services
-    python main.py stop             # Stop all services
-    python main.py setup            # Full setup: deps + auth + start all
-    python main.py verify           # Health check
+    python cli.py                  # Launch Streamlit (default)
+    python cli.py run              # Same as above
+    python cli.py bot              # Start Telegram bot (background)
+    python cli.py status           # Show running services
+    python cli.py stop             # Stop all services
+    python cli.py setup            # Full setup: deps + auth + start all
+    python cli.py verify           # Health check
 """
 
 import argparse
@@ -127,7 +127,7 @@ def kill_process(pid: int) -> bool:
 def start_streamlit() -> int | None:
     """Start Streamlit server. Returns PID or None on failure."""
     print("[→] Starting Streamlit on port {}...".format(STREAMLIT_PORT))
-    streamlit_app = PROJECT_ROOT / "streamlit_app.py"
+    streamlit_app = PROJECT_ROOT / "gui.py"
     if not streamlit_app.exists():
         print(f"[✘] Streamlit app not found at {streamlit_app}")
         return None
@@ -276,7 +276,7 @@ def show_status() -> None:
     if AUTH_CONFIG.exists():
         print(f"[✔] Auth config exists at {AUTH_CONFIG}")
     else:
-        print("[⚠] Auth config not found — run 'python main.py setup' to generate")
+        print("[⚠] Auth config not found — run 'python cli.py setup' to generate")
 
 
 def install_deps() -> None:
@@ -343,8 +343,8 @@ def run_setup() -> None:
     print(f"🔒 Username: {os.getenv('STREAMLIT_USERNAME', 'admin')}")
     print(f"🔑 Password: {os.getenv('STREAMLIT_PASSWORD', 'changeme')}")
     print()
-    print("📝 To stop all services:  python main.py stop")
-    print("📊 To check status:       python main.py status")
+    print("📝 To stop all services:  python cli.py stop")
+    print("📊 To check status:       python cli.py status")
     print()
 
 
@@ -398,7 +398,7 @@ def run_verify() -> None:
     if AUTH_CONFIG.exists():
         print("[✔] Auth config exists")
     else:
-        print("[⚠] Auth config not found — run 'python main.py setup'")
+        print("[⚠] Auth config not found — run 'python cli.py setup'")
 
     print("[→] Checking Python dependencies...", end=" ", flush=True)
     try:
@@ -422,7 +422,7 @@ def run_verify() -> None:
         print("║              ❌ Some checks failed                       ║")
         print("╚══════════════════════════════════════════════════════════╝")
         print()
-        print("[→] Fix failed checks and re-run: python main.py verify")
+        print("[→] Fix failed checks and re-run: python cli.py verify")
     print()
 
 
@@ -433,12 +433,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py              Launch Streamlit
-  python main.py bot          Start Telegram bot
-  python main.py status       Show service status
-  python main.py stop         Stop all services
-  python main.py setup        Full setup (deps + auth + start all)
-  python main.py verify       Health check
+  python cli.py              Launch Streamlit
+  python cli.py bot          Start Telegram bot
+  python cli.py status       Show service status
+  python cli.py stop         Stop all services
+  python cli.py setup        Full setup (deps + auth + start all)
+  python cli.py verify       Health check
         """,
     )
     parser.add_argument(

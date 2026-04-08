@@ -21,20 +21,20 @@ CONFIG = {
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # launch Streamlit
+uv run python cli.py     # launch Streamlit
 ```
 
 ## Service Manager (Cross-Platform)
 
-`main.py` is the single entry point for all services — works on Linux, macOS, and Windows.
+`cli.py` is the single entry point for all services — works on Linux, macOS, and Windows.
 
 ```bash
-uv run python main.py run       # Launch Streamlit (default)
-uv run python main.py bot       # Start Telegram bot (background)
-uv run python main.py status    # Show service status
-uv run python main.py stop      # Stop all services
-uv run python main.py setup     # Full setup: deps + auth + start all
-uv run python main.py verify    # Health check
+uv run python cli.py run       # Launch Streamlit (default)
+uv run python cli.py bot       # Start Telegram bot (background)
+uv run python cli.py status    # Show service status
+uv run python cli.py stop      # Stop all services
+uv run python cli.py setup     # Full setup: deps + auth + start all
+uv run python cli.py verify    # Health check
 ```
 
 ## Telegram Integration
@@ -52,7 +52,6 @@ Get pipeline execution notifications directly on your phone via Telegram. Only *
 The Telegram bot also provides interactive commands for remote control:
 
 | Command | Description |
-|---|---|
 | `/status` | Show current pipeline stats |
 | `/run <limit>` | Run full pipeline remotely |
 | `/audit <n>` | Audit N pending leads |
@@ -83,8 +82,9 @@ The Telegram bot also provides interactive commands for remote control:
    ```
 
 4. **Start the bot:**
+
    ```bash
-   uv run python main.py bot
+   uv run python cli.py bot
    ```
 
 > **Note:** Pipeline will run without notifications if Telegram is not configured. The bot is optional — you get critical notifications from the pipeline even without running the bot separately.

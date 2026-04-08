@@ -587,6 +587,42 @@ def save_feature_toggles(settings_dict: dict):
 
 
 with st.sidebar:
+    # Quick stats
+    from database.repository import count_leads, get_pending_audits, get_qualified_leads, get_emails_for_review
+    total_leads = count_leads()
+    pending_audit = len(get_pending_audits(limit=1))
+    qualified = len(get_qualified_leads(limit=1))
+    pending_review = len(get_emails_for_review(limit=1))
+
+    st.subheader("📊 Quick Stats")
+    st.metric("Total Leads", f"{total_leads:,}")
+    st.metric("Pending Audit", f"{pending_audit:,}")
+    st.metric("Qualified", f"{qualified:,}")
+    st.metric("Pending Email Review", f"{pending_review:,}")
+
+    st.divider()
+
+    # Quick actions
+    st.subheader("⚡ Quick Actions")
+    if st.button("🧹 Clear Cache", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache cleared")
+
+    if st.button("🔌 Test Connection", use_container_width=True):
+        local_prov = selected_provider if llm_mode_option == "local" else None
+        with st.spinner("Testing connection(s)..."):
+            results = test_connection(llm_mode_option, local_prov)
+            for result in results:
+                if result["status"] == "success":
+                    st.success(f"✅ **{result['name']}:** {result['message']}")
+                elif result["status"] == "warning":
+                    st.warning(f"⚠️ **{result['name']}:** {result['message']}")
+                else:
+                    st.error(f"❌ **{result['name']}:** {result['message']}")
+
+    st.divider()
+
+    # Pipeline control
     if st.session_state.pipeline_running:
         st.markdown(
             '<div class="big-red-button">',

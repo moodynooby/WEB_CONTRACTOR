@@ -1,10 +1,13 @@
 """Audit Page - Lead Audit Pipeline."""
 
 import streamlit as st
+from database.repository import count_leads, get_pending_audits, get_qualified_leads
 from infra.logging import get_logger
 from ui.utils import get_app
 
 logger = get_logger(__name__)
+
+st.set_page_config(page_title="Audit", layout="wide")
 
 st.title("📋 Lead Audit")
 st.caption("Audit pending leads using multi-agent pipeline")
@@ -15,6 +18,30 @@ if "audit_running" not in st.session_state:
     st.session_state.audit_running = False
 if "audit_result" not in st.session_state:
     st.session_state.audit_result = None
+
+# --- Sidebar ---
+pending_count = len(get_pending_audits(limit=1))
+qualified_count = len(get_qualified_leads(limit=1))
+total_leads = count_leads()
+
+with st.sidebar:
+    st.subheader("📊 Quick Stats")
+    st.metric("Total Leads", f"{total_leads:,}")
+    st.metric("Pending Audit", f"{pending_count:,}")
+    st.metric("Qualified", f"{qualified_count:,}")
+
+    st.divider()
+
+    st.subheader("⚡ Quick Actions")
+    if st.session_state.audit_running:
+        st.warning("⏳ Audit in progress...")
+        if st.button("⏹️ Cancel Audit", type="secondary", use_container_width=True):
+            st.session_state.audit_running = False
+            st.rerun()
+    elif st.button("🔍 Run Audit", type="primary", use_container_width=True):
+        st.session_state.audit_running = True
+        st.session_state.audit_result = None
+        st.rerun()
 
 col1, col2 = st.columns(2)
 with col1:
@@ -85,7 +112,7 @@ with st.expander("ℹ️ About Audit"):
     2. **Business Agent**: Industry-specific checks (LLM-based)
     3. **Technical Agent**: SEO, meta tags, structured data (rule-based)
     4. **Performance Agent**: Page speed indicators (rule-based)
-    
+
     Agents run in parallel. Scores are weighted and aggregated.
     Leads qualify if score < threshold (website needs improvement = good lead).
     """
