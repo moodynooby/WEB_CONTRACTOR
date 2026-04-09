@@ -136,14 +136,6 @@ class SetupWizard:
         if mongodb_uri:
             self.env_vars["MONGODB_URI"] = mongodb_uri
 
-        username = self.prompt("  Streamlit username", "admin")
-        if username:
-            self.env_vars["STREAMLIT_USERNAME"] = username
-
-        password = self.prompt("  Streamlit password", "changeme")
-        if password:
-            self.env_vars["STREAMLIT_PASSWORD"] = password
-
         groq_key = self.prompt("  Groq API key (optional)", "")
         if groq_key:
             self.env_vars["GROQ_API_KEY"] = groq_key

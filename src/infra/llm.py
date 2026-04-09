@@ -496,6 +496,13 @@ IMPORTANT:
         config.setdefault("max_results", max_results)
         config.setdefault("daily_email_limit", 50)
 
+        # Ensure numeric fields are proper integers (LLM may return them as strings)
+        config["priority"] = int(config.get("priority", 3))
+        config["monthly_target"] = int(config.get("monthly_target", 100))
+        config["max_queries"] = int(config.get("max_queries", max_queries))
+        config["max_results"] = int(config.get("max_results", max_results))
+        config["daily_email_limit"] = int(config.get("daily_email_limit", 50))
+
         return config
 
     except json.JSONDecodeError as e:
