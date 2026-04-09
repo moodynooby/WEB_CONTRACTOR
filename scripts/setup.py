@@ -224,22 +224,10 @@ class SetupWizard:
                     cwd=str(PROJECT_ROOT),
                 )
                 print("  ✓ Streamlit started")
+                print("  💡 Telegram bot will start automatically if configured")
             except Exception as e:
                 print(f"  ⚠️  Failed to start Streamlit: {e}")
                 print("  💡 Start manually: python main.py run")
-
-        if os.getenv("TELEGRAM_BOT_TOKEN") or self.env_vars.get("TELEGRAM_BOT_TOKEN"):
-            start_bot = self.prompt("Start Telegram bot?", "y")
-            if start_bot.lower() in ["y", "yes", ""]:
-                try:
-                    subprocess.Popen(
-                        [sys.executable, str(PROJECT_ROOT / "main.py"), "bot"],
-                        cwd=str(PROJECT_ROOT),
-                    )
-                    print("  ✓ Telegram bot started")
-                except Exception as e:
-                    print(f"  ⚠️  Failed to start bot: {e}")
-                    print("  💡 Start manually: python main.py bot")
 
     def run(self):
         """Run complete setup."""
@@ -267,10 +255,7 @@ class SetupWizard:
 
             print("  ✓ All setup steps completed\n")
             print("  Quick Start:")
-            print("    • Streamlit UI:  python main.py run")
-            print("    • Telegram bot:  python main.py bot")
-            print("    • Status check:  python main.py status")
-            print("    • Stop all:      python main.py stop")
+            print("    • Streamlit UI (with bot):  python main.py run")
             print()
 
 

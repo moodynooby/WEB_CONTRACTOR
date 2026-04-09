@@ -19,6 +19,10 @@ leads.db
 *.log
 ollama.log
 
+# Runtime state
+.pids
+.telegram_state.json
+
 # IDE
 .vscode/
 .idea/

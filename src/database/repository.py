@@ -77,7 +77,6 @@ def save_bucket(data: dict[str, Any]) -> dict[str, Any]:
     try:
         bucket_data = {k: v for k, v in data.items() if k != "id"}
 
-        # Ensure numeric fields are proper integers before saving
         for field in ["priority", "monthly_target", "max_queries", "max_results", "daily_email_limit"]:
             if field in bucket_data and bucket_data[field] is not None:
                 try:

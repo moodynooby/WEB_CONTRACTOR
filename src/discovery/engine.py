@@ -135,9 +135,9 @@ class PlaywrightScraper:
                     stale_query_set.add((sq["query_pattern"], sq["city"]))
 
         for bucket in buckets:
-            bucket_max_queries = bucket.get(
+            bucket_max_queries = int(bucket.get(
                 "max_queries", self._settings.get("max_patterns_per_bucket", 500)
-            )
+            ))
 
             search_patterns = bucket.get("search_patterns", [])
             if isinstance(search_patterns, str):
@@ -162,7 +162,7 @@ class PlaywrightScraper:
 
                 for seg_name in segments:
                     if seg_name in geo_focus:
-                        max_cities = self._settings.get("max_cities_per_segment", 50)
+                        max_cities = int(self._settings.get("max_cities_per_segment", 50))
                         cities.extend(
                             geo_focus[seg_name].get("cities", [])[:max_cities]
                         )

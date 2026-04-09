@@ -25,7 +25,7 @@ class App:
         self._initialized = False
 
     def initialize(self) -> None:
-        """Initialize database and services."""
+        """Initialize database, services, and Telegram bot."""
         if self._initialized:
             return
 
@@ -41,12 +41,29 @@ class App:
         self._initialized = True
         self.logger.info("Initialization complete")
 
+        self._start_bot()
+
+    def _start_bot(self) -> None:
+        """Start Telegram bot in background thread."""
+        try:
+            from infra.notifications.bot import start_bot_thread
+            start_bot_thread(self)
+        except Exception as e:
+            self.logger.warning(f"Failed to start Telegram bot: {e}")
+
     def shutdown(self) -> None:
-        """Cleanup resources."""
+        """Cleanup resources and stop Telegram bot."""
         if not self._initialized:
             return
 
         self.logger.info("Shutting down...")
+
+        try:
+            from infra.notifications.bot import stop_bot
+            stop_bot()
+        except Exception as e:
+            self.logger.warning(f"Error stopping Telegram bot: {e}")
+
         close_db()
         self._initialized = False
         self.logger.info("Shutdown complete")

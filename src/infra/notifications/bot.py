@@ -1,13 +1,12 @@
 """Telegram Bot — Remote command interface for Web Contractor.
 
 Provides bot commands to monitor and control pipeline execution remotely.
+Uses simple long-polling (no asyncio, no python-telegram-bot dependency).
 
 Commands:
-    /start        — Show help message
     /status       — Show current pipeline stats
     /leads        — Show lead counts by status
-    /run          — Run full pipeline (default limit: 20)
-    /run <limit>  — Run pipeline with specific lead limit
+    /run [limit]  — Run full pipeline (default: 20)
     /audit <n>    — Audit N pending leads
     /discovery <n>— Run discovery with N max queries
     /cancel       — Cancel running pipeline
@@ -15,43 +14,42 @@ Commands:
     /help         — Show all commands
 
 Usage:
-    uv run python -m core.telegram_bot
+    from infra.notifications.bot import start_bot_thread, stop_bot
 
-Requires:
-    TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in environment
-    python-telegram-bot (installed via: uv add python-telegram-bot)
+    # Start (called by App.initialize())
+    start_bot_thread(app_instance)
+
+    # Stop (called by App.shutdown())
+    stop_bot()
 """
 
 import threading
+import time
 from typing import Any
 
 from infra.logging import get_logger
+from infra.notifications.telegram import TelegramNotifier
 from infra.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = get_logger(__name__)
 
-_pipeline_state: dict[str, Any] = {
-    "running": False,
-    "cancelled": False,
-    "thread": None,
-    "result": None,
-    "error": None,
-}
+_notifier: TelegramNotifier | None = None
+_bot_thread: threading.Thread | None = None
+_stop_event = threading.Event()
+
+_pipeline_running = False
+_pipeline_thread: threading.Thread | None = None
+_pipeline_result: dict | None = None
+_pipeline_error: str | None = None
+_app_ref: Any = None  
 
 
-def _get_app():
-    """Get App instance (avoids circular imports)."""
-    from gui import App
-
-    app = App()
-    app.initialize()
-    return app
 
 
 def _get_stats() -> str:
     """Format current stats as text message."""
+    from database.connection import get_database, get_email_campaign_stats, DatabaseUnavailableError
     from database.repository import count_leads
-    from database.connection import get_email_campaign_stats, DatabaseUnavailableError
 
     try:
         total_leads = count_leads()
@@ -59,24 +57,16 @@ def _get_stats() -> str:
         return "⚠️ Database is not connected. Cannot fetch stats."
 
     try:
-        from database.connection import get_database
-
         db = get_database()
         if db is None:
-            status_counts = {"pending_audit": 0, "qualified": 0, "unqualified": 0}
+            status_counts: dict = {}
         else:
-            pipeline = [
-                {"$group": {"_id": "$status", "count": {"$sum": 1}}}
-            ]
+            pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
             status_counts = {}
             for doc in db.leads.aggregate(pipeline):
                 status_counts[doc["_id"]] = doc["count"]
     except Exception:
         status_counts = {}
-
-    pending = status_counts.get("pending_audit", 0)
-    qualified = status_counts.get("qualified", 0)
-    unqualified = status_counts.get("unqualified", 0)
 
     try:
         email_stats = get_email_campaign_stats()
@@ -90,47 +80,55 @@ def _get_stats() -> str:
         f"📊 *Web Contractor Stats*\n\n"
         f"📋 *Leads*\n"
         f"  Total: {total_leads}\n"
-        f"  Pending Audit: {pending}\n"
-        f"  Qualified: {qualified}\n"
-        f"  Unqualified: {unqualified}\n\n"
+        f"  Pending Audit: {status_counts.get('pending_audit', 0)}\n"
+        f"  Qualified: {status_counts.get('qualified', 0)}\n"
+        f"  Unqualified: {status_counts.get('unqualified', 0)}\n\n"
         f"📧 *Emails*\n"
         f"  Sent: {email_sent}\n"
         f"  Failed: {email_failed}\n\n"
         f"🏗️ *Pipeline*\n"
-        f"  Status: {'Running' if _pipeline_state['running'] else 'Idle'}"
+        f"  Status: {'Running' if _pipeline_running else 'Idle'}"
     )
 
 
 def _run_pipeline_thread(limit: int) -> None:
     """Run pipeline in background thread."""
-    global _pipeline_state
+    global _pipeline_running, _pipeline_result, _pipeline_error, _pipeline_thread
     try:
-        app = _get_app()
-        result = app.run_unified_pipeline(limit=limit)
-        _pipeline_state["result"] = result
+        assert _app_ref is not None
+        result = _app_ref.run_unified_pipeline(limit=limit)
+        _pipeline_result = result
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        _pipeline_state["error"] = str(e)
+        _pipeline_error = str(e)
     finally:
-        _pipeline_state["running"] = False
-        _pipeline_state["thread"] = None
+        _pipeline_running = False
+        _pipeline_thread = None
+
+
+def _send_message(text: str, parse_mode: str = "Markdown") -> None:
+    """Send message to configured chat."""
+    if _notifier is None:
+        return
+    try:
+        _notifier.send_message(text, parse_mode=parse_mode)
+    except Exception as e:
+        logger.error(f"Failed to send message: {e}")
 
 
 def _format_pipeline_result(limit: int) -> str:
     """Format pipeline execution result as text."""
-    global _pipeline_state
+    global _pipeline_result, _pipeline_error
 
-    if _pipeline_state.get("error"):
-        return f"❌ *Pipeline Failed*\n\nError: {_pipeline_state['error']}"
+    if _pipeline_error:
+        return f"❌ *Pipeline Failed*\n\nError: {_pipeline_error}"
 
-    result = _pipeline_state.get("result", {})
-    if not result:
+    if not _pipeline_result:
         return "⚠️ Pipeline completed but no results available"
 
-    processed = result.get("processed", 0)
-    qualified = result.get("qualified", 0)
-    emails_generated = result.get("emails_generated", 0)
-
+    processed = _pipeline_result.get("processed", 0)
+    qualified = _pipeline_result.get("qualified", 0)
+    emails_generated = _pipeline_result.get("emails_generated", 0)
     qual_rate = f"{(qualified / processed * 100):.1f}%" if processed > 0 else "N/A"
 
     return (
@@ -143,337 +141,283 @@ def _format_pipeline_result(limit: int) -> str:
     )
 
 
-def _setup_bot(token: str) -> Any:
-    """Set up the Telegram bot with command handlers.
+def _watch_pipeline_done(limit: int) -> None:
+    """Wait for pipeline to finish and send notification."""
+    if _pipeline_thread:
+        _pipeline_thread.join()
 
-    Args:
-        token: Telegram bot token
+    if _pipeline_result is None and _pipeline_error is None:
+        _send_message("⏹️ Pipeline was cancelled")
+    else:
+        _send_message(_format_pipeline_result(limit))
 
-    Returns:
-        Application instance
-    """
+
+
+
+def _handle_run(args: list[str]) -> str:
+    """Handle /run command. Starts pipeline in background thread."""
+    global _pipeline_running, _pipeline_result, _pipeline_error, _pipeline_thread
+
+    if _pipeline_running:
+        return "⚠️ Pipeline is already running. Use /cancel to stop."
+
+    limit = 20
+    if args:
+        try:
+            limit = int(args[0])
+            if limit < 1 or limit > 100:
+                return "⚠️ Limit must be between 1 and 100"
+        except ValueError:
+            return "⚠️ Invalid limit. Use: /run <number>"
+
+    _pipeline_running = True
+    _pipeline_result = None
+    _pipeline_error = None
+
+    thread = threading.Thread(target=_run_pipeline_thread, args=(limit,), daemon=True)
+    _pipeline_thread = thread
+    thread.start()
+
+    threading.Thread(target=_watch_pipeline_done, args=(limit,), daemon=True).start()
+
+    return f"🚀 Starting pipeline with limit={limit}..."
+
+
+def _handle_audit(args: list[str]) -> str:
+    """Handle /audit command."""
+    if _pipeline_running:
+        return "⚠️ Pipeline is already running. Use /cancel to stop."
+
+    if not args:
+        return "⚠️ Usage: /audit <number_of_leads>"
+
     try:
-        from telegram import Update
-        from telegram.ext import (
-            Application,
-            CommandHandler,
-            ContextTypes,
-            MessageHandler,
-            filters,
+        limit = int(args[0])
+    except ValueError:
+        return "⚠️ Invalid number"
+
+    try:
+        assert _app_ref is not None
+        result = _app_ref.run_audit(limit=limit)
+        audited = result.get("audited", 0)
+        qualified = result.get("qualified", 0)
+        rate = f"{(qualified / audited * 100):.1f}%" if audited > 0 else "N/A"
+        return f"✅ *Audit Complete*\n\nAudited: {audited}\nQualified: {qualified} ({rate})"
+    except Exception as e:
+        logger.error(f"Audit failed: {e}")
+        return f"❌ Audit failed: {e}"
+
+
+def _handle_discovery(args: list[str]) -> str:
+    """Handle /discovery command."""
+    if _pipeline_running:
+        return "⚠️ Pipeline is already running. Use /cancel to stop."
+
+    if not args:
+        return "⚠️ Usage: /discovery <number_of_queries>"
+
+    try:
+        max_queries = int(args[0])
+    except ValueError:
+        return "⚠️ Invalid number"
+
+    try:
+        assert _app_ref is not None
+        result = _app_ref.run_discovery(max_queries=max_queries)
+        found = result.get("leads_found", 0)
+        saved = result.get("leads_saved", 0)
+        return f"✅ *Discovery Complete*\n\nQueries: {max_queries}\nLeads Found: {found}\nLeads Saved: {saved}"
+    except Exception as e:
+        logger.error(f"Discovery failed: {e}")
+        return f"❌ Discovery failed: {e}"
+
+
+def _handle_cancel() -> str:
+    """Handle /cancel command."""
+    global _pipeline_running, _pipeline_result, _pipeline_error, _pipeline_thread
+
+    if not _pipeline_running:
+        return "⚠️ No pipeline is currently running"
+
+    _pipeline_running = False
+    _pipeline_result = None
+    _pipeline_error = "Cancelled"
+    return "⏹️ Pipeline cancellation requested..."
+
+
+def _handle_status() -> str:
+    return _get_stats()
+
+
+def _handle_leads() -> str:
+    try:
+        from database.connection import get_database
+
+        db = get_database()
+        if db is None:
+            return "⚠️ Database not connected"
+
+        pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
+        status_counts = {}
+        for doc in db.leads.aggregate(pipeline):
+            status_counts[doc["_id"]] = doc["count"]
+
+        total = sum(status_counts.values())
+        lines = "\n".join(
+            f"  {status}: {count}" for status, count in sorted(status_counts.items())
         )
-    except ImportError:
-        logger.error(
-            "python-telegram-bot not installed. "
-            "Run: uv add python-telegram-bot"
+        return f"📋 *Leads by Status*\n\n{lines}\n\n*Total*: {total}"
+    except Exception as e:
+        logger.error(f"Error fetching lead stats: {e}")
+        return f"❌ Error: {e}"
+
+
+def _handle_buckets() -> str:
+    try:
+        from database.connection import get_database
+
+        db = get_database()
+        if db is None:
+            return "⚠️ Database not connected"
+
+        buckets = list(db.buckets.find({}, {"name": 1, "priority": 1, "daily_email_limit": 1}))
+        if not buckets:
+            return "📭 No buckets configured"
+
+        lines = "\n".join(
+            f"  • {b.get('name', 'unknown')} (priority: {b.get('priority', 1)})"
+            for b in sorted(buckets, key=lambda x: x.get("priority", 1))
         )
+        return f"📦 *Buckets*\n\n{lines}"
+    except Exception as e:
+        logger.error(f"Error fetching buckets: {e}")
+        return f"❌ Error: {e}"
+
+
+_COMMANDS: dict[str, Any] = {
+    "/start": lambda _a: "🏗️ *Web Contractor Bot*\n\n"
+        "I can help you monitor and control your pipeline remotely.\n\n"
+        "Use /help to see all available commands.",
+    "/help": lambda _a: (
+        "🏗️ *Web Contractor Bot — Commands*\n\n"
+        "/status — Show current stats\n"
+        "/leads — Show lead counts by status\n"
+        "/run [limit] — Run full pipeline (default: 20)\n"
+        "/audit <n> — Audit N pending leads\n"
+        "/discovery <n> — Run discovery with N queries\n"
+        "/cancel — Cancel running pipeline\n"
+        "/buckets — Show bucket summary\n"
+        "/help — Show this message"
+    ),
+    "/status": lambda _a: _handle_status(),
+    "/leads": lambda _a: _handle_leads(),
+    "/run": _handle_run,
+    "/audit": _handle_audit,
+    "/discovery": _handle_discovery,
+    "/cancel": lambda _a: _handle_cancel(),
+    "/buckets": lambda _a: _handle_buckets(),
+}
+
+
+def _handle_command(text: str) -> str | None:
+    """Parse a command and return response text. None for unknown commands."""
+    if not text.startswith("/"):
         return None
 
-    async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send welcome message with available commands."""
-        if update.message is None:
-            return
-        await update.message.reply_text(
-            "🏗️ *Web Contractor Bot*\n\n"
-            "I can help you monitor and control your pipeline remotely.\n\n"
-            "Use /help to see all available commands.",
-            parse_mode="Markdown",
-        )
+    parts = text.strip().split()
+    command = parts[0].lower()
+    args = parts[1:]
 
-    async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show help message with all commands."""
-        if update.message is None:
-            return
-        await update.message.reply_text(
-            "🏗️ *Web Contractor Bot — Commands*\n\n"
-            "/status — Show current stats\n"
-            "/leads — Show lead counts by status\n"
-            "/run [limit] — Run full pipeline (default: 20)\n"
-            "/audit <n> — Audit N pending leads\n"
-            "/discovery <n> — Run discovery with N queries\n"
-            "/cancel — Cancel running pipeline\n"
-            "/buckets — Show bucket summary\n"
-            "/help — Show this message",
-            parse_mode="Markdown",
-        )
+    handler = _COMMANDS.get(command)
+    if handler is not None:
+        return handler(args)
+    return None  
 
-    async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show current pipeline stats."""
-        if update.message is None:
-            return
-        stats = _get_stats()
-        await update.message.reply_text(stats, parse_mode="Markdown")
 
-    async def cmd_leads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show lead counts by status."""
-        if update.message is None:
-            return
+
+
+def _poll_loop() -> None:
+    """Main long-polling loop. Runs in a daemon thread."""
+    assert _notifier is not None
+
+    bot_info = _notifier.get_me()
+    if bot_info is None:
+        logger.error("Failed to verify bot identity. Check TELEGRAM_BOT_TOKEN.")
+        return
+
+    _notifier.delete_webhook()
+
+    offset: int | None = None
+
+    while not _stop_event.is_set():
         try:
-            from database.connection import get_database
+            updates = _notifier.get_updates(offset=offset, timeout=30)
 
-            db = get_database()
-            if db is None:
-                await update.message.reply_text("⚠️ Database not connected")
-                return
+            for update in updates:
+                offset = update.get("update_id", 0) + 1
 
-            pipeline = [
-                {"$group": {"_id": "$status", "count": {"$sum": 1}}}
-            ]
-            status_counts = {}
-            for doc in db.leads.aggregate(pipeline):
-                status_counts[doc["_id"]] = doc["count"]
+                message = update.get("message")
+                if message is None:
+                    continue
 
-            total = sum(status_counts.values())
-            lines = "\n".join(
-                f"  {status}: {count}" for status, count in sorted(status_counts.items())
-            )
+                chat = message.get("chat", {})
+                chat_id = str(chat.get("id", ""))
+                if TELEGRAM_CHAT_ID and chat_id != str(TELEGRAM_CHAT_ID):
+                    continue
 
-            msg = f"📋 *Leads by Status*\n\n{lines}\n\n*Total*: {total}"
-            await update.message.reply_text(msg, parse_mode="Markdown")
+                text = message.get("text", "")
+                if not text:
+                    continue
+
+                response = _handle_command(text)
+                if response is not None:
+                    _send_message(response)
+                elif text.startswith("/"):
+                    _send_message("❓ Unknown command. Use /help to see available commands.")
+
         except Exception as e:
-            logger.error(f"Error fetching lead stats: {e}")
-            await update.message.reply_text(f"❌ Error: {e}")
-
-    async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Run full pipeline."""
-        if update.message is None:
-            return
-
-        global _pipeline_state
-
-        if _pipeline_state["running"]:
-            await update.message.reply_text(
-                "⚠️ Pipeline is already running. Use /cancel to stop."
-            )
-            return
-
-        limit = 20
-        if context.args:
-            try:
-                limit = int(context.args[0])
-                if limit < 1 or limit > 100:
-                    await update.message.reply_text(
-                        "⚠️ Limit must be between 1 and 100"
-                    )
-                    return
-            except ValueError:
-                await update.message.reply_text("⚠️ Invalid limit. Use: /run <number>")
-                return
-
-        await update.message.reply_text(
-            f"🚀 Starting pipeline with limit={limit}..."
-        )
-
-        _pipeline_state = {
-            "running": True,
-            "cancelled": False,
-            "thread": None,
-            "result": None,
-            "error": None,
-        }
-
-        thread = threading.Thread(target=_run_pipeline_thread, args=(limit,), daemon=True)
-        _pipeline_state["thread"] = thread
-        thread.start()
-
-        def _notify_when_done() -> None:
-            thread.join()
-            if _pipeline_state.get("cancelled"):
-                msg = "⏹️ Pipeline was cancelled"
-            else:
-                msg = _format_pipeline_result(limit)
-            from infra.notifications.telegram import TelegramNotifier
-            if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-                notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                notifier.send_message(msg)
-
-        notify_thread = threading.Thread(target=_notify_when_done, daemon=True)
-        notify_thread.start()
-
-    async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Run audit on pending leads."""
-        if update.message is None:
-            return
-
-        global _pipeline_state
-
-        if _pipeline_state["running"]:
-            await update.message.reply_text(
-                "⚠️ Pipeline is already running. Use /cancel to stop."
-            )
-            return
-
-        if not context.args:
-            await update.message.reply_text("⚠️ Usage: /audit <number_of_leads>")
-            return
-
-        try:
-            limit = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("⚠️ Invalid number")
-            return
-
-        await update.message.reply_text(f"📋 Auditing {limit} leads...")
-
-        try:
-            app = _get_app()
-            result = app.run_audit(limit=limit)
-            audited = result.get("audited", 0)
-            qualified = result.get("qualified", 0)
-            rate = f"{(qualified / audited * 100):.1f}%" if audited > 0 else "N/A"
-
-            msg = (
-                f"✅ *Audit Complete*\n\n"
-                f"Audited: {audited}\n"
-                f"Qualified: {qualified} ({rate})"
-            )
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Audit failed: {e}")
-            await update.message.reply_text(f"❌ Audit failed: {e}")
-
-    async def cmd_discovery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Run discovery with specified queries."""
-        if update.message is None:
-            return
-
-        global _pipeline_state
-
-        if _pipeline_state["running"]:
-            await update.message.reply_text(
-                "⚠️ Pipeline is already running. Use /cancel to stop."
-            )
-            return
-
-        if not context.args:
-            await update.message.reply_text("⚠️ Usage: /discovery <number_of_queries>")
-            return
-
-        try:
-            max_queries = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("⚠️ Invalid number")
-            return
-
-        await update.message.reply_text(f"🔍 Running discovery with {max_queries} queries...")
-
-        try:
-            app = _get_app()
-            result = app.run_discovery(max_queries=max_queries)
-            found = result.get("leads_found", 0)
-            saved = result.get("leads_saved", 0)
-
-            msg = (
-                f"✅ *Discovery Complete*\n\n"
-                f"Queries: {max_queries}\n"
-                f"Leads Found: {found}\n"
-                f"Leads Saved: {saved}"
-            )
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Discovery failed: {e}")
-            await update.message.reply_text(f"❌ Discovery failed: {e}")
-
-    async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Cancel running pipeline."""
-        if update.message is None:
-            return
-
-        global _pipeline_state
-
-        if not _pipeline_state["running"]:
-            await update.message.reply_text("⚠️ No pipeline is currently running")
-            return
-
-        _pipeline_state["cancelled"] = True
-        await update.message.reply_text("⏹️ Pipeline cancellation requested...")
-
-    async def cmd_buckets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show bucket summary."""
-        if update.message is None:
-            return
-        try:
-            from database.connection import get_database
-
-            db = get_database()
-            if db is None:
-                await update.message.reply_text("⚠️ Database not connected")
-                return
-
-            buckets = list(db.buckets.find({}, {"name": 1, "priority": 1, "daily_email_limit": 1}))
-
-            if not buckets:
-                await update.message.reply_text("📭 No buckets configured")
-                return
-
-            lines = "\n".join(
-                f"  • {b.get('name', 'unknown')} (priority: {b.get('priority', 1)})"
-                for b in sorted(buckets, key=lambda x: x.get("priority", 1))
-            )
-
-            msg = f"📦 *Buckets*\n\n{lines}"
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Error fetching buckets: {e}")
-            await update.message.reply_text(f"❌ Error: {e}")
-
-    async def unknown_command(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """Handle unknown commands."""
-        if update.message is None:
-            return
-        await update.message.reply_text(
-            "❓ Unknown command. Use /help to see available commands."
-        )
-
-    app = Application.builder().token(token).build()
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("leads", cmd_leads))
-    app.add_handler(CommandHandler("run", cmd_run))
-    app.add_handler(CommandHandler("audit", cmd_audit))
-    app.add_handler(CommandHandler("discovery", cmd_discovery))
-    app.add_handler(CommandHandler("cancel", cmd_cancel))
-    app.add_handler(CommandHandler("buckets", cmd_buckets))
-
-    app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-
-    return app
+            logger.error(f"Polling error: {e}")
+            time.sleep(5)
 
 
-def main() -> None:
-    """Main entry point for Telegram bot."""
+
+
+def start_bot_thread(app_instance: Any) -> None:
+    """Start Telegram bot as a background thread."""
+    global _notifier, _bot_thread, _app_ref
+
     if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN not set. Cannot start bot.")
-        print("Error: TELEGRAM_BOT_TOKEN environment variable not set")
         return
 
-    if not TELEGRAM_CHAT_ID:
-        logger.warning("TELEGRAM_CHAT_ID not set. Bot will respond to all chats.")
-
-    print("🤖 Starting Web Contractor Telegram Bot...")
-    print(f"   Bot token: {TELEGRAM_BOT_TOKEN[:10]}...")
-    print(f"   Chat ID: {TELEGRAM_CHAT_ID or 'any'}")
-    print()
-    print("Commands available:")
-    print("  /status  — Show current stats")
-    print("  /run     — Run full pipeline")
-    print("  /audit   — Audit pending leads")
-    print("  /cancel  — Cancel running pipeline")
-    print("  /help    — Show all commands")
-    print()
-
-    bot_app = _setup_bot(TELEGRAM_BOT_TOKEN)
-    if bot_app is None:
-        print("Error: Failed to initialize bot. Is python-telegram-bot installed?")
-        print("Install with: uv add python-telegram-bot")
+    if _bot_thread and _bot_thread.is_alive():
+        logger.warning("Bot already running")
         return
 
-    print("✅ Bot is running! Send /start to begin.")
-    bot_app.run_polling(drop_pending_updates=True)
+    _app_ref = app_instance
+    _notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    _stop_event.clear()
+    _bot_thread = threading.Thread(target=_poll_loop, daemon=True)
+    _bot_thread.start()
 
 
-if __name__ == "__main__":
-    main()
+def stop_bot() -> None:
+    """Stop Telegram bot gracefully."""
+    global _notifier, _bot_thread
+
+    _stop_event.set()
+
+    if _bot_thread and _bot_thread.is_alive():
+        _bot_thread.join(timeout=10)
+        _bot_thread = None
+
+    _notifier = None
+
+
+def get_bot_status() -> dict[str, bool]:
+    """Return bot status for UI display."""
+    running = _bot_thread is not None and _bot_thread.is_alive()
+    return {
+        "running": running,
+        "token_configured": bool(TELEGRAM_BOT_TOKEN),
+        "chat_configured": bool(TELEGRAM_CHAT_ID),
+    }

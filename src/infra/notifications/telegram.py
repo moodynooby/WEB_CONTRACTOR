@@ -1,6 +1,7 @@
 """Telegram Notification Service
 
 Sends critical-only notifications to Telegram for pipeline events.
+Also supports long-polling for interactive bot commands.
 """
 
 import requests
@@ -25,6 +26,27 @@ class TelegramNotifier:
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.enabled = True
 
+    def _api_call(self, method: str, payload: dict, timeout: int = 30) -> dict | None:
+        """Make a raw API call to Telegram Bot API.
+
+        Args:
+            method: API method name (e.g. "sendMessage", "getUpdates")
+            payload: Request parameters
+            timeout: Request timeout in seconds
+
+        Returns:
+            Parsed JSON response dict, or None on failure.
+        """
+        url = f"{self.base_url}/{method}"
+        try:
+            response = requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Telegram API call failed ({method}): {e}")
+            self.enabled = False
+            return None
+
     def send_message(self, text: str, parse_mode: str = "Markdown") -> bool:
         """Send a message to Telegram.
 
@@ -39,22 +61,49 @@ class TelegramNotifier:
             logger.debug("Telegram notifier disabled, skipping message")
             return False
 
-        url = f"{self.base_url}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
             "text": text,
             "parse_mode": parse_mode,
         }
 
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            logger.info("Telegram message sent successfully")
-            return True
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send Telegram message: {e}")
-            self.enabled = False
-            return False
+        result = self._api_call("sendMessage", payload, timeout=10)
+        return bool(result)
+
+    def get_me(self) -> dict | None:
+        """Get bot identity. Used to verify token is valid.
+
+        Returns:
+            Bot info dict, or None on failure.
+        """
+        result = self._api_call("getMe", {}, timeout=10)
+        if result and result.get("ok"):
+            return result.get("result")
+        return None
+
+    def get_updates(self, offset: int | None = None, timeout: int = 30) -> list[dict]:
+        """Fetch pending updates via long-polling.
+
+        Args:
+            offset: Update ID to start from (exclusive). Use last+1 to avoid duplicates.
+            timeout: Long-polling timeout in seconds (max ~50).
+
+        Returns:
+            List of update dicts, empty list on failure.
+        """
+        payload: dict = {"timeout": timeout}
+        if offset is not None:
+            payload["offset"] = offset
+
+        result = self._api_call("getUpdates", payload, timeout=timeout + 5)
+        if result and result.get("ok"):
+            return result.get("result", [])
+        return []
+
+    def delete_webhook(self) -> bool:
+        """Delete any existing webhook (required before using getUpdates polling)."""
+        result = self._api_call("deleteWebhook", {}, timeout=10)
+        return bool(result and result.get("ok"))
 
     def notify_pipeline_started(self) -> bool:
         """Send notification that pipeline has started."""

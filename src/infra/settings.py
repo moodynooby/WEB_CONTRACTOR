@@ -17,7 +17,6 @@ from dotenv import load_dotenv
 PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent.parent
 _ENV_FILE = PROJECT_ROOT / ".env"
 
-# Load .env file early so all os.getenv() calls work
 load_dotenv(_ENV_FILE, override=True)
 
 CONFIG_DIR = PROJECT_ROOT / "src" / "infra"
