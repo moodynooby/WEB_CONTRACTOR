@@ -66,33 +66,9 @@ def load_json_section(section: str) -> dict[str, Any]:
     return _section(section)
 
 
-def get_config() -> dict[str, Any]:
-    """Return full config dict."""
-    return _load_config()
-
-
-def generate_override_template() -> None:
-    """Generate config_override.json template with current values."""
-    current = _load_config()
-    with open(OVERRIDE_FILE, "w") as f:
-        json.dump(current, f, indent=2)
-    print(f"Generated override template at {OVERRIDE_FILE}")
-
-
-def update_config(section: str, updates: dict) -> None:
-    """Update config section and save to override file."""
-    current = get_config()
-    current.setdefault(section, {}).update(updates)
-    with open(OVERRIDE_FILE, "w") as f:
-        json.dump(current, f, indent=2)
-
-
 _cfg = _load_config()
 
 LOG_LEVEL: Final[str] = _cfg.get("log_level", "INFO")
-
-_server = _section("server")
-STREAMLIT_PORT: Final[int] = _server.get("streamlit_port", 8501)
 
 _email = _section("email")
 EMAIL_SIGNATURE: Final[str] = _email.get(

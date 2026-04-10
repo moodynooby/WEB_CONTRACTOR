@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from infra.settings import load_json_section
-from infra.logging import get_logger, setup_root_logger
+from infra.logging import get_logger
 
 from audit.orchestrator import AuditOrchestrator
 from discovery.engine import PlaywrightScraper, BucketGenerator
@@ -20,7 +20,6 @@ from infra.llm import (
     generate_with_retry,
     LLMError,
     ProviderError,
-    get_provider_info,
     generate_bucket_config,
 )
 from app import App
@@ -34,18 +33,16 @@ from database.connection import (
     queue_pending_write,
     flush_pending_writes,
     cleanup_old_pending_writes,
-    get_circuit_breaker_state,
     get_email_campaign_stats,
     get_recent_email_campaigns,
     count_email_campaigns,
 )
-from models.schemas import Bucket, Lead, EmailCampaign, QueryPerformance
+from database.schemas import Bucket, Lead, EmailCampaign, QueryPerformance
 from database.repository import (
     save_bucket,
     get_all_buckets,
     get_bucket_by_name,
     get_bucket_id_by_name,
-    ensure_indexes,
     count_pending_audits,
     count_qualified_leads,
     count_emails_for_review,
@@ -61,10 +58,7 @@ from database.repository import (
     get_or_create_query_performance,
     update_query_performance,
     cleanup_stale_queries,
-    get_all_leads,
     count_leads,
-    get_query_performance_all,
-    get_email_campaigns,
 )
 
 __all__ = [
@@ -93,7 +87,6 @@ __all__ = [
     "queue_pending_write",
     "flush_pending_writes",
     "cleanup_old_pending_writes",
-    "get_circuit_breaker_state",
     "get_email_campaign_stats",
     "get_recent_email_campaigns",
     "count_email_campaigns",

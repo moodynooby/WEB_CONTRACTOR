@@ -68,16 +68,6 @@ class LogStreamer:
             self._subscribers.append(q)
         return q
     
-    def unsubscribe(self, q: queue.Queue) -> None:
-        """Unsubscribe from log messages.
-        
-        Args:
-            q: The queue to remove from subscribers.
-        """
-        with self._lock:
-            if q in self._subscribers:
-                self._subscribers.remove(q)
-    
     def publish(self, message: str, level: str = "INFO") -> None:
         """Publish a log message to all subscribers.
         
@@ -92,18 +82,7 @@ class LogStreamer:
             try:
                 q.put_nowait((message, level))
             except queue.Full:
-                pass  
-    
-    def clear(self) -> None:
-        """Remove all subscribers and clear queues."""
-        with self._lock:
-            for q in self._subscribers:
-                while not q.empty():
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        break
-            self._subscribers.clear()
+                pass
 
 
 _global_log_streamer: Optional[LogStreamer] = None
@@ -175,27 +154,3 @@ def get_logger(name: str, level: str = "INFO") -> logging.Logger:
         logger.propagate = False
 
     return logger
-
-
-def setup_root_logger(level: str = "INFO") -> logging.Logger:
-    """Setup root logger for the application.
-
-    Args:
-        level: Logging level
-
-    Returns:
-        Root logger instance
-    """
-    root_logger = logging.getLogger("web_contractor")
-    root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-    if not root_logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        formatter = ColoredFormatter(
-            "[%(asctime)s] %(levelname)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
-
-    return root_logger

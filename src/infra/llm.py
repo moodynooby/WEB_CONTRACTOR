@@ -56,16 +56,6 @@ def get_all_local_providers() -> list[dict[str, Any]]:
     return [{"key": p["key"], **p} for p in providers]
 
 
-def get_local_provider_config(provider: str) -> dict[str, Any]:
-    """Get local provider configuration by name."""
-    providers = get_all_local_providers()
-    for p in providers:
-        if p["key"] == provider:
-            return p
-    available = [p["key"] for p in providers]
-    raise ValueError(f"Unknown provider: {provider}. Available: {available}")
-
-
 def _build_providers() -> dict[str, Any]:
     """Build PROVIDERS dict from config."""
     from infra.settings import load_json_section
@@ -376,26 +366,6 @@ def _compact_system(system: str, max_length: int = 500) -> str:
     if len(system) <= max_length:
         return system
     return system[:max_length].strip()
-
-
-def get_provider_info() -> dict:
-    """Get current provider configuration."""
-    info = {
-        "mode": LLM_MODE,
-        "performance_mode": PERFORMANCE_MODE,
-        "primary_provider": DEFAULT_PROVIDER if LLM_MODE == "cloud" else LOCAL_PROVIDER,
-        "groq_configured": bool(GROQ_API_KEY),
-        "openrouter_configured": bool(OPENROUTER_API_KEY),
-        "default_model": DEFAULT_MODEL if LLM_MODE == "cloud" else LOCAL_MODEL,
-        "fallback_model": FALLBACK_MODEL,
-    }
-
-    if LLM_MODE == "local":
-        info["local_provider"] = LOCAL_PROVIDER
-        info["local_base_url"] = LOCAL_BASE_URL
-        info["local_model"] = LOCAL_MODEL
-
-    return info
 
 
 def generate_bucket_config(

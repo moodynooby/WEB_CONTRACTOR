@@ -60,26 +60,11 @@ def get_all_enabled_sources(
     return [s[0] for s in enabled_sources]
 
 
-def get_source_config(source_name: str, settings: Dict[str, Any]) -> Dict[str, Any]:
-    """Get configuration for a specific source.
-
-    Args:
-        source_name: Name of the source
-        settings: Full application settings dict
-
-    Returns:
-        Source configuration dict
-    """
-    sources_config = settings.get("discovery_sources", {}).get("sources", {})
-    return sources_config.get(source_name, {})
-
-
 __all__ = [
     "BaseScraper",
     "ScraperRegistry",
     "get_scraper",
     "get_all_enabled_sources",
-    "get_source_config",
     "google_maps",
     "google_search",
     "justdial",

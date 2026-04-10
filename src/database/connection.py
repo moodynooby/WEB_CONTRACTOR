@@ -1,9 +1,8 @@
-"""MongoDB Database Connection using PyMongo (sync) — optimized for Streamlit.
+"""MongoDB Database Connection using PyMongo (sync) — production-ready.
 
 Features:
 - Connection pooling with configurable limits
 - Health check / ping mechanism
-- Circuit breaker pattern for resilience
 - TTL-based cleanup for pending writes
 - Email campaign tracking helpers
 - No async/sync bridging needed!
@@ -15,7 +14,6 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from enum import Enum
 from typing import Any
 
 from pymongo import MongoClient
@@ -42,73 +40,11 @@ _is_initialized = False
 _is_healthy = False
 
 
-class CircuitState(Enum):
-    CLOSED = "closed"       
-    OPEN = "open"           
-    HALF_OPEN = "half_open" 
-
-class CircuitBreaker:
-    """Simple circuit breaker to prevent hammering a failing MongoDB."""
-
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: int = 30,
-    ):
-        self._failure_threshold = failure_threshold
-        self._recovery_timeout = recovery_timeout
-        self._state = CircuitState.CLOSED
-        self._failure_count = 0
-        self._last_failure_time: float = 0
-        self._lock = threading.Lock()
-
-    @property
-    def state(self) -> CircuitState:
-        with self._lock:
-            if self._state == CircuitState.OPEN:
-                if time.time() - self._last_failure_time >= self._recovery_timeout:
-                    self._state = CircuitState.HALF_OPEN
-                    logger.info("Circuit breaker transitioning to HALF_OPEN")
-            return self._state
-
-    def record_success(self):
-        with self._lock:
-            self._failure_count = 0
-            if self._state == CircuitState.HALF_OPEN:
-                self._state = CircuitState.CLOSED
-                logger.info("Circuit breaker CLOSED after successful call")
-
-    def record_failure(self):
-        with self._lock:
-            self._failure_count += 1
-            self._last_failure_time = time.time()
-            if self._failure_count >= self._failure_threshold:
-                self._state = CircuitState.OPEN
-                logger.warning(
-                    f"Circuit breaker OPEN after {self._failure_count} failures"
-                )
-
-    def can_execute(self) -> bool:
-        return self.state != CircuitState.OPEN
-
-    def reset(self):
-        with self._lock:
-            self._state = CircuitState.CLOSED
-            self._failure_count = 0
-            logger.info("Circuit breaker reset to CLOSED")
-
-
-_circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30)
-
-
 _PENDING_WRITES_DIR = Path(__file__).parent.parent / "data" / "pending_writes"
 _PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
 _pending_writes_lock = threading.Lock()
 PENDING_WRITES_TTL_DAYS = 7
 
-if not _PENDING_WRITES_DIR.exists():
-    _PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Created pending writes directory: {_PENDING_WRITES_DIR}")
 logger.debug(f"Pending writes directory: {_PENDING_WRITES_DIR}")
 
 
@@ -248,7 +184,6 @@ def init_db() -> None:
                 logger.warning("MongoDB connected but health check failed")
 
             _is_initialized = True
-            _circuit_breaker.reset()
 
         except Exception as e:
             logger.error(f"Failed to initialize MongoDB: {e}")
@@ -272,14 +207,6 @@ def get_database() -> Any | None:
 def is_connected() -> bool:
     """Check if MongoDB is connected and initialized."""
     return _is_initialized and _database is not None
-
-
-def get_circuit_breaker_state() -> dict[str, Any]:
-    """Get circuit breaker status for monitoring."""
-    return {
-        "state": _circuit_breaker.state.value,
-        "can_execute": _circuit_breaker.can_execute(),
-    }
 
 
 def get_connection_status() -> dict[str, Any]:

@@ -56,8 +56,6 @@ from database.repository import (
 from discovery.sources import get_all_enabled_sources
 
 
-# Thread-local storage for Playwright instances
-# Each thread gets its own Playwright instance to avoid greenlet conflicts
 _local = threading.local()
 
 
@@ -291,10 +289,6 @@ class PlaywrightScraper:
                         return queries
 
         return queries[:limit]
-
-    def score_query(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Minimal query scoring logic."""
-        return {"final_score": 1.0, "recommendation": "run"}
 
     def _scrape_sources(
         self,

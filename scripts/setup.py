@@ -215,18 +215,18 @@ class SetupWizard:
         """Step 5: Start services."""
         self.print_step(5, 5, "Starting Services")
 
-        start_streamlit = self.prompt("Start Streamlit now?", "y")
-        if start_streamlit.lower() in ["y", "yes", ""]:
-            print("\n  Starting Streamlit...")
+        start_app = self.prompt("Start the application now?", "y")
+        if start_app.lower() in ["y", "yes", ""]:
+            print("\n  Starting Web Contractor...")
             try:
                 subprocess.Popen(
                     [sys.executable, str(PROJECT_ROOT / "main.py"), "run"],
                     cwd=str(PROJECT_ROOT),
                 )
-                print("  ✓ Streamlit started")
+                print("  ✓ Application started")
                 print("  💡 Telegram bot will start automatically if configured")
             except Exception as e:
-                print(f"  ⚠️  Failed to start Streamlit: {e}")
+                print(f"  ⚠️  Failed to start application: {e}")
                 print("  💡 Start manually: python main.py run")
 
     def run(self):
@@ -255,7 +255,7 @@ class SetupWizard:
 
             print("  ✓ All setup steps completed\n")
             print("  Quick Start:")
-            print("    • Streamlit UI (with bot):  python main.py run")
+            print("    • Launch app:  python main.py run")
             print()
 
 

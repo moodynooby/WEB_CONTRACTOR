@@ -2,7 +2,6 @@
 
 CONFIG: dict = {
     "log_level": "INFO",
-    "server": {"streamlit_port": 8501},
     "email": {
         "signature": "\n\nBest regards,\nManas Doshi,\nFuture Forwards - https://man27.netlify.app/services",
         "smtp_server": "smtp.gmail.com",

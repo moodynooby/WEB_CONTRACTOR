@@ -245,10 +245,6 @@ def _handle_cancel() -> str:
     return "⏹️ Pipeline cancellation requested..."
 
 
-def _handle_status() -> str:
-    return _get_stats()
-
-
 def _handle_leads() -> str:
     try:
         from database.connection import get_database
@@ -309,7 +305,7 @@ _COMMANDS: dict[str, Any] = {
         "/buckets — Show bucket summary\n"
         "/help — Show this message"
     ),
-    "/status": lambda _a: _handle_status(),
+    "/status": lambda _a: _get_stats(),
     "/leads": lambda _a: _handle_leads(),
     "/run": _handle_run,
     "/audit": _handle_audit,
@@ -411,13 +407,3 @@ def stop_bot() -> None:
         _bot_thread = None
 
     _notifier = None
-
-
-def get_bot_status() -> dict[str, bool]:
-    """Return bot status for UI display."""
-    running = _bot_thread is not None and _bot_thread.is_alive()
-    return {
-        "running": running,
-        "token_configured": bool(TELEGRAM_BOT_TOKEN),
-        "chat_configured": bool(TELEGRAM_CHAT_ID),
-    }

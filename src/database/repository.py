@@ -1,4 +1,4 @@
-"""Repository Layer for MongoDB operations - Sync version for Streamlit.
+"""Repository Layer for MongoDB operations - Synchronous implementation.
 
 Uses PyMongo directly (no async wrappers needed!).
 
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from bson import ObjectId
-from pymongo import UpdateOne, ReturnDocument, ASCENDING, DESCENDING
+from pymongo import UpdateOne, ReturnDocument
 
 from database.connection import get_database, queue_pending_write, DatabaseUnavailableError
 from infra.logging import get_logger
@@ -207,40 +207,6 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
     except Exception as e:
         logger.error(f"Error deleting bucket: {e}")
         return (False, f"Error deleting bucket: {e}")
-
-
-def ensure_indexes() -> None:
-    """Create MongoDB indexes for frequently queried fields.
-
-    Called once at application startup to ensure optimal query performance.
-    Index creation is idempotent — safe to call multiple times.
-
-    Raises DatabaseUnavailableError if database is not connected.
-    """
-    db = _get_db()
-
-    try:
-        db.leads.create_index([("status", ASCENDING)])
-        db.leads.create_index([("bucket_id", ASCENDING)])
-        db.leads.create_index([("website", ASCENDING)])
-        db.leads.create_index([("created_at", DESCENDING)])
-        db.leads.create_index([("status", ASCENDING), ("website", ASCENDING)])
-
-        db.email_campaigns.create_index([("status", ASCENDING)])
-        db.email_campaigns.create_index([("lead_id", ASCENDING)])
-        db.email_campaigns.create_index([("sent_at", DESCENDING)])
-
-        db.query_performance.create_index([("bucket_id", ASCENDING)])
-        db.query_performance.create_index([("is_active", ASCENDING)])
-        db.query_performance.create_index([("consecutive_failures", ASCENDING)])
-        db.query_performance.create_index([("last_executed_at", DESCENDING)])
-        db.query_performance.create_index(
-            [("is_active", ASCENDING), ("consecutive_failures", ASCENDING)]
-        )
-
-        logger.info("Database indexes ensured")
-    except Exception as e:
-        logger.error(f"Error ensuring indexes: {e}")
 
 
 def count_pending_audits() -> int:
@@ -832,40 +798,6 @@ def cleanup_stale_queries(days_threshold: int = 30) -> int:
         return 0
 
 
-def get_all_leads(limit: int = 1000, cursor: str | None = None) -> list[dict[str, Any]]:
-    """Get all leads with cursor-based pagination for better performance.
-
-    Uses range queries on _id instead of skip/limit which degrades with large offsets.
-
-    Args:
-        limit: Maximum number of leads to return (default 1000)
-        cursor: Optional _id of the last item from previous page
-
-    Returns:
-        List of lead dictionaries with next_cursor for pagination
-    """
-    db = _get_db()
-
-
-    try:
-        query = {}
-        if cursor:
-            cursor_oid = _to_object_id(cursor)
-            query["_id"] = {"$gt": cursor_oid}
-
-        cursor_results = list(db.leads.find(query).sort("_id", 1).limit(limit + 1))
-        
-        results = []
-        for lead in cursor_results[:limit]:
-            lead["id"] = str(lead.pop("_id"))
-            results.append(lead)
-
-        return results
-    except Exception as e:
-        logger.error(f"Error fetching all leads: {e}")
-        return []
-
-
 def count_leads() -> int:
     """Get total count of leads.
 
@@ -897,28 +829,3 @@ def update_lead_status(lead_id: str, status: str) -> None:
         logger.error(f"Error updating lead status: {e}")
 
 
-
-def get_email_campaigns(limit: int = 500) -> list[dict]:
-    """Get email campaigns with limit to prevent memory issues."""
-    db = _get_db()
-
-
-    try:
-        results = list(db.email_campaigns.find().limit(limit))
-        return _sanitize_documents(results)
-    except Exception as e:
-        logger.error(f"Error fetching email campaigns: {e}")
-        return []
-
-
-def get_query_performance_all() -> list[dict]:
-    """Get all query performance records with limit."""
-    db = _get_db()
-
-
-    try:
-        results = list(db.query_performance.find().limit(1000))
-        return _sanitize_documents(results)
-    except Exception as e:
-        logger.error(f"Error fetching query performance records: {e}")
-        return []
