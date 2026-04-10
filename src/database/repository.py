@@ -159,6 +159,60 @@ def get_bucket_id_by_name(name: str) -> str | None:
     return None
 
 
+def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
+    """Delete a bucket and optionally cascade delete related data.
+    
+    Args:
+        bucket_id: The ObjectId of the bucket to delete.
+        cascade: If True, also delete related leads and query performance records.
+        
+    Returns:
+        Tuple of (success, message)
+        
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
+    
+    try:
+        from bson import ObjectId
+        oid = ObjectId(bucket_id) if isinstance(bucket_id, str) else bucket_id
+    except Exception as e:
+        return (False, f"Invalid bucket ID: {e}")
+    
+    try:
+        # Get bucket name for the message
+        bucket = db.buckets.find_one({"_id": oid})
+        if not bucket:
+            return (False, f"Bucket not found with ID: {bucket_id}")
+        
+        bucket_name = bucket.get("name", "unknown")
+        
+        if cascade:
+            # Delete related leads
+            leads_result = db.leads.delete_many({"bucket_id": oid})
+            logger.info(f"Deleted {leads_result.deleted_count} leads for bucket '{bucket_name}'")
+            
+            # Delete related query performance records
+            qp_result = db.query_performance.delete_many({"bucket_id": oid})
+            logger.info(f"Deleted {qp_result.deleted_count} query performance records for bucket '{bucket_name}'")
+        
+        # Delete the bucket itself
+        result = db.buckets.delete_one({"_id": oid})
+        
+        if result.deleted_count > 0:
+            msg = f"Bucket '{bucket_name}' deleted successfully"
+            if cascade:
+                msg += f" ({leads_result.deleted_count} leads, {qp_result.deleted_count} query records removed)"
+            logger.info(msg)
+            return (True, msg)
+        else:
+            return (False, f"Failed to delete bucket '{bucket_name}'")
+            
+    except Exception as e:
+        logger.error(f"Error deleting bucket: {e}")
+        return (False, f"Error deleting bucket: {e}")
+
+
 def ensure_indexes() -> None:
     """Create MongoDB indexes for frequently queried fields.
 
