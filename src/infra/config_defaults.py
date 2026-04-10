@@ -34,6 +34,23 @@ CONFIG: dict = {
         "default_model": "llama-3.1-8b-instant",
         "fallback_model": "google/gemma-2-2b-it:free",
         "timeout_seconds": 30,
+        "rate_limiting": {
+            "enabled": True,
+            "groq": {
+                "rpm_limit": 30,
+                "tpm_limit": 60000,
+                "rpd_limit": 10000,
+                "safety_buffer_pct": 0.10,
+                "cooldown_seconds": 60.0,
+            },
+            "openrouter": {
+                "rpm_limit": 20,
+                "tpm_limit": 40000,
+                "rpd_limit": 5000,
+                "safety_buffer_pct": 0.15,
+                "cooldown_seconds": 90.0,
+            },
+        },
         "performance_modes": [
             {
                 "key": "cloud_standard",

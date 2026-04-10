@@ -1,4 +1,14 @@
-"""JustDial scraper implementation."""
+"""JustDial scraper for Indian business directory.
+
+Scrapes JustDial (justdial.com) for:
+- Business names
+- Phone numbers
+- Addresses
+- Website URLs
+- Contact emails
+
+Note: JustDial has anti-scraping measures that may require rotation.
+"""
 
 import time
 from typing import Any, Dict, List

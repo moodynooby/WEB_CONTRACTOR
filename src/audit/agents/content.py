@@ -22,7 +22,7 @@ class ContentAgent(BaseAgent):
     ) -> None:
         super().__init__(config)
         self.llm_config = config
-        self.llm_enabled = llm.is_available()
+        self.llm_enabled = llm.is_llm_available()
 
     def execute(
         self,

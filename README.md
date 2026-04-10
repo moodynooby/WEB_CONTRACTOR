@@ -15,7 +15,6 @@ CONFIG = {
 }
 ```
 
-**Optional override:** Create `src/infra/config_override.json` for user-specific values. These merge with defaults (deep merge).
 
 ## Quick Start
 

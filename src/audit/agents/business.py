@@ -23,7 +23,7 @@ class BusinessAgent(BaseAgent):
     ) -> None:
         super().__init__(config)
         self.bucket_overrides = config.get("bucket_overrides", {})
-        self.llm_enabled = llm.is_available()
+        self.llm_enabled = llm.is_llm_available()
 
     def execute(
         self,

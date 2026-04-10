@@ -25,7 +25,6 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 
-
 def check_db_connection() -> bool:
     """Verify MongoDB connectivity before launching any interface.
 
@@ -41,9 +40,13 @@ def check_db_connection() -> bool:
     if not mongo_uri:
         print("[✗] MONGODB_URI not set in .env file")
         print("[→] Configure MongoDB connection:")
-        print("    1. Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas")
+        print(
+            "    1. Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas"
+        )
         print("    2. Add MONGODB_URI to your .env file")
-        print("    3. Format: mongodb+srv://user:password@cluster.mongodb.net/?retryWrites=true&w=majority")
+        print(
+            "    3. Format: mongodb+srv://user:password@cluster.mongodb.net/?retryWrites=true&w=majority"
+        )
         print("")
         print("[→] Or run the setup wizard: python scripts/setup.py")
         return False
@@ -70,7 +73,9 @@ def check_db_connection() -> bool:
         print("    • Check your MONGODB_URI in .env file")
         print("    • Ensure your MongoDB+srv URI is correctly formatted")
         print("    • Verify your IP is whitelisted in MongoDB Atlas")
-        print("    • Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas")
+        print(
+            "    • Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas"
+        )
         print("")
         print("[→] Or run the setup wizard: python scripts/setup.py")
         return False
@@ -108,8 +113,9 @@ def launch_bot():
     print("[→] Press Ctrl+C to stop")
     print()
 
-    from app import App
-    app = App()
+    from app import WebContractorApp
+
+    app = WebContractorApp()
     app.initialize()
 
     try:

@@ -6,10 +6,10 @@
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # launch Streamlit
+uv run python main.py     # launch PyQt6 GUI
 
 # Service manager (cross-platform):
-uv run python main.py run       # Launch Streamlit
+uv run python main.py run       # Launch PyQt6 GUI
 uv run python main.py bot       # Start Telegram bot
 uv run python main.py status    # Show service status
 uv run python main.py stop      # Stop all services

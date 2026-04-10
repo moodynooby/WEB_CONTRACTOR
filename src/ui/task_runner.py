@@ -7,7 +7,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from datetime import datetime, timezone
 
 
-class TaskRunner(QThread):
+class BackgroundTaskRunner(QThread):
     """Run a callable in a background thread.
 
     Signals:
@@ -56,14 +56,14 @@ class TaskRunner(QThread):
             self.failed.emit(self.display_name, error_msg)
 
 
-class TaskManager:
+class BackgroundTaskManager:
     """Manage multiple background tasks.
 
     Prevents duplicate task execution and tracks running tasks.
     """
 
     def __init__(self):
-        self._running_tasks: dict[str, TaskRunner] = {}
+        self._running_tasks: dict[str, BackgroundTaskRunner] = {}
 
     def is_running(self, task_name: str) -> bool:
         """Check if a task is currently running.
@@ -79,19 +79,15 @@ class TaskManager:
             and self._running_tasks[task_name].isRunning()
         )
 
-    def start_task(self, task_name: str, runner: TaskRunner) -> None:
+    def start_task(self, task_name: str, runner: BackgroundTaskRunner) -> None:
         """Register and start a task.
 
         Args:
             task_name: Task identifier.
-            runner: TaskRunner instance to start.
+            runner: BackgroundTaskRunner instance to start.
         """
-        runner.finished.connect(
-            lambda *_: self._cleanup(task_name)
-        )
-        runner.failed.connect(
-            lambda *_: self._cleanup(task_name)
-        )
+        runner.finished.connect(lambda *_: self._cleanup(task_name))
+        runner.failed.connect(lambda *_: self._cleanup(task_name))
         self._running_tasks[task_name] = runner
         runner.start()
 

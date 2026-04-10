@@ -1,4 +1,11 @@
-"""Data models using dataclasses for MongoDB."""
+"""Data models using dataclasses for MongoDB documents.
+
+Provides dataclass definitions for:
+- Bucket: Search bucket configuration
+- Lead: Discovered business leads
+- EmailCampaign: Outbound email campaigns
+- QueryPerformance: Query execution tracking
+"""
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -6,7 +13,7 @@ from typing import Any, Optional
 
 
 @dataclass
-class Bucket:
+class SearchBucket:
     name: str
     categories: list[str] = field(default_factory=list)
     search_patterns: list[str] = field(default_factory=list)
@@ -31,7 +38,7 @@ class Bucket:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Bucket":
+    def from_dict(cls, data: dict) -> "SearchBucket":
         if "_id" in data and data["_id"]:
             data["_id"] = str(data["_id"])
         return cls(**data)

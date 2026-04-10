@@ -5,7 +5,7 @@ from .discovery import (
     find_emails_in_html,
     find_contact_form_email,
     find_phone,
-    discover_contact_info,
+    find_contact_info_from_website,
     scrape_email_from_website,
 )
 from .sender import EmailSender
@@ -16,7 +16,7 @@ __all__ = [
     "find_emails_in_html",
     "find_contact_form_email",
     "find_phone",
-    "discover_contact_info",
+    "find_contact_info_from_website",
     "scrape_email_from_website",
     "EmailSender",
     "EmailGenerator",

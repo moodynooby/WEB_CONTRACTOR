@@ -69,7 +69,7 @@ def _get_playwright() -> Playwright:
     Returns:
         Playwright instance for the current thread
     """
-    if not hasattr(_local, 'playwright'):
+    if not hasattr(_local, "playwright"):
         _local.playwright = sync_playwright().start()
     return _local.playwright
 
@@ -102,7 +102,7 @@ class PlaywrightScraper:
         scraper = PlaywrightScraper()
         with scraper.managed_session():
             # Queries are generated from bucket patterns
-            queries = scraper.generate_queries()
+            queries = scraper.create_search_queries()
             # Each query is scraped across all enabled sources sequentially
             results = scraper.run()
 
@@ -162,9 +162,7 @@ class PlaywrightScraper:
         """
         pw = _get_playwright()
         browser = pw.chromium.launch(
-            headless=self._settings.get("scraper_settings", {}).get(
-                "headless", True
-            )
+            headless=self._settings.get("scraper_settings", {}).get("headless", True)
         )
         context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
         self._context = context
@@ -193,7 +191,7 @@ class PlaywrightScraper:
         """Load bucket configuration from DB"""
         return get_all_buckets()
 
-    def generate_queries(
+    def create_search_queries(
         self, bucket_name: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Generate search queries from bucket patterns, filtering out stale queries
@@ -225,9 +223,11 @@ class PlaywrightScraper:
                     stale_query_set.add((sq["query_pattern"], sq["city"]))
 
         for bucket in buckets:
-            bucket_max_queries = int(bucket.get(
-                "max_queries", self._settings.get("max_patterns_per_bucket", 500)
-            ))
+            bucket_max_queries = int(
+                bucket.get(
+                    "max_queries", self._settings.get("max_patterns_per_bucket", 500)
+                )
+            )
 
             search_patterns = bucket.get("search_patterns", [])
             if isinstance(search_patterns, str):
@@ -252,7 +252,9 @@ class PlaywrightScraper:
 
                 for seg_name in segments:
                     if seg_name in geo_focus:
-                        max_cities = int(self._settings.get("max_cities_per_segment", 50))
+                        max_cities = int(
+                            self._settings.get("max_cities_per_segment", 50)
+                        )
                         cities.extend(
                             geo_focus[seg_name].get("cities", [])[:max_cities]
                         )
@@ -356,9 +358,7 @@ class PlaywrightScraper:
 
                     if leads:
                         normalized = [
-                            scraper.normalize_lead(
-                                lead, bucket=bucket, query=query
-                            )
+                            scraper.normalize_lead(lead, bucket=bucket, query=query)
                             for lead in leads
                         ]
                         query_leads.extend(normalized)
@@ -418,7 +418,7 @@ class PlaywrightScraper:
 
         self.log("DISCOVERY: Query Generation + Lead Scraping")
 
-        queries = self.generate_queries(bucket_name, max_queries)
+        queries = self.create_search_queries(bucket_name, max_queries)
         self.log(f"Generated {len(queries)} search queries", "info")
 
         stale_threshold = self._settings.get("stale_query_threshold", 3)
@@ -524,7 +524,7 @@ class PlaywrightScraper:
         }
 
 
-class BucketGenerator:
+class BucketConfigGenerator:
     """AI-powered bucket configuration generator."""
 
     def __init__(self):

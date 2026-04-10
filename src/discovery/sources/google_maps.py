@@ -1,4 +1,13 @@
-"""Google Maps scraper implementation."""
+"""Google Maps scraper for business listings.
+
+Uses Playwright to navigate Google Maps and extract:
+- Business names
+- Website URLs
+- Phone numbers
+- Addresses
+
+Note: This scraper relies on Google Maps UI which may change frequently.
+"""
 
 from typing import Any, Dict, List
 

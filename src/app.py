@@ -13,7 +13,7 @@ from audit.orchestrator import AuditOrchestrator
 from infra.logging import get_logger
 
 
-class App:
+class WebContractorApp:
     """Application layer - manages all services."""
 
     def __init__(self):
@@ -47,6 +47,7 @@ class App:
         """Start Telegram bot in background thread."""
         try:
             from infra.notifications.bot import start_bot_thread
+
             start_bot_thread(self)
         except Exception as e:
             self.logger.warning(f"Failed to start Telegram bot: {e}")
@@ -60,6 +61,7 @@ class App:
 
         try:
             from infra.notifications.bot import stop_bot
+
             stop_bot()
         except Exception as e:
             self.logger.warning(f"Error stopping Telegram bot: {e}")

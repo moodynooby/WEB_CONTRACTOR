@@ -18,7 +18,11 @@ from typing import Any
 from bson import ObjectId
 from pymongo import UpdateOne, ReturnDocument
 
-from database.connection import get_database, queue_pending_write, DatabaseUnavailableError
+from database.connection import (
+    get_database,
+    defer_database_write,
+    DatabaseUnavailableError,
+)
 from infra.logging import get_logger
 
 logger = get_logger(__name__)
@@ -64,7 +68,6 @@ def _sanitize_documents(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [_sanitize_document(doc) for doc in docs]
 
 
-
 def save_bucket(data: dict[str, Any]) -> dict[str, Any]:
     """Save or update bucket. Returns the saved bucket data with id.
 
@@ -77,12 +80,20 @@ def save_bucket(data: dict[str, Any]) -> dict[str, Any]:
     try:
         bucket_data = {k: v for k, v in data.items() if k != "id"}
 
-        for field in ["priority", "monthly_target", "max_queries", "max_results", "daily_email_limit"]:
+        for field in [
+            "priority",
+            "monthly_target",
+            "max_queries",
+            "max_results",
+            "daily_email_limit",
+        ]:
             if field in bucket_data and bucket_data[field] is not None:
                 try:
                     bucket_data[field] = int(bucket_data[field])
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid value for {field} in bucket {data.get('name')}: {bucket_data[field]}")
+                    logger.warning(
+                        f"Invalid value for {field} in bucket {data.get('name')}: {bucket_data[field]}"
+                    )
 
         result = db.buckets.find_one_and_update(
             {"name": data["name"]},
@@ -161,40 +172,45 @@ def get_bucket_id_by_name(name: str) -> str | None:
 
 def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
     """Delete a bucket and optionally cascade delete related data.
-    
+
     Args:
         bucket_id: The ObjectId of the bucket to delete.
         cascade: If True, also delete related leads and query performance records.
-        
+
     Returns:
         Tuple of (success, message)
-        
+
     Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
-    
+
     try:
         from bson import ObjectId
+
         oid = ObjectId(bucket_id) if isinstance(bucket_id, str) else bucket_id
     except Exception as e:
         return (False, f"Invalid bucket ID: {e}")
-    
+
     try:
         bucket = db.buckets.find_one({"_id": oid})
         if not bucket:
             return (False, f"Bucket not found with ID: {bucket_id}")
-        
+
         bucket_name = bucket.get("name", "unknown")
-        
+
         if cascade:
             leads_result = db.leads.delete_many({"bucket_id": oid})
-            logger.info(f"Deleted {leads_result.deleted_count} leads for bucket '{bucket_name}'")
-            
+            logger.info(
+                f"Deleted {leads_result.deleted_count} leads for bucket '{bucket_name}'"
+            )
+
             qp_result = db.query_performance.delete_many({"bucket_id": oid})
-            logger.info(f"Deleted {qp_result.deleted_count} query performance records for bucket '{bucket_name}'")
-        
+            logger.info(
+                f"Deleted {qp_result.deleted_count} query performance records for bucket '{bucket_name}'"
+            )
+
         result = db.buckets.delete_one({"_id": oid})
-        
+
         if result.deleted_count > 0:
             msg = f"Bucket '{bucket_name}' deleted successfully"
             if cascade:
@@ -203,13 +219,13 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
             return (True, msg)
         else:
             return (False, f"Failed to delete bucket '{bucket_name}'")
-            
+
     except Exception as e:
         logger.error(f"Error deleting bucket: {e}")
         return (False, f"Error deleting bucket: {e}")
 
 
-def count_pending_audits() -> int:
+def count_leads_pending_audit() -> int:
     """Count leads pending audit (lightweight, no aggregation pipeline).
 
     Raises DatabaseUnavailableError if database is not connected.
@@ -217,13 +233,15 @@ def count_pending_audits() -> int:
     db = _get_db()
 
     try:
-        return db.leads.count_documents({"status": "pending_audit", "website": {"$ne": None}})
+        return db.leads.count_documents(
+            {"status": "pending_audit", "website": {"$ne": None}}
+        )
     except Exception as e:
         logger.error(f"Error counting pending audits: {e}")
         return 0
 
 
-def count_qualified_leads() -> int:
+def count_qualified_leads_without_emails() -> int:
     """Count qualified leads without emails (lightweight, no aggregation pipeline).
 
     Raises DatabaseUnavailableError if database is not connected.
@@ -258,10 +276,10 @@ def count_emails_for_review() -> int:
         return 0
 
 
-
 def save_leads_batch(leads: list[dict[str, Any]]) -> int:
-    """Save multiple leads in batch.
+    """Save multiple leads in batch, skipping duplicates.
 
+    Uses bulk_write with upsert to handle existing websites gracefully.
     Raises DatabaseUnavailableError if database is not connected.
     """
     db = _get_db()
@@ -274,35 +292,46 @@ def save_leads_batch(leads: list[dict[str, Any]]) -> int:
             for bucket in db.buckets.find({"name": {"$in": list(bucket_names)}}):
                 bucket_map[bucket["name"]] = str(bucket["_id"])
 
-        insert_data = []
+        operations = []
         for lead_data in leads:
-            insert_data.append(
-                {
-                    "business_name": lead_data.get("business_name"),
-                    "category": lead_data.get("category"),
-                    "location": lead_data.get("location"),
-                    "phone": lead_data.get("phone"),
-                    "email": lead_data.get("email"),
-                    "website": lead_data.get("website"),
-                    "source": lead_data.get("source"),
-                    "bucket_id": bucket_map.get(lead_data.get("bucket")),
-                    "quality_score": lead_data.get("quality_score", 0.5),
-                    "social_links": lead_data.get("social_links", {}),
-                    "contact_form_url": lead_data.get("contact_form_url"),
-                    "tech_stack": lead_data.get("tech_stack"),
-                    "metadata": lead_data.get("metadata", {}),
-                    "status": "pending_audit",
-                    "created_at": datetime.now(timezone.utc),
-                }
+            lead_doc = {
+                "business_name": lead_data.get("business_name"),
+                "category": lead_data.get("category"),
+                "location": lead_data.get("location"),
+                "phone": lead_data.get("phone"),
+                "email": lead_data.get("email"),
+                "website": lead_data.get("website"),
+                "source": lead_data.get("source"),
+                "bucket_id": bucket_map.get(lead_data.get("bucket")),
+                "quality_score": lead_data.get("quality_score", 0.5),
+                "social_links": lead_data.get("social_links", {}),
+                "contact_form_url": lead_data.get("contact_form_url"),
+                "tech_stack": lead_data.get("tech_stack"),
+                "metadata": lead_data.get("metadata", {}),
+                "status": "pending_audit",
+                "created_at": datetime.now(timezone.utc),
+            }
+
+            operations.append(
+                UpdateOne(
+                    {"website": lead_data.get("website")},
+                    {"$setOnInsert": lead_doc},
+                    upsert=True,
+                )
             )
 
-        result = db.leads.insert_many(insert_data, ordered=False)
-        logger.info(f"Saved {len(result.inserted_ids)} leads in batch")
-        return len(result.inserted_ids)
+        if not operations:
+            return 0
+
+        result = db.leads.bulk_write(operations, ordered=False)
+        logger.info(
+            f"Saved {result.upserted_count} leads, skipped {result.matched_count} duplicates"
+        )
+        return result.upserted_count
     except Exception as e:
         logger.error(f"Error saving leads batch: {e}")
         for lead in leads:
-            queue_pending_write("insert_one", {"collection": "leads", **lead})
+            defer_database_write("insert_one", {"collection": "leads", **lead})
         return 0
 
 
@@ -326,11 +355,13 @@ def get_pending_audits(limit: int = 50) -> list[dict[str, Any]]:
                     "as": "bucket",
                 }
             },
-            {"$project": {
-                "business_name": 1,
-                "website": 1,
-                "bucket_name": {"$arrayElemAt": ["$bucket.name", 0]},
-            }},
+            {
+                "$project": {
+                    "business_name": 1,
+                    "website": 1,
+                    "bucket_name": {"$arrayElemAt": ["$bucket.name", 0]},
+                }
+            },
             {"$limit": limit},
         ]
 
@@ -370,10 +401,12 @@ def get_qualified_leads(limit: int = 50) -> list[dict[str, Any]]:
                     "as": "campaigns",
                 }
             },
-            {"$match": {
-                "status": "qualified",
-                "campaigns": {"$size": 0},
-            }},
+            {
+                "$match": {
+                    "status": "qualified",
+                    "campaigns": {"$size": 0},
+                }
+            },
             {
                 "$lookup": {
                     "from": "buckets",
@@ -382,15 +415,17 @@ def get_qualified_leads(limit: int = 50) -> list[dict[str, Any]]:
                     "as": "bucket",
                 }
             },
-            {"$project": {
-                "business_name": 1,
-                "website": 1,
-                "bucket_name": {"$arrayElemAt": ["$bucket.name", 0]},
-                "email": 1,
-                "phone": 1,
-                "issues_json": 1,
-                "audit_score": 1,
-            }},
+            {
+                "$project": {
+                    "business_name": 1,
+                    "website": 1,
+                    "bucket_name": {"$arrayElemAt": ["$bucket.name", 0]},
+                    "email": 1,
+                    "phone": 1,
+                    "issues_json": 1,
+                    "audit_score": 1,
+                }
+            },
             {"$limit": limit},
         ]
 
@@ -411,6 +446,29 @@ def get_qualified_leads(limit: int = 50) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error fetching qualified leads: {e}")
         return []
+
+
+def get_lead_by_id(lead_id: str) -> dict[str, Any] | None:
+    """Fetch a single lead document by its string ID.
+
+    Returns None if the lead is not found or the ID is invalid.
+
+    Raises DatabaseUnavailableError if database is not connected.
+    """
+    db = _get_db()
+
+    try:
+        oid = _to_object_id(lead_id)
+        lead = db.leads.find_one({"_id": oid})
+        if lead is None:
+            return None
+        return _sanitize_document(lead)
+    except ValueError as e:
+        logger.error(f"Invalid lead ID: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching lead: {e}")
+        return None
 
 
 def save_audits_batch(audits: list[dict[str, Any]]) -> int:
@@ -459,7 +517,6 @@ def save_audits_batch(audits: list[dict[str, Any]]) -> int:
         return 0
 
 
-
 def save_emails_batch(emails: list[dict[str, Any]]) -> int:
     """Save multiple email campaigns.
 
@@ -486,7 +543,9 @@ def save_emails_batch(emails: list[dict[str, Any]]) -> int:
     except Exception as e:
         logger.error(f"Error saving emails: {e}")
         for email in emails:
-            queue_pending_write("insert_one", {"collection": "email_campaigns", **email})
+            defer_database_write(
+                "insert_one", {"collection": "email_campaigns", **email}
+            )
         return 0
 
 
@@ -510,17 +569,19 @@ def get_emails_for_review(limit: int = 50) -> list[dict[str, Any]]:
                     "as": "lead",
                 }
             },
-            {"$match": {"lead": {"$ne": []}}},  
-            {"$project": {
-                "subject": 1,
-                "body": 1,
-                "status": 1,
-                "duration": 1,
-                "business_name": {"$arrayElemAt": ["$lead.business_name", 0]},
-                "email": {"$arrayElemAt": ["$lead.email", 0]},
-                "social_links": {"$arrayElemAt": ["$lead.social_links", 0]},
-                "contact_form_url": {"$arrayElemAt": ["$lead.contact_form_url", 0]},
-            }},
+            {"$match": {"lead": {"$ne": []}}},
+            {
+                "$project": {
+                    "subject": 1,
+                    "body": 1,
+                    "status": 1,
+                    "duration": 1,
+                    "business_name": {"$arrayElemAt": ["$lead.business_name", 0]},
+                    "email": {"$arrayElemAt": ["$lead.email", 0]},
+                    "social_links": {"$arrayElemAt": ["$lead.social_links", 0]},
+                    "contact_form_url": {"$arrayElemAt": ["$lead.contact_form_url", 0]},
+                }
+            },
             {"$limit": limit},
         ]
 
@@ -666,7 +727,7 @@ def get_or_create_query_performance(
             "query_pattern": query_pattern,
             "city": city,
         }
-        
+
         update = {
             "$setOnInsert": {
                 "bucket_id": bucket_id,
@@ -763,7 +824,10 @@ def get_stale_queries(
     db = _get_db()
 
     try:
-        query: dict = {"is_active": True, "consecutive_failures": {"$gte": max_failures}}
+        query: dict = {
+            "is_active": True,
+            "consecutive_failures": {"$gte": max_failures},
+        }
         if bucket_id:
             query["bucket_id"] = bucket_id
 
@@ -827,5 +891,3 @@ def update_lead_status(lead_id: str, status: str) -> None:
         logger.error(f"Invalid lead ID: {e}")
     except Exception as e:
         logger.error(f"Error updating lead status: {e}")
-
-

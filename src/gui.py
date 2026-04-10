@@ -27,15 +27,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from database.connection import is_connected, get_connection_status, init_db
 from database.repository import (
     count_buckets,
-    count_pending_audits,
-    count_qualified_leads,
+    count_leads_pending_audit,
+    count_qualified_leads_without_emails,
     count_emails_for_review,
 )
 from infra.logging import get_logger, get_log_streamer
-from app import App
+from app import WebContractorApp
 from ui.dark_theme import apply_dark_theme
-from ui.widgets import StatusBar, ActionPanel, LogConsole
-from ui.task_runner import TaskRunner, TaskManager
+from ui.widgets import StatusBar, ActionPanel, LogConsole, EmailReviewDialog
+from ui.task_runner import BackgroundTaskRunner, BackgroundTaskManager
 
 logger = get_logger(__name__)
 
@@ -45,8 +45,8 @@ class WebContractorGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.app: App | None = None
-        self.task_manager = TaskManager()
+        self.app: WebContractorApp | None = None
+        self.task_manager = BackgroundTaskManager()
         self.log_poller_timer = QTimer()
         self._log_queue = None
 
@@ -85,6 +85,7 @@ class WebContractorGUI(QMainWindow):
         self.action_panel.discovery_requested.connect(self._run_discovery)
         self.action_panel.audit_requested.connect(self._run_audit)
         self.action_panel.email_requested.connect(self._run_email_generation)
+        self.action_panel.review_requested.connect(self._open_review_dialog)
         self.action_panel.pipeline_requested.connect(self._run_full_pipeline)
         self.action_panel.atlas_requested.connect(self._open_atlas_dashboard)
 
@@ -116,7 +117,7 @@ class WebContractorGUI(QMainWindow):
 
         try:
             logger.info("Initializing Web Contractor services...")
-            self.app = App()
+            self.app = WebContractorApp()
             self.app.initialize()
             logger.info("Services initialized successfully")
             self._refresh_stats()
@@ -127,6 +128,9 @@ class WebContractorGUI(QMainWindow):
                 "Initialization Error",
                 f"Failed to initialize services:\n{e}",
             )
+            return
+
+        self._setup_log_streamer()
 
     def _setup_log_streamer(self) -> None:
         """Setup log streamer subscription for GUI."""
@@ -143,7 +147,7 @@ class WebContractorGUI(QMainWindow):
                 message, _level = self._log_queue.get_nowait()
                 self.log_console.append_message(message)
         except Exception:
-            pass  
+            pass
 
     def _refresh_stats(self) -> None:
         """Update quick stats from database."""
@@ -153,8 +157,8 @@ class WebContractorGUI(QMainWindow):
         try:
             stats = {
                 "Buckets": count_buckets(),
-                "Pending Audits": count_pending_audits(),
-                "Qualified Leads": count_qualified_leads(),
+                "Pending Audits": count_leads_pending_audit(),
+                "Qualified Leads": count_qualified_leads_without_emails(),
                 "Emails for Review": count_emails_for_review(),
             }
             self.status_bar.update_stats(stats)
@@ -175,6 +179,7 @@ class WebContractorGUI(QMainWindow):
             "discovery",
             lambda: app.run_discovery(),
             "Discovery",
+            task_type="discovery",
         )
 
     def _run_audit(self) -> None:
@@ -191,6 +196,7 @@ class WebContractorGUI(QMainWindow):
             "audit",
             lambda: app.run_audit(limit=20),
             "Audit",
+            task_type="audit",
         )
 
     def _run_email_generation(self) -> None:
@@ -207,7 +213,14 @@ class WebContractorGUI(QMainWindow):
             "email",
             lambda: app.generate_emails(limit=20),
             "Email Generation",
+            task_type="email",
         )
+
+    def _open_review_dialog(self) -> None:
+        """Open the email review dialog."""
+        dialog = EmailReviewDialog(self)
+        dialog.review_complete.connect(self._refresh_stats)
+        dialog.exec()
 
     def _run_full_pipeline(self) -> None:
         """Run full unified pipeline in background thread."""
@@ -223,20 +236,23 @@ class WebContractorGUI(QMainWindow):
             "pipeline",
             lambda: app.run_unified_pipeline(limit=20),
             "Full Pipeline",
+            task_type="pipeline",
         )
 
-    def _run_task(self, task_name: str, task_func, display_name: str) -> None:
+    def _run_task(self, task_name: str, task_func, display_name: str, task_type: str | None = None) -> None:
         """Run a long-running task in a background thread.
 
         Args:
             task_name: Internal task identifier.
             task_func: Callable to execute.
             display_name: Human-readable task name.
+            task_type: Type of task for selective button control ("discovery", "audit", "email", "pipeline").
+                      None means block all buttons (legacy behavior).
         """
 
         def on_started(name: str):
             self.log_console.append_message(f"Starting {name}...")
-            self.action_panel.set_buttons_enabled(False)
+            self.action_panel.set_buttons_enabled(False, task_type=task_type)
 
         def on_finished(name: str, result: dict, elapsed: float):
             summary = f"✓ {name} completed in {elapsed:.1f}s"
@@ -245,7 +261,7 @@ class WebContractorGUI(QMainWindow):
 
             self.log_console.append_message(summary)
             self._refresh_stats()
-            self.action_panel.set_buttons_enabled(True)
+            self.action_panel.set_buttons_enabled(True, task_type=task_type)
 
             QMessageBox.information(self, f"{name} Complete", summary)
 
@@ -253,11 +269,11 @@ class WebContractorGUI(QMainWindow):
             error_msg = f"✗ {name} failed: {error}"
             self.log_console.append_message(error_msg)
             logger.error(error_msg)
-            self.action_panel.set_buttons_enabled(True)
+            self.action_panel.set_buttons_enabled(True, task_type=task_type)
 
             QMessageBox.critical(self, f"{name} Failed", f"{name} failed:\n{error}")
 
-        runner = TaskRunner(task_name, task_func, display_name)
+        runner = BackgroundTaskRunner(task_name, task_func, display_name)
         runner.started.connect(on_started)
         runner.finished.connect(on_finished)
         runner.failed.connect(on_failed)
@@ -295,7 +311,6 @@ def main() -> None:
     apply_dark_theme(qt_app)
 
     gui = WebContractorGUI()
-    gui._setup_log_streamer()
     gui.show()
 
     sys.exit(qt_app.exec())

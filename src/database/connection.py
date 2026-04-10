@@ -4,8 +4,8 @@ Features:
 - Connection pooling with configurable limits
 - Health check / ping mechanism
 - TTL-based cleanup for pending writes
-- Email campaign tracking helpers
-- No async/sync bridging needed!
+- Email campaign statistics helpers
+- Thread-safe initialization
 """
 
 import json
@@ -30,6 +30,7 @@ class DatabaseUnavailableError(Exception):
     Unlike returning empty lists/zeros, this makes it explicit to callers
     that the database is down so they can show proper error messages.
     """
+
     pass
 
 
@@ -54,27 +55,25 @@ def is_initialized() -> bool:
     This is True even if the connection attempt failed.
     Use is_connected() to check if the DB is actually available.
     """
-    return _is_initialized  
-
+    return _is_initialized
 
 
 def _create_configured_client() -> MongoClient:
     """Create MongoDB client with production-grade connection pooling."""
     return MongoClient(
         MONGODB_URI,
-        maxPoolSize=50,           
-        minPoolSize=5,            
-        maxIdleTimeMS=300000,     
-        serverSelectionTimeoutMS=5000,  
+        maxPoolSize=50,
+        minPoolSize=5,
+        maxIdleTimeMS=300000,
+        serverSelectionTimeoutMS=5000,
         connectTimeoutMS=10000,
         socketTimeoutMS=30000,
-        retryWrites=True,         
-        retryReads=True,          
-        tls=True,                 
+        retryWrites=True,
+        retryReads=True,
+        tls=True,
         tlsAllowInvalidCertificates=False,
         uuidRepresentation="standard",
     )
-
 
 
 def _ping_database() -> bool:
@@ -97,7 +96,6 @@ def is_healthy() -> bool:
     return _is_healthy and _database is not None
 
 
-
 def _create_indexes(db: Any) -> None:
     """Create required indexes for collections."""
     db.leads.create_index("website", unique=True)
@@ -115,7 +113,9 @@ def _create_indexes(db: Any) -> None:
             if idx.get("key") == {"name": 1}:
                 if not idx.get("collation"):
                     db.buckets.drop_index(idx["name"])
-                    logger.info(f"Dropped old index '{idx['name']}' from buckets collection")
+                    logger.info(
+                        f"Dropped old index '{idx['name']}' from buckets collection"
+                    )
                 break
     except Exception as e:
         logger.warning(f"Error checking buckets indexes: {e}")
@@ -131,29 +131,22 @@ def _create_indexes(db: Any) -> None:
     )
     db.query_performance.create_index("is_active")
     db.query_performance.create_index("consecutive_failures")
-    db.query_performance.create_index(
-        "last_executed_at", expireAfterSeconds=2592000
-    )  
+    db.query_performance.create_index("last_executed_at", expireAfterSeconds=2592000)
 
     db.email_campaigns.create_index([("lead_id", 1), ("status", 1)])
     db.email_campaigns.create_index("status")
     db.email_campaigns.create_index([("status", 1), ("sent_at", -1)])
-    
+
     try:
-        db.email_campaigns.create_index(
-            "sent_at", expireAfterSeconds=7776000
-        )
+        db.email_campaigns.create_index("sent_at", expireAfterSeconds=7776000)
     except Exception as e:
         if "IndexOptionsConflict" in str(e) or "already exists" in str(e):
             db.email_campaigns.drop_index("sent_at_1")
-            db.email_campaigns.create_index(
-                "sent_at", expireAfterSeconds=7776000
-            )
+            db.email_campaigns.create_index("sent_at", expireAfterSeconds=7776000)
         else:
-            raise  
+            raise
 
     logger.info("MongoDB indexes created/verified")
-
 
 
 def init_db() -> None:
@@ -189,9 +182,8 @@ def init_db() -> None:
             logger.error(f"Failed to initialize MongoDB: {e}")
             _client = None
             _database = None
-            _is_initialized = True  
+            _is_initialized = True
             _is_healthy = False
-
 
 
 def get_client() -> MongoClient | None:
@@ -241,8 +233,7 @@ def close_db() -> None:
                 _is_healthy = False
 
 
-
-def queue_pending_write(operation: str, data: dict) -> None:
+def defer_database_write(operation: str, data: dict) -> None:
     """Queue a database write to disk when DB is unreachable.
 
     Args:
@@ -254,13 +245,11 @@ def queue_pending_write(operation: str, data: dict) -> None:
         write_entry = {
             "timestamp": timestamp,
             "operation": operation,
-            "data": data,
+            "payload": data,
         }
         write_file = _PENDING_WRITES_DIR / f"write_{timestamp}.json"
         try:
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(_PENDING_WRITES_DIR), suffix=".tmp"
-            )
+            fd, tmp_path = tempfile.mkstemp(dir=str(_PENDING_WRITES_DIR), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w") as tmp_f:
                     json.dump(write_entry, tmp_f)
@@ -274,7 +263,7 @@ def queue_pending_write(operation: str, data: dict) -> None:
             logger.error(f"Failed to queue pending write: {e}")
 
 
-def flush_pending_writes() -> int:
+def replay_deferred_writes() -> int:
     """Retry all pending disk writes when DB connection is restored.
 
     Returns:
@@ -299,22 +288,24 @@ def flush_pending_writes() -> int:
                 if db is None:
                     break
 
-                collection_name = entry["data"].get("collection")
+                collection_name = entry["payload"].get("collection")
                 if not collection_name:
                     continue
 
                 collection = db[collection_name]
                 operation = entry["operation"]
-                data = entry["data"]
+                payload = entry["payload"]
 
                 if operation == "insert_one":
-                    collection.insert_one(data)
+                    collection.insert_one(payload)
                 elif operation == "insert_many":
-                    collection.insert_many(data.get("documents", []), ordered=False)
+                    collection.insert_many(payload.get("documents", []), ordered=False)
                 elif operation == "update_one":
-                    collection.update_one(data.get("filter", {}), data.get("update", {}))
+                    collection.update_one(
+                        payload.get("filter", {}), payload.get("update", {})
+                    )
                 elif operation == "delete_one":
-                    collection.delete_one(data.get("filter", {}))
+                    collection.delete_one(payload.get("filter", {}))
                 else:
                     logger.warning(f"Unknown operation: {operation}")
                     continue
@@ -353,10 +344,11 @@ def cleanup_old_pending_writes(max_age_days: int = PENDING_WRITES_TTL_DAYS) -> i
                 logger.error(f"Failed to cleanup pending write {write_file.name}: {e}")
 
         if cleaned > 0:
-            logger.info(f"Cleaned up {cleaned} old pending writes (> {max_age_days} days)")
+            logger.info(
+                f"Cleaned up {cleaned} old pending writes (> {max_age_days} days)"
+            )
 
         return cleaned
-
 
 
 def get_email_campaign_stats() -> dict[str, Any]:
@@ -417,11 +409,7 @@ def get_recent_email_campaigns(limit: int = 50) -> list[dict]:
         db = _database
         if db is None:
             return []
-        campaigns = list(
-            db.email_campaigns.find()
-            .sort("sent_at", -1)
-            .limit(limit)
-        )
+        campaigns = list(db.email_campaigns.find().sort("sent_at", -1).limit(limit))
         for campaign in campaigns:
             campaign["id"] = str(campaign.pop("_id"))
         return campaigns

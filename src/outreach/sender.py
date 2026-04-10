@@ -16,7 +16,14 @@ from database.repository import mark_email_sent
 
 
 class EmailSender:
-    """SMTP Email Sender."""
+    """SMTP Email Sender for outbound campaigns.
+
+    Handles email delivery via Gmail SMTP with:
+    - TLS encryption
+    - Automatic status tracking in database
+    - Signature injection
+    - Error handling and logging
+    """
 
     def __init__(self) -> None:
         self.logger = get_logger(self.__class__.__name__)
@@ -38,7 +45,12 @@ class EmailSender:
             self.logger.debug(message)
 
     def send_email(
-        self, to_email: str, subject: str, body: str, campaign_id: int | None = None, lead_id: str | None = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        campaign_id: int | None = None,
+        lead_id: str | None = None,
     ) -> bool:
         """Send single email via SMTP"""
         try:

@@ -151,6 +151,11 @@ def get_logger(name: str, level: str = "INFO") -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+        gui_handler = GUIHandler()
+        gui_handler.setLevel(getattr(logging, level.upper(), logging.INFO))
+        gui_handler.setFormatter(formatter)
+        logger.addHandler(gui_handler)
+
         logger.propagate = False
 
     return logger

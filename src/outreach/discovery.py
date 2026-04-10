@@ -133,7 +133,9 @@ def _try_mailscout_fallback(base_url: str) -> Optional[str]:
     return None
 
 
-def discover_contact_info(html_content: str, base_url: str) -> Dict[str, Optional[str]]:
+def find_contact_info_from_website(
+    html_content: str, base_url: str
+) -> Dict[str, Optional[str]]:
     """Discover contact information from website HTML."""
     soup = BeautifulSoup(html_content, "html.parser")
 

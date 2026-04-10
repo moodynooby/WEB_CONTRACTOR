@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 import requests
 from bs4 import BeautifulSoup
-from outreach.discovery import discover_contact_info
+from outreach.discovery import find_contact_info_from_website
 from audit.agents import (
     AgentResult,
     BaseAgent,
@@ -72,7 +72,7 @@ class AuditOrchestrator:
         start_time = time.time()
         self.log(f"\nAuditing: {lead['business_name']} ({lead['website']})", "info")
 
-        fetch_result = self._fetch_page(lead["website"])
+        fetch_result = self._fetch_webpage(lead["website"])
         if not fetch_result:
             return {
                 "lead_id": lead["id"],
@@ -93,7 +93,7 @@ class AuditOrchestrator:
 
         html_content, soup, response = fetch_result
 
-        discovered_info = discover_contact_info(html_content, lead["website"])
+        discovered_info = find_contact_info_from_website(html_content, lead["website"])
 
         if not discovered_info.get("email"):
             self.log(f"  ✗ No valid email found for {lead['business_name']}", "warning")
@@ -187,7 +187,7 @@ class AuditOrchestrator:
         final_score, all_issues = self._aggregate_results(
             results, load_json_section("agents").get("weights", {})
         )
-        qualified = self._is_qualified(
+        qualified = self._check_qualification(
             final_score, all_issues, load_json_section("qualification")
         )
 
@@ -261,7 +261,7 @@ class AuditOrchestrator:
         with self.managed_session():
             return self.audit_leads(leads, progress_callback)
 
-    def _fetch_page(self, url: str) -> tuple[str, BeautifulSoup, Any] | None:
+    def _fetch_webpage(self, url: str) -> tuple[str, BeautifulSoup, Any] | None:
         """Fetch a URL using requests.
 
         Args:
@@ -326,7 +326,7 @@ class AuditOrchestrator:
         final_score = int(total_score / total_weight) if total_weight > 0 else 0
         return final_score, all_issues
 
-    def _is_qualified(
+    def _check_qualification(
         self, score: int, issues: list[dict[str, Any]], rules: dict
     ) -> bool:
         """Determine if lead is qualified based on score threshold."""

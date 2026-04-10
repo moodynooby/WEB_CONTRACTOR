@@ -19,17 +19,57 @@ from infra.settings import (
     DEFAULT_USER_AGENT,
     LLM_MODE,
     PERFORMANCE_MODE,
-    LOCAL_PROVIDER,
     LOCAL_BASE_URL,
     LOCAL_MODEL,
     CONNECTION_TEST_TIMEOUT,
     load_json_section,
 )
 from infra.logging import get_logger
+from infra.rate_limit import get_rate_protector
 
 logger = get_logger(__name__)
 
 _local = threading.local()
+
+
+def _initialize_rate_limiting():
+    """Initialize rate limiting based on config."""
+    protector = get_rate_protector()
+    config = load_json_section("llm")
+    rate_config = config.get("rate_limiting", {})
+
+    if not rate_config.get("enabled", True):
+        logger.info("Rate limiting disabled in configuration")
+        return
+
+    groq_config = rate_config.get("groq", {})
+    if groq_config:
+        protector.configure_provider(
+            provider_name="groq",
+            rpm_limit=groq_config.get("rpm_limit", 30),
+            tpm_limit=groq_config.get("tpm_limit", 60000),
+            rpd_limit=groq_config.get("rpd_limit", 10000),
+            enabled=True,
+            safety_buffer_pct=groq_config.get("safety_buffer_pct", 0.10),
+            cooldown_seconds=groq_config.get("cooldown_seconds", 60.0),
+        )
+
+    openrouter_config = rate_config.get("openrouter", {})
+    if openrouter_config:
+        protector.configure_provider(
+            provider_name="openrouter",
+            rpm_limit=openrouter_config.get("rpm_limit", 20),
+            tpm_limit=openrouter_config.get("tpm_limit", 40000),
+            rpd_limit=openrouter_config.get("rpd_limit", 5000),
+            enabled=True,
+            safety_buffer_pct=openrouter_config.get("safety_buffer_pct", 0.15),
+            cooldown_seconds=openrouter_config.get("cooldown_seconds", 90.0),
+        )
+
+    logger.info("Rate limiting initialized for cloud providers")
+
+
+_initialize_rate_limiting()
 
 
 def get_all_modes() -> list[dict[str, Any]]:
@@ -107,7 +147,7 @@ def get_session() -> requests.Session:
     return _local.session
 
 
-def is_available() -> bool:
+def is_llm_available() -> bool:
     """Test if at least one LLM provider is available"""
     if LLM_MODE == "local":
         try:
@@ -136,7 +176,7 @@ def is_available() -> bool:
     return False
 
 
-def _build_messages(
+def _construct_api_messages(
     prompt: str | None,
     system: str | None,
 ) -> list[dict]:
@@ -167,8 +207,8 @@ def _handle_api_response(
 ) -> str:
     """Handle API response and extract content."""
     if response.status_code == 200:
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        response_json = response.json()
+        content = response_json["choices"][0]["message"]["content"]
         if not content or content.strip() == "":
             raise LLMError(f"Empty response from {provider_name}")
 
@@ -193,10 +233,17 @@ def _generate_with_config(
     extra_headers: dict,
 ) -> str:
     """Generate response using specified provider configuration."""
+    if provider_name != "local":
+        protector = get_rate_protector()
+        allowed, reason = protector.check_rate_limit(provider_name)
+        if not allowed:
+            logger.warning(f"Rate limit blocking {provider_name}: {reason}")
+            raise LLMError(f"Rate limit: {reason}")
+
     session = get_session()
     session.headers.update(_get_provider_headers(api_key, extra_headers))
 
-    messages = _build_messages(prompt, system)
+    messages = _construct_api_messages(prompt, system)
 
     mode_profile = get_mode_profile(PERFORMANCE_MODE)
     temperature = mode_profile.get("temperature", 0.1 if format_json else 0.3)
@@ -221,7 +268,21 @@ def _generate_with_config(
             json=payload,
             timeout=adjusted_timeout,
         )
-        return _handle_api_response(response, provider_name, format_json)
+
+        if response.status_code == 429:
+            if provider_name != "local":
+                protector = get_rate_protector()
+                protector.record_rate_limit_error(provider_name)
+            raise LLMError(f"{provider_name} rate limit exceeded")
+
+        content = _handle_api_response(response, provider_name, format_json)
+
+        if provider_name != "local":
+            protector = get_rate_protector()
+            estimated_tokens = len(content) // 4 if content else 0  
+            protector.record_request(provider_name, estimated_tokens)
+
+        return content
 
     except requests.exceptions.Timeout:
         raise LLMError(f"{provider_name} request timeout")
@@ -292,7 +353,9 @@ def generate(
                 provider_name=provider_name,
                 api_key=str(config["api_key"]),
                 base_url=str(config["base_url"]),
-                extra_headers=config["extra_headers"] if isinstance(config["extra_headers"], dict) else {},
+                extra_headers=config["extra_headers"]
+                if isinstance(config["extra_headers"], dict)
+                else {},
             )
         except LLMError as e:
             errors.append(f"{provider_name}: {e}")
@@ -336,11 +399,22 @@ def generate_with_retry(
             )
         except LLMError as e:
             last_error = e
+            error_str = str(e).lower()
+            is_rate_limit = "rate limit" in error_str
+
             if attempt < max_retries - 1:
-                is_rate_limit = "rate limit" in str(e).lower()
-                base_wait = 4 if is_rate_limit else 2
-                jitter = random.uniform(0, 1)
-                wait_time = (base_wait**attempt) + jitter
+                if is_rate_limit:
+                    base_wait = 10
+                    multiplier = 2 ** attempt
+                    wait_time = base_wait * multiplier + random.uniform(0, 2)
+                    logger.warning(
+                        f"Rate limit hit, waiting {wait_time:.1f}s before retry (attempt {attempt + 1}/{max_retries})"
+                    )
+                else:
+                    base_wait = 2
+                    jitter = random.uniform(0, 1)
+                    wait_time = (base_wait ** attempt) + jitter
+
                 time.sleep(wait_time)
 
     raise ProviderError(f"Failed after {max_retries} attempts: {last_error}")
@@ -480,3 +554,34 @@ IMPORTANT:
         raise
     except Exception as e:
         raise LLMError(f"Bucket generation failed: {e}")
+
+
+def get_rate_limit_status(provider: str | None = None) -> dict[str, Any]:
+    """Get rate limit usage status for providers.
+
+    Args:
+        provider: Specific provider name or None for all providers
+
+    Returns:
+        Dictionary with rate limit usage statistics
+    """
+    protector = get_rate_protector()
+
+    if provider:
+        return protector.get_usage_stats(provider)
+    else:
+        stats = {}
+        for provider_name in ["groq", "openrouter"]:
+            stats[provider_name] = protector.get_usage_stats(provider_name)
+        return stats
+
+
+def reset_rate_limits(provider: str | None = None):
+    """Reset rate limit tracking.
+
+    Args:
+        provider: Specific provider name or None for all providers
+    """
+    protector = get_rate_protector()
+    protector.reset_stats(provider)
+    logger.info(f"Rate limits reset for {provider or 'all providers'}")
