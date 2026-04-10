@@ -92,7 +92,7 @@ class LogStreamer:
             try:
                 q.put_nowait((message, level))
             except queue.Full:
-                pass  # Drop message if queue is full
+                pass  
     
     def clear(self) -> None:
         """Remove all subscribers and clear queues."""
@@ -106,7 +106,6 @@ class LogStreamer:
             self._subscribers.clear()
 
 
-# Global log streamer instance for GUI integration
 _global_log_streamer: Optional[LogStreamer] = None
 _streamer_lock = threading.Lock()
 

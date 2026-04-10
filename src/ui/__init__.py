@@ -1,1 +1,4 @@
-"""UI utilities and visualizations package."""
+"""UI Module
+
+PyQt6 desktop interface with dark theme styling.
+"""

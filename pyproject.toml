@@ -1,11 +1,10 @@
 [project]
 name = "web-contractor"
 version = "1"
-description = "Ultra-minimal lead generation and outreach automation with Streamlit web UI"
+description = "Ultra-minimal lead generation and outreach automation with PyQt6 desktop UI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.28.0",
     "requests>=2.32.5",
     "playwright>=1.40.0",
     "python-dotenv>=1.2.1",
@@ -15,11 +14,11 @@ dependencies = [
     "groq>=0.4.0",
     "email-scraper>=0.6",
     "mailscout>=0.1.1",
+    "PyQt6>=6.6.0",
     "mkdocs>=1.6.1",
     "mkdocstrings[python]>=1.0.3",
     "mkdocs-material>=9.7.5",
     "mkdocs-api-autonav>=0.4.0",
-    "plotly>=5.18.0",
 ]
 
 [project.scripts]

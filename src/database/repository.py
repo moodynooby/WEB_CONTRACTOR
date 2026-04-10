@@ -180,7 +180,6 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
         return (False, f"Invalid bucket ID: {e}")
     
     try:
-        # Get bucket name for the message
         bucket = db.buckets.find_one({"_id": oid})
         if not bucket:
             return (False, f"Bucket not found with ID: {bucket_id}")
@@ -188,15 +187,12 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
         bucket_name = bucket.get("name", "unknown")
         
         if cascade:
-            # Delete related leads
             leads_result = db.leads.delete_many({"bucket_id": oid})
             logger.info(f"Deleted {leads_result.deleted_count} leads for bucket '{bucket_name}'")
             
-            # Delete related query performance records
             qp_result = db.query_performance.delete_many({"bucket_id": oid})
             logger.info(f"Deleted {qp_result.deleted_count} query performance records for bucket '{bucket_name}'")
         
-        # Delete the bucket itself
         result = db.buckets.delete_one({"_id": oid})
         
         if result.deleted_count > 0:

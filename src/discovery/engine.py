@@ -1,11 +1,45 @@
-"""Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)"""
+"""Discovery Module: Query Generation + Lead Scraping (Stage 0 + Stage A)
+
+This module handles lead discovery by generating search queries and scraping
+results from multiple sources using Playwright browser automation.
+
+⚠️  PLAYWRIGHT THREADING LIMITATIONS ⚠️
+========================================
+Playwright's sync API is NOT thread-safe due to its internal use of greenlets
+for async-to-sync conversion. Key constraints:
+
+1. **No ThreadPoolExecutor**: Cannot parallelize scraping across sources.
+   Each Playwright operation must run sequentially on the same thread.
+   Attempting parallel execution raises:
+   - "Cannot switch to a different thread" (greenlet.error)
+   - "It looks like you are using Playwright Sync API inside the asyncio loop"
+
+2. **Thread-local instances**: Playwright instances must be thread-local via
+   threading.local(). Sharing a global instance across threads fails because
+   greenlets maintain thread-specific execution contexts.
+
+3. **Sequential execution**: Sources scrape one-by-one, not in parallel.
+   Each source gets its own isolated browser context for safety.
+
+4. **Context managers required**: Always use managed_session() to ensure
+   proper browser/context/page lifecycle management and cleanup.
+
+If you need to parallelize, consider:
+- Playwright's async_api (requires async/await throughout codebase)
+- Multiprocessing (separate processes, not threads)
+- Running multiple independent script instances
+
+References:
+- https://playwright.dev/python/docs/library#thread-safety
+- https://github.com/microsoft/playwright-python/issues/1033
+"""
 
 import json
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Playwright, Page, sync_playwright
 
 from infra.settings import DEFAULT_USER_AGENT, load_json_section
 from infra.logging import get_logger
@@ -20,6 +54,26 @@ from database.repository import (
     cleanup_stale_queries,
 )
 from discovery.sources import get_all_enabled_sources
+
+
+# Thread-local storage for Playwright instances
+# Each thread gets its own Playwright instance to avoid greenlet conflicts
+_local = threading.local()
+
+
+def _get_playwright() -> Playwright:
+    """Get or create thread-local Playwright instance.
+
+    Playwright's sync API uses greenlets which are thread-local,
+    so each thread needs its own instance to avoid 'Cannot switch
+    to a different thread' errors.
+
+    Returns:
+        Playwright instance for the current thread
+    """
+    if not hasattr(_local, 'playwright'):
+        _local.playwright = sync_playwright().start()
+    return _local.playwright
 
 
 def _build_discovery_settings() -> dict[str, Any]:
@@ -40,7 +94,25 @@ def _build_discovery_settings() -> dict[str, Any]:
 
 
 class PlaywrightScraper:
-    """Consolidated Stage 0 (Planning) + Stage A (Scraping)"""
+    """Consolidated Stage 0 (Planning) + Stage A (Scraping).
+
+    Handles query generation and lead scraping using Playwright browser
+    automation. All operations run sequentially due to Playwright's sync
+    API thread-safety limitations.
+
+    Usage:
+        scraper = PlaywrightScraper()
+        with scraper.managed_session():
+            # Queries are generated from bucket patterns
+            queries = scraper.generate_queries()
+            # Each query is scraped across all enabled sources sequentially
+            results = scraper.run()
+
+    Note:
+        Do NOT attempt to parallelize scraping operations. Each source
+        must run sequentially within the same thread to avoid greenlet
+        thread-switching errors.
+    """
 
     def __init__(self):
         self.logger = get_logger(__name__)
@@ -71,22 +143,42 @@ class PlaywrightScraper:
 
     @contextmanager
     def managed_session(self):
-        """Context manager for scraping session - creates fresh browser context per operation."""
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=self._settings.get("scraper_settings", {}).get(
-                    "headless", True
-                )
-            )
-            context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
-            self._context = context
+        """Context manager for Playwright browser session.
 
-            try:
-                yield self
-            finally:
-                context.close()
-                browser.close()
-                self._context = None
+        Creates a thread-local Playwright instance and launches a browser
+        with a fresh context. This ensures proper resource lifecycle management.
+
+        ⚠️  IMPORTANT: This MUST be used as a context manager:
+            with scraper.managed_session():
+                # scraping operations here
+
+        The session provides:
+        - Thread-local Playwright instance (avoiding greenlet conflicts)
+        - Browser instance with configured user agent
+        - Browser context for isolation
+        - Automatic cleanup of all resources on exit
+
+        Raises:
+            playwright._impl._errors.Error: If called from within an
+                asyncio event loop without proper isolation
+        """
+        pw = _get_playwright()
+        browser = pw.chromium.launch(
+            headless=self._settings.get("scraper_settings", {}).get(
+                "headless", True
+            )
+        )
+        context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
+        self._context = context
+        self._browser = browser
+
+        try:
+            yield self
+        finally:
+            context.close()
+            browser.close()
+            self._context = None
+            self._browser = None
 
     @contextmanager
     def get_page(self) -> Generator[Page, None, None]:
@@ -166,6 +258,8 @@ class PlaywrightScraper:
                         cities.extend(
                             geo_focus[seg_name].get("cities", [])[:max_cities]
                         )
+                    else:
+                        cities.append(seg_name)
 
                 if not cities:
                     self.log(
@@ -208,11 +302,24 @@ class PlaywrightScraper:
         bucket_max_results: Optional[int],
         query_perf: Optional[Any],
     ) -> Tuple[List[Dict], Optional[Any]]:
-        """Scrape a query across all enabled sources in parallel.
+        """Scrape a query across all enabled sources sequentially.
 
-        Uses ThreadPoolExecutor to run multiple scrapers concurrently.
-        Each source gets its own isolated browser context for thread safety.
-        Shares a single browser instance across all workers for efficiency.
+        ⚠️  THREAD-SAFETY: Playwright sync API is NOT thread-safe.
+        Sources MUST run sequentially, not in parallel, because:
+        - Playwright uses greenlets for async-to-sync conversion
+        - Greenlets are thread-local and cannot switch threads
+        - Parallel execution causes: "Cannot switch to a different thread"
+
+        Each source gets its own isolated browser context for safety.
+        A single browser instance is shared across all sources for efficiency.
+
+        Args:
+            query_data: Query information (query, bucket, city, pattern)
+            bucket_max_results: Maximum results per query (from bucket config)
+            query_perf: Query performance tracking object
+
+        Returns:
+            Tuple of (list of normalized leads, query performance object)
         """
         query = query_data["query"]
         bucket = query_data["bucket"]
@@ -226,73 +333,55 @@ class PlaywrightScraper:
             return query_leads, query_perf
 
         sources_scrape_settings = self._settings.get("scraper_settings", {})
-        parallel_config = self._settings.get("parallel_scraping", {})
-
-        max_workers = parallel_config.get("max_workers", 3)
-        timeout_seconds = parallel_config.get("timeout_per_source_seconds", 30)
 
         self.log(
-            f"  Scraping {len(enabled_sources)} sources ({region}) in parallel...",
+            f"  Scraping {len(enabled_sources)} sources ({region})...",
             "info",
         )
 
-        def worker(scraper, browser):
-            """Worker function for single source scraping."""
-            try:
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                )
-                page = context.new_page()
+        pw = _get_playwright()
+        browser = pw.chromium.launch(
+            headless=sources_scrape_settings.get("headless", True)
+        )
 
+        try:
+            for scraper in enabled_sources:
+                context = None
+                page = None
                 try:
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    )
+                    page = context.new_page()
+
                     max_results = int(scraper.get_max_results())
                     if bucket_max_results and bucket_max_results < max_results:
                         max_results = int(bucket_max_results)
 
                     leads = scraper.search(query, page, max_results=max_results)
-                    return leads
+
+                    if leads:
+                        normalized = [
+                            scraper.normalize_lead(
+                                lead, bucket=bucket, query=query
+                            )
+                            for lead in leads
+                        ]
+                        query_leads.extend(normalized)
+                        self.log(
+                            f"  [{scraper.SOURCE_NAME}] Found {len(leads)} leads",
+                            "success",
+                        )
+
+                except Exception as e:
+                    self.log(f"  [{scraper.SOURCE_NAME}] Failed: {e}", "error")
                 finally:
-                    context.close()
-            except Exception as e:
-                self.log(f"  [{scraper.SOURCE_NAME}] Worker failed: {e}", "error")
-                return []
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=sources_scrape_settings.get("headless", True)
-            )
-            try:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_source = {
-                        executor.submit(worker, s, browser): s.SOURCE_NAME
-                        for s in enabled_sources
-                    }
-
-                    from concurrent.futures import as_completed
-
-                    for future in as_completed(
-                        future_to_source, timeout=timeout_seconds * len(enabled_sources)
-                    ):
-                        source_name = future_to_source[future]
-                        try:
-                            leads = future.result(timeout=timeout_seconds)
-                            if leads:
-                                scraper_instance = next(
-                                    s
-                                    for s in enabled_sources
-                                    if s.SOURCE_NAME == source_name
-                                )
-                                normalized = [
-                                    scraper_instance.normalize_lead(
-                                        lead, bucket=bucket, query=query
-                                    )
-                                    for lead in leads
-                                ]
-                                query_leads.extend(normalized)
-                        except Exception as e:
-                            self.log(f"  [{source_name}] Failed: {e}", "error")
-            finally:
-                browser.close()
+                    if page:
+                        page.close()
+                    if context:
+                        context.close()
+        finally:
+            browser.close()
 
         self.log(f"  Total: {len(query_leads)} leads from all sources", "success")
         return query_leads, query_perf
@@ -303,12 +392,27 @@ class PlaywrightScraper:
         max_queries: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> dict:
-        """Execute full discovery pipeline - single-threaded with efficient resource reuse
+        """Execute full discovery pipeline - sequential query processing.
+
+        This method runs the complete discovery workflow:
+        1. Load buckets and clean up stale queries
+        2. Generate search queries from bucket patterns
+        3. For each query, scrape all enabled sources sequentially
+        4. Save discovered leads to database
+        5. Update query performance metrics
+
+        ⚠️  THREADING: This runs in a single thread due to Playwright's
+        sync API limitations. Do NOT attempt to parallelize source scraping.
+
+        The pipeline MUST be called within a managed_session() context.
 
         Args:
             bucket_name: Optional bucket name to filter queries
             max_queries: Optional max queries override. If None, uses config or bucket default.
             progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            Dict with keys: queries_executed, leads_found, leads_saved
         """
         self.buckets = self._load_buckets()
         max_queries = max_queries or self._settings.get("max_queries_per_run", 500)

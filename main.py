@@ -1,18 +1,18 @@
-"""Web Contractor — Service Manager
+"""Web Contractor — Desktop Application Launcher
 
-Launches the Streamlit application.
+Launches the Tkinter desktop application.
 The Telegram bot lifecycle is managed by the App class.
 
 Usage:
-    python main.py              # Launch Streamlit
+    python main.py              # Launch Tkinter GUI
     python main.py run          # Same as above
+    python main.py bot          # Start Telegram bot only
 
 For setup, use the scripts:
     python scripts/setup.py         # Interactive setup wizard
 """
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -20,22 +20,24 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 SRC_DIR = PROJECT_ROOT / "src"
-STREAMLIT_PORT = 8501
+
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 
 
 def check_db_connection() -> bool:
     """Verify MongoDB connectivity before launching any interface.
-    
+
     Returns:
         True if database is reachable, False otherwise.
     """
-    # Load environment variables from .env file
     env_file = PROJECT_ROOT / ".env"
     if env_file.exists():
         load_dotenv(env_file)
-    
+
     mongo_uri = os.getenv("MONGODB_URI")
-    
+
     if not mongo_uri:
         print("[✗] MONGODB_URI not set in .env file")
         print("[→] Configure MongoDB connection:")
@@ -45,19 +47,19 @@ def check_db_connection() -> bool:
         print("")
         print("[→] Or run the setup wizard: python scripts/setup.py")
         return False
-    
+
     print("[→] Testing MongoDB connection...")
-    
+
     try:
         from pymongo import MongoClient
-        
+
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
         client.admin.command("ping")
         client.close()
-        
+
         print("[✓] MongoDB connection successful")
         return True
-        
+
     except ImportError:
         print("[✗] pymongo not installed. Run: uv sync")
         return False
@@ -74,36 +76,67 @@ def check_db_connection() -> bool:
         return False
 
 
-def main():
-    """Launch Streamlit application."""
-    # Pre-flight database check
-    if not check_db_connection():
-        print("[✗] Database connectivity check failed. Application cannot start.")
-        sys.exit(1)
-    
-    streamlit_app = SRC_DIR / "gui.py"
-    if not streamlit_app.exists():
-        print(f"[✘] Streamlit app not found at {streamlit_app}")
-        sys.exit(1)
+def launch_gui():
+    """Launch Tkinter desktop application."""
+    from database.connection import init_db
+    from gui import main as gui_main
 
-    print(f"[→] Starting Streamlit on port {STREAMLIT_PORT}...")
+    print("[→] Initializing database...")
+    init_db()
+
+    print("[→] Starting Web Contractor GUI...")
     print("[→] Telegram bot will start automatically if configured")
     print()
 
-    proc = subprocess.run(
-        [
-            sys.executable, "-m", "streamlit", "run", str(streamlit_app),
-            "--server.port", str(STREAMLIT_PORT),
-            "--server.headless", "true",
-            "--server.enableCORS", "false",
-            "--server.enableXsrfProtection", "true",
-            "--browser.gatherUsageStats", "false",
-        ],
-        cwd=str(SRC_DIR),
-    )
+    gui_main()
 
-    if proc.returncode != 0:
-        print(f"[✘] Streamlit exited with code {proc.returncode}")
+
+def launch_bot():
+    """Launch Telegram bot only (foreground mode)."""
+    from database.connection import init_db, is_connected
+    import time
+
+    if not is_connected():
+        print("[✗] Database not connected. Bot cannot start.")
+        sys.exit(1)
+
+    print("[→] Initializing database...")
+    init_db()
+
+    print("[→] Starting Telegram bot in foreground mode...")
+    print("[→] The bot will handle pipeline execution when you use /run command")
+    print("[→] Press Ctrl+C to stop")
+    print()
+
+    from app import App
+    app = App()
+    app.initialize()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[→] Stopping...")
+        app.shutdown()
+
+
+def main():
+    """Main entry point."""
+    command = sys.argv[1] if len(sys.argv) > 1 else "run"
+
+    if command in ("run", "gui"):
+        if not check_db_connection():
+            print("[✗] Database connectivity check failed. Application cannot start.")
+            sys.exit(1)
+
+        launch_gui()
+    elif command == "bot":
+        launch_bot()
+    elif command == "status":
+        check_db_connection()
+    else:
+        print(f"[✗] Unknown command: {command}")
+        print("[→] Usage: python main.py [run|gui|bot|status]")
         sys.exit(1)
 
 

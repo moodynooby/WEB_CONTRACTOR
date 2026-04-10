@@ -21,19 +21,25 @@ CONFIG = {
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # launch Streamlit
+uv run python main.py     # launch Tkinter desktop app
 ```
 
-## Service Manager (Cross-Platform)
+## Desktop Application (Cross-Platform)
 
-`main.py` is the service manager — works on Linux, macOS, and Windows.
+`main.py` launches the Tkinter desktop application — works on Linux, macOS, and Windows.
 
 ```bash
-uv run python main.py run       # Launch Streamlit (default)
-uv run python main.py bot       # Start Telegram bot (background)
-uv run python main.py status    # Show service status
-uv run python main.py stop      # Stop all services
+uv run python main.py run       # Launch Tkinter GUI (default)
+uv run python main.py gui       # Same as above
+uv run python main.py bot       # Start Telegram bot (foreground)
+uv run python main.py status    # Check database connection
 ```
+
+### Analytics Dashboard
+
+Click "View Analytics (Atlas)" in the GUI to open your MongoDB Atlas Charts dashboard.
+
+See [docs/atlas-charts-setup.md](docs/atlas-charts-setup.md) for setup instructions.
 
 ## Scripts
 

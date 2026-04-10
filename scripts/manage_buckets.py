@@ -19,7 +19,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -30,7 +29,6 @@ def check_db_connection() -> bool:
     Returns:
         True if database is reachable, False otherwise.
     """
-    # Load environment variables from .env file
     env_file = PROJECT_ROOT / ".env"
     if env_file.exists():
         load_dotenv(env_file)
@@ -130,13 +128,11 @@ def create_bucket_interactive():
     print("  This wizard uses AI to generate an optimized bucket configuration")
     print("  for your business type and target locations.\n")
     
-    # Get business type
     business_type = prompt("Business type (e.g., 'dentists', 'yoga studios')")
     if not business_type:
         print("  ✗ Business type is required")
         return
     
-    # Get target locations
     locations_str = prompt("Target locations (comma-separated, e.g., 'New York, Los Angeles, Chicago')")
     if not locations_str:
         print("  ✗ At least one location is required")
@@ -147,7 +143,6 @@ def create_bucket_interactive():
         print("  ✗ At least one valid location is required")
         return
     
-    # Get optional parameters
     max_queries_str = prompt("Max queries per run", "10")
     max_results_str = prompt("Max results per query", "50")
     
@@ -158,7 +153,6 @@ def create_bucket_interactive():
         print("  ✗ Invalid number format")
         return
     
-    # Generate bucket configuration
     print("\n[→] Generating bucket configuration with AI...")
     
     generator = BucketGenerator()
@@ -171,7 +165,6 @@ def create_bucket_interactive():
             max_results=max_results,
         )
         
-        # Validate configuration
         is_valid, errors = generator.validate_config(config)
         
         if not is_valid:
@@ -180,7 +173,6 @@ def create_bucket_interactive():
                 print(f"    - {error}")
             return
         
-        # Show generated configuration
         print("\n[✓] Generated configuration:")
         print(f"    Name: {config['name']}")
         print(f"    Categories: {len(config.get('categories', []))}")
@@ -188,13 +180,11 @@ def create_bucket_interactive():
         print(f"    Geographic Segments: {len(config.get('geographic_segments', []))}")
         print(f"    Priority: {config.get('priority', 'N/A')}")
         
-        # Confirm save
         save = prompt("\nSave this bucket to database?", "y")
         if save.lower() not in ["y", "yes"]:
             print("  ⚠️  Bucket not saved")
             return
         
-        # Save to database
         success, message = generator.save_config(config)
         
         if success:
@@ -352,14 +342,12 @@ def main():
     
     args = parser.parse_args()
     
-    # Check database connection first
     if not check_db_connection():
         print("\n[✗] Database connectivity check failed. Cannot proceed.")
         sys.exit(1)
     
     print()
     
-    # Handle non-interactive modes
     if args.list:
         list_buckets()
         return
@@ -378,7 +366,6 @@ def main():
         )
         return
     
-    # Interactive mode
     show_menu()
 
 
