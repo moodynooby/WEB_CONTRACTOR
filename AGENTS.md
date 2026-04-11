@@ -13,7 +13,8 @@ uv run python main.py run       # Launch PyQt6 GUI
 uv run python main.py bot       # Start Telegram bot
 uv run python main.py status    # Show service status
 uv run python main.py stop      # Stop all services
-
+uv run --active mkdocs build  # serve docs
+uv run --active mkdocs gh-deploy
 # Scripts:
 uv run python scripts/setup.py        # Interactive setup wizard
 

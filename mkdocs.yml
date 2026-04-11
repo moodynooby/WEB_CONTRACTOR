@@ -7,7 +7,7 @@ theme:
 plugins:
   - search
   - api-autonav:
-      modules: ["core", "ui"]
+      modules: ["src"]
   - mkdocstrings:
       handlers:
         python:

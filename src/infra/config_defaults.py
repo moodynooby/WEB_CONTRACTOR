@@ -18,14 +18,12 @@ CONFIG: dict = {
         "email_scrape_seconds": 10,
     },
     "llm": {
-        "provider": "groq",
         "timeout_seconds": 30,
         "max_retries": 3,
-
-        "groq": {"model": "llama-3.3-70b-versatile"},
-        "openrouter": {"model": "google/gemma-2-9b-it:free"},
-        "anthropic": {"model": "claude-sonnet-4-6"},
-        "gemini": {"model": "gemini-2.0-flash"},
+        # "groq": {"model": "llama-3.3-70b-versatile"},
+        # "openrouter": {"model": "google/gemma-2-9b-it:free"},
+        # "anthropic": {"model": "claude-sonnet-4-6"},
+        # "gemini": {"model": "gemini-2.0-flash"},
 
         "ollama": {
             "model": "llama3.2:latest",
@@ -113,24 +111,24 @@ CONFIG: dict = {
                 "max_results": 50,
                 "description": "Google Search for blog/platform websites",
             },
-            "justdial": {
-                "enabled": True,
-                "priority": 3,
-                "max_results": 50,
-                "description": "JustDial Indian business directory",
-            },
-            "sulekha": {
-                "enabled": True,
-                "priority": 5,
-                "max_results": 50,
-                "description": "Sulekha Indian community network",
-            },
-            "yellowpages": {
-                "enabled": True,
-                "priority": 4,
-                "max_results": 50,
-                "description": "YellowPages India",
-            },
+            # "justdial": {
+            #     "enabled": True,
+            #     "priority": 3,
+            #     "max_results": 50,
+            #     "description": "JustDial Indian business directory",
+            # },
+            # "sulekha": {
+            #     "enabled": True,
+            #     "priority": 5,
+            #     "max_results": 50,
+            #     "description": "Sulekha Indian community network",
+            # },
+            # "yellowpages": {
+            #     "enabled": True,
+            #     "priority": 4,
+            #     "max_results": 50,
+            #     "description": "YellowPages India",
+            # },
             "blogspot": {
                 "enabled": True,
                 "priority": 1,
@@ -143,12 +141,12 @@ CONFIG: dict = {
                 "max_results": 50,
                 "description": "WordPress.com sites",
             },
-            "wix": {
-                "enabled": True,
-                "priority": 1,
-                "max_results": 50,
-                "description": "Wix-hosted sites",
-            },
+            # "wix": {
+            #     "enabled": True,
+            #     "priority": 1,
+            #     "max_results": 50,
+            #     "description": "Wix-hosted sites",
+            # },
             "website_filter": {
                 "enabled": True,
                 "priority": 1,
