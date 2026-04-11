@@ -41,7 +41,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from playwright.sync_api import Playwright, Page, sync_playwright
 
-from infra.settings import DEFAULT_USER_AGENT, load_json_section
+from infra.settings import DEFAULT_USER_AGENT, get_section
 from infra.logging import get_logger
 from database.repository import (
     get_all_buckets,
@@ -76,13 +76,13 @@ def _get_playwright() -> Playwright:
 
 def _build_discovery_settings() -> dict[str, Any]:
     """Merge relevant sections into one flat dict."""
-    cfg = load_json_section("scraper") or {}
-    limits = load_json_section("discovery_limits") or {}
-    sources = load_json_section("discovery_sources") or {}
-    anti = load_json_section("anti_detection") or {}
-    parallel = load_json_section("parallel") or {}
-    scoring = load_json_section("query_scoring") or {}
-    perf = load_json_section("query_performance") or {}
+    cfg = get_section("scraper") or {}
+    limits = get_section("discovery_limits") or {}
+    sources = get_section("discovery_sources") or {}
+    anti = get_section("anti_detection") or {}
+    parallel = get_section("parallel") or {}
+    scoring = get_section("query_scoring") or {}
+    perf = get_section("query_performance") or {}
     all_cfg = {**cfg, **limits, **sources, **anti, **parallel, **scoring, **perf}
     from infra.settings import STALE_QUERY_THRESHOLD, STALE_QUERY_CLEANUP_DAYS
 
@@ -210,7 +210,7 @@ class PlaywrightScraper:
 
         buckets.sort(key=lambda b: b.get("priority", 1), reverse=True)
 
-        geo_focus = load_json_section("geographic_focus")
+        geo_focus = get_section("geographic_focus")
 
         stale_query_set = set()
         for bucket in buckets:

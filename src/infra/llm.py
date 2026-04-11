@@ -1,316 +1,88 @@
-"""LLM Client Module - Groq + OpenRouter with local provider support"""
+"""LLM Client — LiteLLM-backed with unified provider routing.
+
+Replaces the legacy requests-based provider pool with LiteLLM (included via ADK).
+Benefits:
+- 100+ providers via OpenAI-compatible API (Groq, OpenRouter, Gemini, Anthropic, Ollama, etc.)
+- Built-in retry/fallback via LiteLLM
+- No manual rate limiting or HTTP session management
+- Single config source (llm section in config_defaults.py)
+"""
 
 import json
-import threading
 import time
 from typing import Any
 
-import requests
+import litellm
 
-from infra.settings import (
-    GROQ_API_KEY,
-    OPENROUTER_API_KEY,
-    DEFAULT_PROVIDER,
-    DEFAULT_MODEL,
-    FALLBACK_MODEL,
-    LLM_TIMEOUT,
-    GROQ_BASE_URL,
-    OPENROUTER_BASE_URL,
-    DEFAULT_USER_AGENT,
-    LLM_MODE,
-    PERFORMANCE_MODE,
-    LOCAL_BASE_URL,
-    LOCAL_MODEL,
-    CONNECTION_TEST_TIMEOUT,
-    load_json_section,
-)
 from infra.logging import get_logger
-from infra.rate_limit import get_rate_protector
+from infra.settings import get_section
 
 logger = get_logger(__name__)
 
-_local = threading.local()
-
-
-def _initialize_rate_limiting():
-    """Initialize rate limiting based on config."""
-    protector = get_rate_protector()
-    config = load_json_section("llm")
-    rate_config = config.get("rate_limiting", {})
-
-    if not rate_config.get("enabled", True):
-        logger.info("Rate limiting disabled in configuration")
-        return
-
-    groq_config = rate_config.get("groq", {})
-    if groq_config:
-        protector.configure_provider(
-            provider_name="groq",
-            rpm_limit=groq_config.get("rpm_limit", 30),
-            tpm_limit=groq_config.get("tpm_limit", 60000),
-            rpd_limit=groq_config.get("rpd_limit", 10000),
-            enabled=True,
-            safety_buffer_pct=groq_config.get("safety_buffer_pct", 0.10),
-            cooldown_seconds=groq_config.get("cooldown_seconds", 60.0),
-        )
-
-    openrouter_config = rate_config.get("openrouter", {})
-    if openrouter_config:
-        protector.configure_provider(
-            provider_name="openrouter",
-            rpm_limit=openrouter_config.get("rpm_limit", 20),
-            tpm_limit=openrouter_config.get("tpm_limit", 40000),
-            rpd_limit=openrouter_config.get("rpd_limit", 5000),
-            enabled=True,
-            safety_buffer_pct=openrouter_config.get("safety_buffer_pct", 0.15),
-            cooldown_seconds=openrouter_config.get("cooldown_seconds", 90.0),
-        )
-
-    logger.info("Rate limiting initialized for cloud providers")
-
-
-_initialize_rate_limiting()
-
-
-def get_all_modes() -> list[dict[str, Any]]:
-    """Get all available performance modes from config."""
-    config = load_json_section("llm")
-    modes = config.get("performance_modes", [])
-    return [{"key": m["key"], **m} for m in modes]
-
-
-def get_mode_profile(mode: str) -> dict[str, Any]:
-    """Get a performance mode profile by name."""
-    modes = get_all_modes()
-    for m in modes:
-        if m["key"] == mode:
-            return m
-    available = [m["key"] for m in modes]
-    raise ValueError(f"Unknown mode: {mode}. Available: {available}")
-
-
-def get_all_local_providers() -> list[dict[str, Any]]:
-    """Get all available local providers from config."""
-    config = load_json_section("llm")
-    providers = config.get("local_providers", [])
-    return [{"key": p["key"], **p} for p in providers]
-
-
-def _build_providers() -> dict[str, Any]:
-    """Build PROVIDERS dict from config."""
-    from infra.settings import load_json_section
-
-    providers_config = load_json_section("providers")
-    openrouter_headers = providers_config.get("openrouter", {}).get("extra_headers", {})
-    return {
-        "groq": {
-            "api_key": GROQ_API_KEY,
-            "base_url": GROQ_BASE_URL,
-            "default_model": DEFAULT_MODEL,
-            "extra_headers": {},
-        },
-        "openrouter": {
-            "api_key": OPENROUTER_API_KEY,
-            "base_url": OPENROUTER_BASE_URL,
-            "default_model": FALLBACK_MODEL,
-            "extra_headers": openrouter_headers,
-        },
-        "local": {
-            "api_key": "",
-            "base_url": LOCAL_BASE_URL,
-            "default_model": LOCAL_MODEL,
-            "extra_headers": {},
-        },
-    }
-
-
-PROVIDERS = _build_providers()
-
 
 class LLMError(Exception):
-    """Raised on LLM API failures"""
-
+    """Raised on a single LLM API failure."""
     pass
 
 
 class ProviderError(LLMError):
-    """Raised when all providers fail"""
-
+    """Raised when all providers and retries are exhausted."""
     pass
 
 
-def get_session() -> requests.Session:
-    """Get thread-local HTTP session."""
-    if not hasattr(_local, "session"):
-        _local.session = requests.Session()
-        _local.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
-    return _local.session
+def _get_model_string() -> str:
+    """Get the LiteLLM-formatted model string from LLM config.
+
+    Returns model in LiteLLM format: "provider/model_name"
+    Examples: "groq/llama-3.3-70b-versatile", "openrouter/google/gemma-2-9b-it:free"
+    """
+    llm_config = get_section("llm")
+    provider = llm_config.get("provider", "groq")
+
+    if provider == "gemini":
+        gemini_cfg = llm_config.get("gemini", {})
+        model_id = gemini_cfg.get("model", "gemini-2.0-flash")
+        return f"gemini/{model_id}"
+
+    if provider == "ollama":
+        ollama_cfg = llm_config.get("ollama", {})
+        model_id = ollama_cfg.get("model", "llama3.2:latest")
+        base_url = ollama_cfg.get("base_url", "http://localhost:11434")
+        import os
+        os.environ.setdefault("OLLAMA_API_BASE", base_url)
+        return f"ollama/{model_id}"
+
+    if provider == "lm_studio":
+        lm_cfg = llm_config.get("lm_studio", {})
+        model_id = lm_cfg.get("model", "local-model")
+        base_url = lm_cfg.get("base_url", "http://localhost:1234/v1")
+        api_key = lm_cfg.get("api_key", "") or "lm-studio"
+        import os
+        os.environ.setdefault("OPENAI_API_BASE", base_url)
+        os.environ.setdefault("OPENAI_API_KEY", api_key)
+        return f"openai/{model_id}"
+
+    provider_cfg = llm_config.get(provider, {})
+    model_id = provider_cfg.get("model", "")
+
+    if not model_id:
+        logger.warning(f"No model configured for '{provider}', falling back to groq/llama-3.3-70b-versatile")
+        return "groq/llama-3.3-70b-versatile"
+
+    return f"{provider}/{model_id}"
 
 
-def is_llm_available() -> bool:
-    """Test if at least one LLM provider is available"""
-    if LLM_MODE == "local":
-        try:
-            session = get_session()
-            response = session.get(f"{LOCAL_BASE_URL}", timeout=CONNECTION_TEST_TIMEOUT)
-            if response.status_code == 200:
-                return True
-        except requests.exceptions.RequestException:
-            pass
-        return False
+def _get_api_keys() -> dict[str, str]:
+    """Ensure LiteLLM has the necessary API keys from environment."""
+    import os
+    from infra.settings import GROQ_API_KEY, OPENROUTER_API_KEY
 
-    for name, config in PROVIDERS.items():
-        if name == "local":
-            continue
-        if config["api_key"]:
-            try:
-                session = get_session()
-                session.headers.update({"Authorization": f"Bearer {config['api_key']}"})
-                response = session.get(
-                    f"{config['base_url']}/models", timeout=CONNECTION_TEST_TIMEOUT
-                )
-                if response.status_code == 200:
-                    return True
-            except requests.exceptions.RequestException:
-                pass
-    return False
+    if GROQ_API_KEY and not os.environ.get("GROQ_API_KEY"):
+        os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+    if OPENROUTER_API_KEY and not os.environ.get("OPENROUTER_API_KEY"):
+        os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
 
-
-def _construct_api_messages(
-    prompt: str | None,
-    system: str | None,
-) -> list[dict]:
-    """Build message list for API request."""
-    messages: list[dict] = []
-    if system:
-        messages.append({"role": "system", "content": _compact_system(system)})
-
-        messages.append({"role": "user", "content": prompt or ""})
-
-    return messages
-
-
-def _get_provider_headers(api_key: str, extra_headers: dict) -> dict:
-    """Build headers for provider API request."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    headers.update(extra_headers)
-    return headers
-
-
-def _handle_api_response(
-    response: requests.Response,
-    provider_name: str,
-    format_json: bool,
-) -> str:
-    """Handle API response and extract content."""
-    if response.status_code == 200:
-        response_json = response.json()
-        content = response_json["choices"][0]["message"]["content"]
-        if not content or content.strip() == "":
-            raise LLMError(f"Empty response from {provider_name}")
-
-        if format_json:
-            return _extract_json(content)
-        return content  # type: ignore[no-any-return]
-    elif response.status_code == 429:
-        raise LLMError(f"{provider_name} rate limit exceeded")
-    else:
-        raise LLMError(f"{provider_name} API error: {response.status_code}")
-
-
-def _generate_with_config(
-    model: str,
-    prompt: str | None,
-    system: str | None,
-    format_json: bool,
-    timeout: int,
-    provider_name: str,
-    api_key: str,
-    base_url: str,
-    extra_headers: dict,
-) -> str:
-    """Generate response using specified provider configuration."""
-    if provider_name != "local":
-        protector = get_rate_protector()
-        allowed, reason = protector.check_rate_limit(provider_name)
-        if not allowed:
-            logger.warning(f"Rate limit blocking {provider_name}: {reason}")
-            raise LLMError(f"Rate limit: {reason}")
-
-    session = get_session()
-    session.headers.update(_get_provider_headers(api_key, extra_headers))
-
-    messages = _construct_api_messages(prompt, system)
-
-    mode_profile = get_mode_profile(PERFORMANCE_MODE)
-    temperature = mode_profile.get("temperature", 0.1 if format_json else 0.3)
-    max_tokens = mode_profile.get("max_tokens", 2048)
-
-    timeout_multiplier = mode_profile.get("timeout_multiplier", 1.0)
-    adjusted_timeout = int(timeout * timeout_multiplier)
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-
-    if format_json:
-        payload["response_format"] = {"type": "json_object"}
-
-    try:
-        response = session.post(
-            f"{base_url}/chat/completions",
-            json=payload,
-            timeout=adjusted_timeout,
-        )
-
-        if response.status_code == 429:
-            if provider_name != "local":
-                protector = get_rate_protector()
-                protector.record_rate_limit_error(provider_name)
-            raise LLMError(f"{provider_name} rate limit exceeded")
-
-        content = _handle_api_response(response, provider_name, format_json)
-
-        if provider_name != "local":
-            protector = get_rate_protector()
-            estimated_tokens = len(content) // 4 if content else 0  
-            protector.record_request(provider_name, estimated_tokens)
-
-        return content
-
-    except requests.exceptions.Timeout:
-        raise LLMError(f"{provider_name} request timeout")
-    except requests.exceptions.RequestException as e:
-        raise LLMError(f"{provider_name} connection error: {e}")
-
-
-def _get_provider_order(provider: str | None):
-    """Get ordered list of (provider_name, model) to try."""
-    if provider:
-        if provider in PROVIDERS:
-            config = PROVIDERS[provider]
-            yield (provider, config["default_model"])
-            return
-
-    if LLM_MODE == "local":
-        if LOCAL_BASE_URL:
-            yield ("local", LOCAL_MODEL)
-    else:
-        primary = provider or DEFAULT_PROVIDER
-        if primary in PROVIDERS and primary != "local":
-            primary_config = PROVIDERS[primary]
-            if primary_config["api_key"]:
-                yield (primary, primary_config["default_model"])
-
-        for name, config in PROVIDERS.items():
-            if name != primary and name != "local" and config["api_key"]:
-                yield (name, config["default_model"])
+    return {}
 
 
 def generate(
@@ -318,128 +90,87 @@ def generate(
     prompt: str | None = None,
     system: str | None = None,
     format_json: bool = False,
-    timeout: int = LLM_TIMEOUT,
+    timeout: int = 30,
     provider: str | None = None,
+    max_retries: int = 3,
+    max_tokens: int = 2048,
 ) -> str:
-    """Generate text from LLM with automatic provider fallback.
+    """Generate text from LLM using LiteLLM.
 
     Args:
-        model: Model name (default: from env config)
-        prompt: User prompt
-        system: Optional system message
-        format_json: If True, request JSON output
-        timeout: Request timeout in seconds
-        provider: Force specific provider ("groq" or "openrouter")
+        model: Model name in LiteLLM format (e.g., "groq/llama-3.3-70b-versatile").
+               Overrides config default if provided.
+        prompt: User prompt.
+        system: Optional system message.
+        format_json: If True, request JSON output.
+        timeout: Request timeout in seconds.
+        provider: Unused — model param or config determines provider.
+        max_retries: Number of retry attempts on failure.
+        max_tokens: Maximum tokens for the response.
 
     Returns:
-        Raw response text from model
+        Generated text string.
 
     Raises:
-        ProviderError: If all providers fail
+        ProviderError: All retries exhausted.
     """
-    errors: list[str] = []
+    _get_api_keys()
 
-    for provider_name, provider_model in _get_provider_order(provider):
-        config = PROVIDERS[provider_name]
-        use_model = model or provider_model
+    model_str = model or _get_model_string()
 
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt or ""})
+
+    params: dict[str, Any] = {
+        "model": model_str,
+        "messages": messages,
+        "temperature": 0.5,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+    }
+
+    if format_json:
+        params["response_format"] = {"type": "json_object"}
+
+    last_error: Exception | None = None
+
+    for attempt in range(max_retries):
         try:
-            return _generate_with_config(
-                model=use_model,
-                prompt=prompt,
-                system=system,
-                format_json=format_json,
-                timeout=timeout,
-                provider_name=provider_name,
-                api_key=str(config["api_key"]),
-                base_url=str(config["base_url"]),
-                extra_headers=config["extra_headers"]
-                if isinstance(config["extra_headers"], dict)
-                else {},
-            )
-        except LLMError as e:
-            errors.append(f"{provider_name}: {e}")
-            continue
+            response = litellm.completion(**params)
+
+            content = response.choices[0].message.content
+            if not content or not content.strip():
+                raise LLMError("Empty response from LLM")
+
+            if format_json:
+                content = _extract_json(content)
+
+            logger.info(f"LLM success (attempt {attempt + 1}/{max_retries})")
+            return content
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"LLM attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                time.sleep(wait)
 
     raise ProviderError(
-        f"All providers failed. Errors: {'; '.join(errors)}. "
-        f"Mode: {LLM_MODE}, Performance: {PERFORMANCE_MODE}"
+        f"LLM failed after {max_retries} attempt(s). Last error: {last_error}"
     )
 
 
-def generate_with_retry(
-    model: str | None = None,
-    prompt: str | None = None,
-    system: str | None = None,
-    format_json: bool = False,
-    max_retries: int = 3,
-    timeout: int = LLM_TIMEOUT,
-    provider: str | None = None,
-) -> str:
-    """Generate with retry logic (for email operations).
-
-    Retries with exponential backoff on transient failures and
-    exponential timeout increase. Rate limits get longer backoff.
-    """
-    import random
-
-    last_error = None
-
-    for attempt in range(max_retries):
-        current_timeout = timeout * (2**attempt)
-
-        try:
-            return generate(
-                model=model,
-                prompt=prompt,
-                system=system,
-                format_json=format_json,
-                timeout=current_timeout,
-                provider=provider,
-            )
-        except LLMError as e:
-            last_error = e
-            error_str = str(e).lower()
-            is_rate_limit = "rate limit" in error_str
-
-            if attempt < max_retries - 1:
-                if is_rate_limit:
-                    base_wait = 10
-                    multiplier = 2 ** attempt
-                    wait_time = base_wait * multiplier + random.uniform(0, 2)
-                    logger.warning(
-                        f"Rate limit hit, waiting {wait_time:.1f}s before retry (attempt {attempt + 1}/{max_retries})"
-                    )
-                else:
-                    base_wait = 2
-                    jitter = random.uniform(0, 1)
-                    wait_time = (base_wait ** attempt) + jitter
-
-                time.sleep(wait_time)
-
-    raise ProviderError(f"Failed after {max_retries} attempts: {last_error}")
-
-
 def _extract_json(text: str) -> str:
-    """Extract JSON object from text that might contain filler."""
+    """Extract JSON object/array from text that may contain filler."""
     text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-
+    start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
-        start = text.find("[")
-        end = text.rfind("]")
-
+        start, end = text.find("["), text.rfind("]")
     if start != -1 and end != -1 and end > start:
-        return text[start : end + 1]
+        return text[start:end + 1]
     return text
-
-
-def _compact_system(system: str, max_length: int = 500) -> str:
-    """Compact system message for API calls."""
-    if len(system) <= max_length:
-        return system
-    return system[:max_length].strip()
 
 
 def generate_bucket_config(
@@ -448,53 +179,20 @@ def generate_bucket_config(
     max_queries: int = 10,
     max_results: int = 50,
 ) -> dict:
-    """Generate bucket configuration using LLM.
+    """Generate bucket configuration using LLM."""
+    system_message = (
+        "You create search bucket configurations for lead generation. Output ONLY JSON."
+    )
 
-    Args:
-        business_type: Type of business (e.g., "dentists", "yoga studios")
-        target_locations: List of target cities/regions
-        max_queries: Maximum queries per run (default: 10)
-        max_results: Maximum results per query (default: 50)
+    prompt = f"""Generate a bucket config for '{business_type}' targeting: {", ".join(target_locations) or "All India"}
 
-    Returns:
-        Dictionary with bucket configuration including:
-        - name: Bucket name
-        - categories: List of business categories
-        - search_patterns: List of search query patterns
-        - geographic_segments: List of locations
-        - intent_profile: User intent description
-        - priority: Priority level (1-5)
-        - monthly_target: Target leads per month
-        - daily_email_limit: Daily email limit
-
-    Raises:
-        LLMError: If LLM generation fails
-    """
-    system_message = """You are an expert at creating search bucket configurations for lead generation. 
-Your job is to analyze a business type and generate optimal search patterns that potential clients would use to find such businesses.
-
-Rules:
-1. Search patterns should be realistic queries people actually type
-2. Include variations with location modifiers
-3. Categories should cover related business types
-4. Keep it practical - max 10 search patterns
-5. All output MUST be valid JSON"""
-
-    locations_str = ", ".join(target_locations) if target_locations else "All India"
-
-    prompt = f"""Generate a bucket configuration for '{business_type}' businesses targeting: {locations_str}
-
-Return ONLY a JSON object with this exact structure (no markdown, no explanation):
+Return ONLY JSON:
 {{
   "name": "{business_type.lower().replace(" ", "_")}",
   "categories": ["{business_type}", "related category 1", "related category 2"],
-  "search_patterns": [
-    "best {{service}} in {{city}}",
-    "top rated {{service}} near me",
-    "affordable {{service}} {{city}}"
-  ],
+  "search_patterns": ["best {{service}} in {{city}}", "top {{service}} near me", "affordable {{service}} {{city}}"],
   "geographic_segments": {json.dumps(target_locations)},
-  "intent_profile": "Looking for professional {{service}} services in {{location}}",
+  "intent_profile": "Looking for professional {{service}} in {{location}}",
   "priority": 3,
   "monthly_target": 100,
   "max_queries": {max_queries},
@@ -502,52 +200,16 @@ Return ONLY a JSON object with this exact structure (no markdown, no explanation
   "daily_email_limit": 50
 }}
 
-IMPORTANT: 
-- Replace {{service}} with actual service terms for {business_type}
-- Include 5-10 realistic search patterns
-- Make categories specific to the business type
-- Return ONLY valid JSON, no other text"""
+Notes: replace {{service}} with {business_type} terms, 5-10 patterns, valid JSON only."""
 
     try:
         response = generate(
             prompt=prompt,
             system=system_message,
             format_json=True,
-            timeout=LLM_TIMEOUT * 2,
+            timeout=60,
         )
-
         config = json.loads(response)
-
-        required_fields = [
-            "name",
-            "categories",
-            "search_patterns",
-            "geographic_segments",
-        ]
-        missing_fields = [f for f in required_fields if f not in config]
-
-        if missing_fields:
-            raise LLMError(
-                f"LLM response missing required fields: {', '.join(missing_fields)}"
-            )
-
-        config["name"] = config["name"].lower().replace(" ", "_").replace("-", "_")
-
-        config.setdefault("intent_profile", f"Looking for {business_type} services")
-        config.setdefault("priority", 3)
-        config.setdefault("monthly_target", 100)
-        config.setdefault("max_queries", max_queries)
-        config.setdefault("max_results", max_results)
-        config.setdefault("daily_email_limit", 50)
-
-        config["priority"] = int(config.get("priority", 3))
-        config["monthly_target"] = int(config.get("monthly_target", 100))
-        config["max_queries"] = int(config.get("max_queries", max_queries))
-        config["max_results"] = int(config.get("max_results", max_results))
-        config["daily_email_limit"] = int(config.get("daily_email_limit", 50))
-
-        return config
-
     except json.JSONDecodeError as e:
         raise LLMError(f"Failed to parse LLM response as JSON: {e}")
     except LLMError:
@@ -555,33 +217,20 @@ IMPORTANT:
     except Exception as e:
         raise LLMError(f"Bucket generation failed: {e}")
 
+    required = ["name", "categories", "search_patterns", "geographic_segments"]
+    missing = [f for f in required if f not in config]
+    if missing:
+        raise LLMError(f"LLM response missing required fields: {', '.join(missing)}")
 
-def get_rate_limit_status(provider: str | None = None) -> dict[str, Any]:
-    """Get rate limit usage status for providers.
+    config["name"] = config["name"].lower().replace(" ", "_").replace("-", "_")
+    config.setdefault("intent_profile", f"Looking for {business_type} services")
+    config.setdefault("priority", 3)
+    config.setdefault("monthly_target", 100)
+    config.setdefault("max_queries", max_queries)
+    config.setdefault("max_results", max_results)
+    config.setdefault("daily_email_limit", 50)
 
-    Args:
-        provider: Specific provider name or None for all providers
+    for key in ("priority", "monthly_target", "max_queries", "max_results", "daily_email_limit"):
+        config[key] = int(config[key])
 
-    Returns:
-        Dictionary with rate limit usage statistics
-    """
-    protector = get_rate_protector()
-
-    if provider:
-        return protector.get_usage_stats(provider)
-    else:
-        stats = {}
-        for provider_name in ["groq", "openrouter"]:
-            stats[provider_name] = protector.get_usage_stats(provider_name)
-        return stats
-
-
-def reset_rate_limits(provider: str | None = None):
-    """Reset rate limit tracking.
-
-    Args:
-        provider: Specific provider name or None for all providers
-    """
-    protector = get_rate_protector()
-    protector.reset_stats(provider)
-    logger.info(f"Rate limits reset for {provider or 'all providers'}")
+    return config

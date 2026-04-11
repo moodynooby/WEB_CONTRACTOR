@@ -329,11 +329,6 @@ class EmailReviewDialog(QDialog):
                 except (json.JSONDecodeError, TypeError):
                     issues = []
 
-            critical_issues = [i for i in issues if i.get("severity") == "critical"]
-            warning_issues = [i for i in issues if i.get("severity") == "warning"]
-            top_issues = (critical_issues + warning_issues)[:3]
-            issues_text = "\n".join([f"- {i['description']}" for i in top_issues])
-
             email_config = self.email_generator.email_config
             bucket_templates = email_config.get("bucket_templates", {})
             bucket = lead.get("bucket", "default")
@@ -341,24 +336,27 @@ class EmailReviewDialog(QDialog):
             angle = bucket_template.get("angle", "")
             cta = bucket_template.get("cta", "")
 
-            prompt = email_config.get("prompt_template", "").format(
-                business_name=lead.get("business_name", ""),
-                bucket=bucket,
-                url=lead.get("website", ""),
-                issue_summary=issues_text,
+            from outreach.prompts import (
+                format_issues,
+                build_email_prompt,
+                get_email_system_message,
             )
 
-            if angle:
-                prompt += f"\n\nAngle: {angle}"
-            if cta:
-                prompt += f"\nCTA: {cta}"
-
-            system_message = email_config.get("system_message", "")
+            issues_text = format_issues(issues)
+            prompt = build_email_prompt(
+                business_name=lead.get("business_name", ""),
+                bucket=bucket,
+                issues_summary=issues_text,
+                url=lead.get("website", ""),
+                angle=angle,
+                cta=cta,
+            )
+            system_message = get_email_system_message()
             llm_config = self.email_generator.llm_config
 
             from infra import llm as llm_module
 
-            raw = llm_module.generate_with_retry(
+            raw = llm_module.generate(
                 model=llm_config.get("default_model", "llama-3.1-8b-instant"),
                 prompt=prompt,
                 system=system_message,

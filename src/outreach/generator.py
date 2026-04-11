@@ -8,7 +8,7 @@ from infra import llm
 from infra.settings import (
     DEFAULT_MODEL,
     EMAIL_MAX_RETRIES,
-    load_json_section,
+    get_section,
 )
 from infra.logging import get_logger
 from database.repository import (
@@ -24,8 +24,8 @@ class EmailGenerator:
 
     def __init__(self) -> None:
         self.logger = get_logger(self.__class__.__name__)
-        self.email_config = load_json_section("email_generation")
-        self.llm_config = load_json_section("llm")
+        self.email_config = get_section("email_generation")
+        self.llm_config = get_section("llm")
 
     def log(self, message: str, style: str = "") -> None:
         """Log message with level awareness."""
@@ -96,33 +96,31 @@ class EmailGenerator:
                 except (json.JSONDecodeError, TypeError):
                     issues = []
 
-            critical_issues = [i for i in issues if i.get("severity") == "critical"]
-            warning_issues = [i for i in issues if i.get("severity") == "warning"]
-            top_issues = (critical_issues + warning_issues)[:3]
-            issues_text = "\n".join([f"- {i['description']}" for i in top_issues])
-
             bucket_templates = self.email_config.get("bucket_templates", {})
             bucket_template = bucket_templates.get(lead.get("bucket", "default"), {})
             angle = bucket_template.get("angle", "")
             cta = bucket_template.get("cta", "")
 
-            prompt = self.email_config.get("prompt_template", "").format(
-                business_name=lead["business_name"],
-                bucket=lead.get("bucket", "default"),
-                url=lead["website"],
-                issue_summary=issues_text,
+            from outreach.prompts import (
+                format_issues,
+                build_email_prompt,
+                get_email_system_message,
             )
 
-            if angle:
-                prompt += f"\n\nAngle: {angle}"
-            if cta:
-                prompt += f"\nCTA: {cta}"
-
-            system_message = self.email_config.get("system_message", "")
+            issues_text = format_issues(issues)
+            prompt = build_email_prompt(
+                business_name=lead["business_name"],
+                bucket=lead.get("bucket", "default"),
+                issues_summary=issues_text,
+                url=lead["website"],
+                angle=angle,
+                cta=cta,
+            )
+            system_message = get_email_system_message()
 
             email_start = time.time()
             try:
-                raw = llm.generate_with_retry(
+                raw = llm.generate(
                     model=DEFAULT_MODEL,
                     prompt=prompt,
                     system=system_message,
@@ -184,18 +182,12 @@ class EmailGenerator:
             self.log("Email refinement disabled", "warning")
             return {"subject": subject, "body": body}
 
-        prompt = f"""Refine this cold email based on instructions.
+        from outreach.prompts import build_refine_prompt
 
-Instructions: {instructions}
-
-Current Subject: {subject}
-Current Body:
-{body}
-
-Return ONLY JSON: {{"subject": "refined subject line", "body": "refined email body"}}"""
+        prompt = build_refine_prompt(subject, body, instructions)
 
         try:
-            raw = llm.generate_with_retry(
+            raw = llm.generate(
                 model=llm_settings.get("default_model", "llama-3.1-8b-instant"),
                 prompt=prompt,
                 system="You are a professional email editor. Output ONLY valid JSON.",

@@ -1,6 +1,7 @@
 """Web Contractor - Application Layer
 
 Application services and business logic, independent of UI framework.
+Uses Google ADK for pipeline orchestration (SequentialAgent).
 """
 
 from typing import Callable
@@ -9,7 +10,10 @@ from database.connection import init_db, close_db
 from discovery.engine import PlaywrightScraper
 from outreach.sender import EmailSender
 from outreach.generator import EmailGenerator
-from audit.orchestrator import AuditOrchestrator
+from audit.adk_pipeline import (
+    run_pipeline,
+    run_audit_pipeline,
+)
 from infra.logging import get_logger
 
 
@@ -21,7 +25,6 @@ class WebContractorApp:
         self._scraper: PlaywrightScraper | None = None
         self._email_sender: EmailSender | None = None
         self._email_generator: EmailGenerator | None = None
-        self._orchestrator: AuditOrchestrator | None = None
         self._initialized = False
 
     def initialize(self) -> None:
@@ -34,7 +37,6 @@ class WebContractorApp:
 
         self.logger.info("Initializing services...")
         self._scraper = PlaywrightScraper()
-        self._orchestrator = AuditOrchestrator()
         self._email_sender = EmailSender()
         self._email_generator = EmailGenerator()
 
@@ -78,13 +80,6 @@ class WebContractorApp:
         return self._scraper
 
     @property
-    def orchestrator(self) -> AuditOrchestrator:
-        if not self._initialized:
-            self.initialize()
-        assert self._orchestrator is not None
-        return self._orchestrator
-
-    @property
     def email_sender(self) -> EmailSender:
         if not self._initialized:
             self.initialize()
@@ -121,18 +116,21 @@ class WebContractorApp:
         limit: int = 20,
         progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> dict:
-        """Run lead audit pipeline using multi-agent orchestrator."""
-        self.logger.info("Starting multi-agent audit...")
+        """Run lead audit pipeline using ADK SequentialAgent."""
+        self.logger.info("Starting ADK audit...")
         try:
-            result = self.orchestrator.run(
+            result = run_audit_pipeline(
                 limit=limit,
                 progress_callback=progress_callback,
             )
+            audit_data = result.get("audit", {})
+            audited = len(audit_data.get("agents_run", [])) if audit_data else 0
+            qualified = 1 if audit_data.get("qualified") else 0
             self.logger.info(
-                f"Audit complete: {result.get('audited', 0)} audited, "
-                f"{result.get('qualified', 0)} qualified"
+                f"Audit complete: {audited} audited, "
+                f"{qualified} qualified"
             )
-            return result
+            return {"audited": audited, "qualified": qualified}
         except Exception as e:
             self.logger.error(f"Audit failed: {e}")
             raise
@@ -162,25 +160,23 @@ class WebContractorApp:
         limit: int = 20,
         progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> dict:
-        """Run unified audit + email generation pipeline."""
-        self.logger.info("Starting unified pipeline...")
+        """Run unified audit + email generation pipeline using ADK SequentialAgent."""
+        self.logger.info("Starting ADK unified pipeline...")
         try:
-            audit_result = self.run_audit(
-                limit=limit, progress_callback=progress_callback
+            result = run_pipeline(
+                limit=limit,
+                include_discovery=False,
+                include_refinement_loop=False,
+                include_email_send=False,
+                progress_callback=progress_callback,
             )
-            email_result = self.generate_emails(limit=limit)
-
-            result = {
-                "processed": audit_result.get("audited", 0),
-                "qualified": audit_result.get("qualified", 0),
-                "emails_generated": email_result.get("generated", 0),
+            audit_data = result.get("audit", {})
+            email_data = result.get("email_generation", {})
+            return {
+                "processed": len(audit_data.get("agents_run", [])) if audit_data else 0,
+                "qualified": 1 if audit_data.get("qualified") else 0,
+                "emails_generated": email_data.get("emails_generated", 0) if email_data else 0,
             }
-            self.logger.info(
-                f"Pipeline complete: {result.get('processed', 0)} processed, "
-                f"{result.get('qualified', 0)} qualified, "
-                f"{result.get('emails_generated', 0)} emails generated"
-            )
-            return result
         except Exception as e:
             self.logger.error(f"Pipeline failed: {e}")
             raise

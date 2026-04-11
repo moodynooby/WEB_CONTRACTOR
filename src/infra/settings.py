@@ -1,11 +1,9 @@
 """Application Settings — single source of truth.
 
 All config in Python. Edit directly in infra/config_defaults.py.
-Optional override via infra/config_override.json (auto-generated if needed).
 Secrets (API keys, credentials) load from environment variables.
 """
 
-import json
 import os
 import warnings
 from importlib.util import module_from_spec, spec_from_file_location
@@ -21,18 +19,6 @@ load_dotenv(_ENV_FILE, override=True)
 
 CONFIG_DIR = PROJECT_ROOT / "src" / "infra"
 DEFAULT_CONFIG_FILE = CONFIG_DIR / "config_defaults.py"
-OVERRIDE_FILE = CONFIG_DIR / "config_override.json"
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def _load_config() -> dict[str, Any]:
@@ -46,27 +32,25 @@ def _load_config() -> dict[str, Any]:
 
     config = defaults.CONFIG
 
-    if OVERRIDE_FILE.exists():
-        with open(OVERRIDE_FILE, "r") as f:
-            override = json.load(f)
-        config = _deep_merge(config, override)
-
+  
     return config
 
 
+_cfg = _load_config()
+
+
 def _section(name: str) -> dict[str, Any]:
-    """Return a top-level section dict (empty if missing)."""
-    cfg = _load_config()
-    section = cfg.get(name)
+    """Return a top-level section dict from the already-loaded _cfg (empty if missing)."""
+    section = _cfg.get(name)
     return section if isinstance(section, dict) else {}
 
 
-def load_json_section(section: str) -> dict[str, Any]:
-    """Return a top-level section from config."""
-    return _section(section)
+def get_section(name: str) -> dict[str, Any]:
+    """Return a config section from the already-loaded _cfg dict.
 
-
-_cfg = _load_config()
+    This is an O(1) dict lookup — no file I/O or re-parsing.
+    """
+    return _section(name)
 
 LOG_LEVEL: Final[str] = _cfg.get("log_level", "INFO")
 
@@ -78,26 +62,20 @@ SMTP_SERVER: Final[str] = _email.get("smtp_server", "smtp.gmail.com")
 SMTP_PORT: Final[int] = _email.get("smtp_port", 587)
 
 _llm = _section("llm")
-LLM_MODE: Final[str] = _llm.get("mode", "cloud")
-PERFORMANCE_MODE: Final[str] = _llm.get("performance_mode", "cloud_standard")
+LLM_MODE: Final[str] = "cloud"  
 DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
-DEFAULT_MODEL: Final[str] = _llm.get("default_model", "llama-3.1-8b-instant")
-FALLBACK_MODEL: Final[str] = _llm.get("fallback_model", "google/gemma-2-2b-it:free")
+DEFAULT_MODEL: Final[str] = f"{DEFAULT_PROVIDER}/{_llm.get(DEFAULT_PROVIDER, {}).get('model', 'llama-3.3-70b-versatile')}"
+FALLBACK_MODEL: Final[str] = DEFAULT_MODEL
 LLM_TIMEOUT: Final[int] = _llm.get("timeout_seconds", 30)
 
-_local_llm = _llm.get("local", {})
-LOCAL_PROVIDER: Final[str] = _local_llm.get("provider", "ollama")
-LOCAL_BASE_URL: Final[str] = _local_llm.get("base_url", "http://localhost:11434/v1")
-LOCAL_MODEL: Final[str] = _local_llm.get("model", "llama3.2:latest")
-LOCAL_HARDWARE_PROFILE: Final[str] = _local_llm.get("hardware_profile", "auto")
+_local_llm = _llm.get("ollama", {})
+LOCAL_PROVIDER: Final[str] = "ollama"
+LOCAL_BASE_URL: Final[str] = _local_llm.get("base_url", "http://localhost:11434")
+LOCAL_MODEL: Final[str] = f"ollama/{_local_llm.get('model', 'llama3.2:latest')}"
+LOCAL_HARDWARE_PROFILE: Final[str] = "auto"
 
-_providers = _section("providers")
-GROQ_BASE_URL: Final[str] = _providers.get("groq", {}).get(
-    "base_url", "https://api.groq.com/openai/v1"
-)
-OPENROUTER_BASE_URL: Final[str] = _providers.get("openrouter", {}).get(
-    "base_url", "https://openrouter.ai/api/v1"
-)
+GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
+OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
 
 _timeouts = _section("timeouts")
 CONNECTION_TEST_TIMEOUT: Final[int] = _timeouts.get("connection_test_seconds", 5)
@@ -157,6 +135,15 @@ TELEGRAM_CHAT_ID: Final[str] = os.getenv("TELEGRAM_CHAT_ID", "")
 MONGODB_URI: Final[str] = os.getenv("MONGODB_URI", "")
 MONGODB_DATABASE: Final[str] = os.getenv("MONGODB_DATABASE", "web_contractor")
 
+OLLAMA_API_BASE: Final[str] = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+OLLAMA_MODEL: Final[str] = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+
+LM_STUDIO_API_BASE: Final[str] = os.getenv(
+    "LM_STUDIO_API_BASE", "http://localhost:1234/v1"
+)
+LM_STUDIO_MODEL: Final[str] = os.getenv("LM_STUDIO_MODEL", "local-model")
+LM_STUDIO_API_KEY: Final[str] = os.getenv("LM_STUDIO_API_KEY", "")
+
 
 def _validate_mongodb_uri(uri: str) -> bool:
     if not uri:
@@ -199,6 +186,29 @@ def _validate_secrets() -> None:
             "Telegram notifications not configured. Pipeline will run without notifications.",
             RuntimeWarning,
         )
+
+    import socket
+
+    for provider_name, url in [
+        ("Ollama", OLLAMA_API_BASE),
+        ("LM Studio", LM_STUDIO_API_BASE),
+    ]:
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((parsed.hostname or "localhost", parsed.port or 11434))
+            sock.close()
+            if result != 0:
+                warnings.warn(
+                    f"{provider_name} not reachable at {url}. "
+                    f"Start {provider_name} before using local LLM mode.",
+                    RuntimeWarning,
+                )
+        except Exception:
+            pass
 
     if MONGODB_URI and not _validate_mongodb_uri(MONGODB_URI):
         warnings.warn(
