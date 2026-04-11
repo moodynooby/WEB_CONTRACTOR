@@ -1,90 +1,35 @@
-"""Bucket Manager CLI - Interactive wizard for managing discovery buckets.
+"""Bucket Manager CLI - Unified interface for managing discovery buckets.
 
 Usage:
-    python scripts/manage_buckets.py          # Interactive mode
-    python scripts/manage_buckets.py --list   # List all buckets
-    python scripts/manage_buckets.py --create # Create bucket non-interactively
+    python scripts/manage_buckets.py              # Interactive mode
+    python scripts/manage_buckets.py --list       # List all buckets
+    python scripts/manage_buckets.py --create     # Create bucket non-interactively
 
 Features:
-- Create new buckets using AI-powered BucketConfigGenerator
+- Create new buckets using AI-powered BucketManager
 - List existing buckets with details
 - Delete buckets with confirmation
 - Database connectivity check before operations
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
-
-from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
 def check_db_connection() -> bool:
-    """Verify MongoDB connectivity before proceeding.
+    """Verify MongoDB connectivity before proceeding."""
+    from infra.db_health import check_db_connection as _check
 
-    Returns:
-        True if database is reachable, False otherwise.
-    """
-    env_file = PROJECT_ROOT / ".env"
-    if env_file.exists():
-        load_dotenv(env_file)
-
-    mongo_uri = os.getenv("MONGODB_URI")
-
-    if not mongo_uri:
-        print("[✗] MONGODB_URI not set in .env file")
-        print("[→] Configure MongoDB connection:")
-        print(
-            "    1. Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas"
-        )
-        print("    2. Add MONGODB_URI to your .env file")
-        print("")
-        print("[→] Or run the setup wizard: python scripts/setup.py")
-        return False
-
-    print("[→] Testing MongoDB connection...")
-
-    try:
-        from pymongo import MongoClient
-
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-        client.admin.command("ping")
-        client.close()
-
-        print("[✓] MongoDB connection successful")
-        return True
-
-    except ImportError:
-        print("[✗] pymongo not installed. Run: uv sync")
-        return False
-    except Exception as e:
-        print(f"[✗] MongoDB connection failed: {e}")
-        print("")
-        print("[→] Troubleshooting:")
-        print("    • Check your MONGODB_URI in .env file")
-        print("    • Ensure your IP is whitelisted in MongoDB Atlas")
-        return False
+    return _check(PROJECT_ROOT)
 
 
 def prompt(question: str, default: str = "") -> str:
-    """Prompt user for input with optional default.
-
-    Args:
-        question: The question to ask
-        default: Default value if user presses Enter
-
-    Returns:
-        User's input or default value
-    """
-    if default:
-        prompt_text = f"  {question} [{default}]: "
-    else:
-        prompt_text = f"  {question}: "
-
+    """Prompt user for input with optional default."""
+    prompt_text = f"  {question} [{default}]: " if default else f"  {question}: "
     try:
         answer = input(prompt_text).strip()
         return answer if answer else default
@@ -95,13 +40,13 @@ def prompt(question: str, default: str = "") -> str:
 
 def list_buckets():
     """List all existing buckets with details."""
-    from database.repository import get_all_buckets
+    from database.repository import BucketManager
 
     print("\n" + "=" * 70)
     print("  📦 Existing Buckets")
     print("=" * 70)
 
-    buckets = get_all_buckets()
+    buckets = BucketManager.list()
 
     if not buckets:
         print("\n  No buckets found. Use 'create' to add a new bucket.")
@@ -119,10 +64,25 @@ def list_buckets():
         print()
 
 
+def _do_create(business_type: str, locations: list[str], max_queries: int, max_results: int):
+    """Shared create logic used by both interactive and non-interactive modes."""
+    from database.repository import BucketManager
+
+    print(f"\n[→] Creating bucket for '{business_type}' in {len(locations)} locations...")
+
+    success, message = BucketManager.create(
+        business_type=business_type,
+        target_locations=locations,
+        max_queries=max_queries,
+        max_results=max_results,
+    )
+
+    print(f"  {'✓' if success else '✗'} {message}")
+    return success
+
+
 def create_bucket_interactive():
     """Interactive wizard to create a new bucket using AI."""
-    from discovery.engine import BucketConfigGenerator
-
     print("\n" + "=" * 70)
     print("  ✨ Create New Bucket (AI-Powered)")
     print("=" * 70)
@@ -143,131 +103,43 @@ def create_bucket_interactive():
         return
 
     target_locations = [loc.strip() for loc in locations_str.split(",") if loc.strip()]
-    if not target_locations:
-        print("  ✗ At least one valid location is required")
-        return
 
-    max_queries_str = prompt("Max queries per run", "10")
-    max_results_str = prompt("Max results per query", "50")
+    max_queries = int(prompt("Max queries per run", "10"))
+    max_results = int(prompt("Max results per query", "50"))
 
-    try:
-        max_queries = int(max_queries_str)
-        max_results = int(max_results_str)
-    except ValueError:
-        print("  ✗ Invalid number format")
-        return
+    success = _do_create(business_type, target_locations, max_queries, max_results)
 
-    print("\n[→] Generating bucket configuration with AI...")
+    if success:
+        from database.repository import BucketManager
 
-    generator = BucketConfigGenerator()
-
-    try:
-        config = generator.generate(
-            business_type=business_type,
-            target_locations=target_locations,
-            max_queries=max_queries,
-            max_results=max_results,
+        config = BucketManager.get_by_name(
+            business_type.lower().replace(" ", "_").replace("-", "_")
         )
-
-        is_valid, errors = generator.validate_config(config)
-
-        if not is_valid:
-            print("\n  ✗ Configuration validation failed:")
-            for error in errors:
-                print(f"    - {error}")
-            return
-
-        print("\n[✓] Generated configuration:")
-        print(f"    Name: {config['name']}")
-        print(f"    Categories: {len(config.get('categories', []))}")
-        print(f"    Search Patterns: {len(config.get('search_patterns', []))}")
-        print(f"    Geographic Segments: {len(config.get('geographic_segments', []))}")
-        print(f"    Priority: {config.get('priority', 'N/A')}")
-
-        save = prompt("\nSave this bucket to database?", "y")
-        if save.lower() not in ["y", "yes"]:
-            print("  ⚠️  Bucket not saved")
-            return
-
-        success, message = generator.save_config(config)
-
-        if success:
-            print(f"\n  ✓ {message}")
-        else:
-            print(f"\n  ✗ {message}")
-
-    except Exception as e:
-        print(f"\n  ✗ Generation failed: {e}")
-        print("  💡 Check your Groq API key in .env file")
+        if config:
+            print("\n  Generated configuration:")
+            print(f"    Categories: {len(config.get('categories', []))}")
+            print(f"    Search Patterns: {len(config.get('search_patterns', []))}")
+            print(f"    Geographic Segments: {len(config.get('geographic_segments', []))}")
+            print(f"    Priority: {config.get('priority', 'N/A')}")
 
 
 def create_bucket_non_interactive(
     business_type: str, locations: str, max_queries: int, max_results: int
 ):
-    """Create bucket without interaction (for scripting/automation).
-
-    Args:
-        business_type: Type of business
-        locations: Comma-separated locations
-        max_queries: Max queries per run
-        max_results: Max results per query
-    """
-    from discovery.engine import BucketConfigGenerator
-
+    """Create bucket without interaction (for scripting/automation)."""
     target_locations = [loc.strip() for loc in locations.split(",") if loc.strip()]
-
-    if not business_type:
-        print("✗ Business type is required (--business-type)")
-        sys.exit(1)
-
-    if not target_locations:
-        print("✗ At least one location is required (--locations)")
-        sys.exit(1)
-
-    print(
-        f"[→] Creating bucket for '{business_type}' in {len(target_locations)} locations..."
-    )
-
-    generator = BucketConfigGenerator()
-
-    try:
-        config = generator.generate(
-            business_type=business_type,
-            target_locations=target_locations,
-            max_queries=max_queries,
-            max_results=max_results,
-        )
-
-        is_valid, errors = generator.validate_config(config)
-
-        if not is_valid:
-            print("✗ Configuration validation failed:")
-            for error in errors:
-                print(f"  - {error}")
-            sys.exit(1)
-
-        success, message = generator.save_config(config)
-
-        if success:
-            print(f"✓ {message}")
-        else:
-            print(f"✗ {message}")
-            sys.exit(1)
-
-    except Exception as e:
-        print(f"✗ Generation failed: {e}")
-        sys.exit(1)
+    _do_create(business_type, target_locations, max_queries, max_results)
 
 
 def delete_bucket():
     """Delete a bucket with confirmation."""
-    from database.repository import get_all_buckets, delete_bucket
+    from database.repository import BucketManager
 
     print("\n" + "=" * 70)
     print("  🗑️  Delete Bucket")
     print("=" * 70)
 
-    buckets = get_all_buckets()
+    buckets = BucketManager.list()
 
     if not buckets:
         print("\n  No buckets to delete")
@@ -291,21 +163,15 @@ def delete_bucket():
             return
 
         bucket = buckets[idx]
-        bucket_name = bucket["name"]
-
         confirm = prompt(
-            f"Delete bucket '{bucket_name}' and all related data? (y/N)", "n"
+            f"Delete bucket '{bucket['name']}' and all related data? (y/N)", "n"
         )
         if confirm.lower() not in ["y", "yes"]:
             print("  ⚠️  Deletion cancelled")
             return
 
-        success, message = delete_bucket(bucket["id"], cascade=True)
-
-        if success:
-            print(f"  ✓ {message}")
-        else:
-            print(f"  ✗ {message}")
+        success, message = BucketManager.delete(bucket["id"], cascade=True)
+        print(f"  {'✓' if success else '✗'} {message}")
 
     except ValueError:
         print("  ✗ Invalid input. Please enter a number.")

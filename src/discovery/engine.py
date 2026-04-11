@@ -37,7 +37,8 @@ References:
 import json
 import threading
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from logging import Logger
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from playwright.sync_api import Playwright, Page, sync_playwright
 
@@ -91,7 +92,29 @@ def _build_discovery_settings() -> dict[str, Any]:
     return all_cfg
 
 
-class PlaywrightScraper:
+class _LoggableMixin:
+    """Mixin that provides style-aware logging via a self.logger attribute."""
+
+    logger: Logger
+
+    def log(self, message: str, style: str = "") -> None:
+        """Log message with level awareness.
+
+        Args:
+            message: Log message.
+            style: One of 'error', 'warning', 'success', or '' for debug.
+        """
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
+
+
+class PlaywrightScraper(_LoggableMixin):
     """Consolidated Stage 0 (Planning) + Stage A (Scraping).
 
     Handles query generation and lead scraping using Playwright browser
@@ -127,17 +150,6 @@ class PlaywrightScraper:
     @buckets.setter
     def buckets(self, value: list[dict[str, Any]]) -> None:
         self._buckets_cache = value
-
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness."""
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
 
     @contextmanager
     def managed_session(self):
@@ -297,7 +309,7 @@ class PlaywrightScraper:
         query_data: Dict,
         bucket_max_results: Optional[int],
         query_perf: Optional[Any],
-    ) -> Tuple[List[Dict], Optional[Any]]:
+    ) -> tuple[list[dict], Optional[Any]]:
         """Scrape a query across all enabled sources sequentially.
 
         ⚠️  THREAD-SAFETY: Playwright sync API is NOT thread-safe.
@@ -524,134 +536,3 @@ class PlaywrightScraper:
         }
 
 
-class BucketConfigGenerator:
-    """AI-powered bucket configuration generator."""
-
-    def __init__(self):
-        self.logger = get_logger(__name__)
-
-    def generate(
-        self,
-        business_type: str,
-        target_locations: list[str],
-        max_queries: int = 10,
-        max_results: int = 50,
-    ) -> dict[str, Any]:
-        """Generate bucket configuration using LLM.
-
-        Args:
-            business_type: Type of business (e.g., "dentists", "yoga studios")
-            target_locations: List of target cities/regions
-            max_queries: Maximum queries per run
-            max_results: Maximum results per query
-
-        Returns:
-            Dictionary with complete bucket configuration
-
-        Raises:
-            Exception: If generation fails
-        """
-        from infra.llm import generate_bucket_config
-
-        self.logger.info(
-            f"Generating bucket config for '{business_type}' in {len(target_locations)} locations"
-        )
-
-        try:
-            config = generate_bucket_config(
-                business_type=business_type,
-                target_locations=target_locations,
-                max_queries=max_queries,
-                max_results=max_results,
-            )
-
-            self.logger.info(f"Generated bucket config: {config['name']}")
-            return config
-
-        except Exception as e:
-            self.logger.error(f"Bucket generation failed: {e}")
-            raise
-
-    def validate_config(self, config: dict[str, Any]) -> tuple[bool, list[str]]:
-        """Validate bucket configuration before saving.
-
-        Args:
-            config: Bucket configuration dict
-
-        Returns:
-            Tuple of (is_valid, list_of_errors)
-        """
-        errors = []
-
-        if not config.get("name"):
-            errors.append("Bucket name is required")
-        elif len(config["name"]) < 3:
-            errors.append("Bucket name must be at least 3 characters")
-        elif len(config["name"]) > 50:
-            errors.append("Bucket name must be less than 50 characters")
-
-        if not config.get("categories"):
-            errors.append("At least one category is required")
-        elif len(config["categories"]) > 10:
-            errors.append("Maximum 10 categories allowed")
-
-        if not config.get("search_patterns"):
-            errors.append("At least one search pattern is required")
-        elif len(config["search_patterns"]) > 20:
-            errors.append("Maximum 20 search patterns allowed")
-
-        if not config.get("geographic_segments"):
-            errors.append("At least one geographic segment is required")
-
-        if config.get("priority") and not (1 <= config["priority"] <= 5):
-            errors.append("Priority must be between 1 and 5")
-
-        if config.get("monthly_target", 0) < 0:
-            errors.append("Monthly target must be non-negative")
-
-        if config.get("max_queries", 0) <= 0:
-            errors.append("Max queries must be greater than 0")
-
-        if config.get("max_results", 0) <= 0:
-            errors.append("Max results must be greater than 0")
-
-        if config.get("daily_email_limit", 0) <= 0:
-            errors.append("Daily email limit must be greater than 0")
-
-        return (len(errors) == 0, errors)
-
-    def save_config(self, config: dict[str, Any]) -> tuple[bool, str]:
-        """Save bucket configuration to database.
-
-        Args:
-            config: Validated bucket configuration
-
-        Returns:
-            Tuple of (success, message)
-        """
-        from database.repository import save_bucket, get_bucket_by_name
-        from database.connection import is_connected
-
-        try:
-            if not is_connected():
-                return (
-                    False,
-                    "Database not connected. Please configure MONGODB_URI in your .env file. "
-                    "Get a free MongoDB Atlas cluster at: https://www.mongodb.com/atlas",
-                )
-
-            existing = get_bucket_by_name(config["name"])
-            if existing:
-                return (False, f"Bucket '{config['name']}' already exists")
-
-            result = save_bucket(config)
-
-            if result and result.get("id"):
-                self.logger.info(f"Bucket '{config['name']}' saved successfully")
-                return (True, f"Bucket '{config['name']}' created successfully")
-            else:
-                return (False, "Failed to save bucket to database")
-
-        except Exception as e:
-            self.logger.error(f"Error saving bucket: {e}")
-            return (False, f"Error saving bucket: {str(e)}")

@@ -3,17 +3,11 @@
 Features:
 - Connection pooling with configurable limits
 - Health check / ping mechanism
-- TTL-based cleanup for pending writes
 - Email campaign statistics helpers
 - Thread-safe initialization
 """
 
-import json
-import os
-import tempfile
 import threading
-import time
-from pathlib import Path
 from typing import Any
 
 from pymongo import MongoClient
@@ -39,14 +33,6 @@ _database: Any | None = None
 _db_lock = threading.Lock()
 _is_initialized = False
 _is_healthy = False
-
-
-_PENDING_WRITES_DIR = Path(__file__).parent.parent / "data" / "pending_writes"
-_PENDING_WRITES_DIR.mkdir(parents=True, exist_ok=True)
-_pending_writes_lock = threading.Lock()
-PENDING_WRITES_TTL_DAYS = 7
-
-logger.debug(f"Pending writes directory: {_PENDING_WRITES_DIR}")
 
 
 def is_initialized() -> bool:
@@ -231,124 +217,6 @@ def close_db() -> None:
                 _database = None
                 _is_initialized = False
                 _is_healthy = False
-
-
-def defer_database_write(operation: str, data: dict) -> None:
-    """Queue a database write to disk when DB is unreachable.
-
-    Args:
-        operation: One of 'insert_one', 'insert_many', 'update_one', 'delete_one'
-        data: Dict with 'collection' key and operation-specific data
-    """
-    with _pending_writes_lock:
-        timestamp = time.time()
-        write_entry = {
-            "timestamp": timestamp,
-            "operation": operation,
-            "payload": data,
-        }
-        write_file = _PENDING_WRITES_DIR / f"write_{timestamp}.json"
-        try:
-            fd, tmp_path = tempfile.mkstemp(dir=str(_PENDING_WRITES_DIR), suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w") as tmp_f:
-                    json.dump(write_entry, tmp_f)
-                os.replace(tmp_path, str(write_file))
-            except Exception:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                raise
-            logger.warning(f"Queued pending write to disk: {write_file.name}")
-        except Exception as e:
-            logger.error(f"Failed to queue pending write: {e}")
-
-
-def replay_deferred_writes() -> int:
-    """Retry all pending disk writes when DB connection is restored.
-
-    Returns:
-        Number of successfully flushed writes
-    """
-    if not is_connected():
-        logger.warning("Cannot flush pending writes: DB not connected")
-        return 0
-
-    with _pending_writes_lock:
-        write_files = sorted(_PENDING_WRITES_DIR.glob("write_*.json"))
-        if not write_files:
-            return 0
-
-        flushed = 0
-        for write_file in write_files:
-            try:
-                with open(write_file) as f:
-                    entry = json.load(f)
-
-                db = _database
-                if db is None:
-                    break
-
-                collection_name = entry["payload"].get("collection")
-                if not collection_name:
-                    continue
-
-                collection = db[collection_name]
-                operation = entry["operation"]
-                payload = entry["payload"]
-
-                if operation == "insert_one":
-                    collection.insert_one(payload)
-                elif operation == "insert_many":
-                    collection.insert_many(payload.get("documents", []), ordered=False)
-                elif operation == "update_one":
-                    collection.update_one(
-                        payload.get("filter", {}), payload.get("update", {})
-                    )
-                elif operation == "delete_one":
-                    collection.delete_one(payload.get("filter", {}))
-                else:
-                    logger.warning(f"Unknown operation: {operation}")
-                    continue
-
-                write_file.unlink()
-                flushed += 1
-                logger.info(f"Flushed pending write: {write_file.name}")
-
-            except Exception as e:
-                logger.error(f"Failed to flush pending write {write_file.name}: {e}")
-
-        if flushed > 0:
-            logger.info(f"Flushed {flushed} pending writes to DB")
-
-        return flushed
-
-
-def cleanup_old_pending_writes(max_age_days: int = PENDING_WRITES_TTL_DAYS) -> int:
-    """Remove pending writes older than TTL to prevent disk bloat.
-
-    Returns:
-        Number of cleaned up files
-    """
-    with _pending_writes_lock:
-        cutoff_time = time.time() - (max_age_days * 86400)
-        cleaned = 0
-
-        for write_file in _PENDING_WRITES_DIR.glob("write_*.json"):
-            try:
-                file_mtime = write_file.stat().st_mtime
-                if file_mtime < cutoff_time:
-                    write_file.unlink()
-                    cleaned += 1
-                    logger.debug(f"Cleaned up old pending write: {write_file.name}")
-            except Exception as e:
-                logger.error(f"Failed to cleanup pending write {write_file.name}: {e}")
-
-        if cleaned > 0:
-            logger.info(
-                f"Cleaned up {cleaned} old pending writes (> {max_age_days} days)"
-            )
-
-        return cleaned
 
 
 def get_email_campaign_stats() -> dict[str, Any]:

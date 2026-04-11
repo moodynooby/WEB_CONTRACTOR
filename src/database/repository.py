@@ -20,8 +20,8 @@ from pymongo import UpdateOne, ReturnDocument
 
 from database.connection import (
     get_database,
-    defer_database_write,
     DatabaseUnavailableError,
+    is_connected,
 )
 from infra.logging import get_logger
 
@@ -225,6 +225,141 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
         return (False, f"Error deleting bucket: {e}")
 
 
+class BucketManager:
+    """Unified bucket management - CRUD + AI-powered config generation.
+
+    This class consolidates all bucket operations:
+    - create(): Generate bucket config via LLM and save to database
+    - list(): Get all buckets
+    - delete(): Delete a bucket with optional cascade
+    - get_by_name(): Look up a bucket by name
+    - validate(): Validate a bucket config before saving
+    """
+
+    @staticmethod
+    def create(
+        business_type: str,
+        target_locations: list[str],
+        max_queries: int = 10,
+        max_results: int = 50,
+    ) -> tuple[bool, str]:
+        """Create a new bucket using AI-powered config generation.
+
+        Args:
+            business_type: Type of business (e.g., "dentists", "yoga studios")
+            target_locations: List of target cities/regions
+            max_queries: Maximum queries per run
+            max_results: Maximum results per query
+
+        Returns:
+            Tuple of (success, message)
+        """
+        from infra.llm import generate_bucket_config
+
+        if not business_type:
+            return (False, "Business type is required")
+        if not target_locations:
+            return (False, "At least one target location is required")
+
+        try:
+            config = generate_bucket_config(
+                business_type=business_type,
+                target_locations=target_locations,
+                max_queries=max_queries,
+                max_results=max_results,
+            )
+        except Exception as e:
+            return (False, f"LLM generation failed: {e}")
+
+        is_valid, errors = BucketManager.validate(config)
+        if not is_valid:
+            return (False, f"Validation failed: {'; '.join(errors)}")
+
+        return BucketManager._save(config)
+
+    @staticmethod
+    def validate(config: dict[str, Any]) -> tuple[bool, list[str]]:
+        """Validate bucket configuration before saving.
+
+        Args:
+            config: Bucket configuration dict
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+        """
+        errors = []
+
+        if not config.get("name"):
+            errors.append("Bucket name is required")
+        elif len(config["name"]) < 3:
+            errors.append("Bucket name must be at least 3 characters")
+        elif len(config["name"]) > 50:
+            errors.append("Bucket name must be less than 50 characters")
+
+        if not config.get("categories"):
+            errors.append("At least one category is required")
+        elif len(config["categories"]) > 10:
+            errors.append("Maximum 10 categories allowed")
+
+        if not config.get("search_patterns"):
+            errors.append("At least one search pattern is required")
+        elif len(config["search_patterns"]) > 20:
+            errors.append("Maximum 20 search patterns allowed")
+
+        if not config.get("geographic_segments"):
+            errors.append("At least one geographic segment is required")
+
+        if config.get("priority") and not (1 <= config["priority"] <= 5):
+            errors.append("Priority must be between 1 and 5")
+
+        if config.get("monthly_target", 0) < 0:
+            errors.append("Monthly target must be non-negative")
+
+        if config.get("max_queries", 0) <= 0:
+            errors.append("Max queries must be greater than 0")
+
+        if config.get("max_results", 0) <= 0:
+            errors.append("Max results must be greater than 0")
+
+        if config.get("daily_email_limit", 0) <= 0:
+            errors.append("Daily email limit must be greater than 0")
+
+        return (len(errors) == 0, errors)
+
+    @staticmethod
+    def list() -> list[dict[str, Any]]:
+        """Get all buckets."""
+        return get_all_buckets()
+
+    @staticmethod
+    def get_by_name(name: str) -> dict[str, Any] | None:
+        """Get bucket by name."""
+        return get_bucket_by_name(name)
+
+    @staticmethod
+    def delete(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
+        """Delete a bucket with optional cascade delete of related data."""
+        return delete_bucket(bucket_id, cascade=cascade)
+
+    @staticmethod
+    def _save(config: dict[str, Any]) -> tuple[bool, str]:
+        """Internal: save config to database after validation."""
+        if not is_connected():
+            return (
+                False,
+                "Database not connected. Please configure MONGODB_URI in your .env file.",
+            )
+
+        existing = get_bucket_by_name(config["name"])
+        if existing:
+            return (False, f"Bucket '{config['name']}' already exists")
+
+        result = save_bucket(config)
+        if result and result.get("id"):
+            return (True, f"Bucket '{config['name']}' created successfully")
+        return (False, "Failed to save bucket to database")
+
+
 def count_leads_pending_audit() -> int:
     """Count leads pending audit (lightweight, no aggregation pipeline).
 
@@ -330,8 +465,6 @@ def save_leads_batch(leads: list[dict[str, Any]]) -> int:
         return result.upserted_count
     except Exception as e:
         logger.error(f"Error saving leads batch: {e}")
-        for lead in leads:
-            defer_database_write("insert_one", {"collection": "leads", **lead})
         return 0
 
 
@@ -542,10 +675,6 @@ def save_emails_batch(emails: list[dict[str, Any]]) -> int:
         return len(result.inserted_ids)
     except Exception as e:
         logger.error(f"Error saving emails: {e}")
-        for email in emails:
-            defer_database_write(
-                "insert_one", {"collection": "email_campaigns", **email}
-            )
         return 0
 
 

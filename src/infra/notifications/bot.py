@@ -270,13 +270,9 @@ def _handle_leads() -> str:
 
 def _handle_buckets() -> str:
     try:
-        from database.connection import get_database
+        from database.repository import BucketManager
 
-        db = get_database()
-        if db is None:
-            return "⚠️ Database not connected"
-
-        buckets = list(db.buckets.find({}, {"name": 1, "priority": 1, "daily_email_limit": 1}))
+        buckets = BucketManager.list()
         if not buckets:
             return "📭 No buckets configured"
 

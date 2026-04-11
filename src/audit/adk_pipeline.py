@@ -22,6 +22,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from audit.adk_agents import _run_adk_session
 from infra.adk_tools import (
     fetch_website,
     discover_leads,
@@ -245,58 +246,21 @@ async def run_pipeline_async(
     include_email_send: bool = False,
     progress_callback: Callable | None = None,
 ) -> dict[str, Any]:
-    """Run the full pipeline asynchronously.
-
-    Args:
-        limit: Number of leads to process.
-        include_discovery: Whether to run discovery first.
-        include_refinement_loop: Whether to use iterative email refinement.
-        include_email_send: Whether to send emails after generation.
-        progress_callback: Optional callback(current, total, message).
-
-    Returns:
-        Pipeline result summary.
-    """
+    """Run the full pipeline asynchronously."""
     agent = build_full_pipeline(
         include_discovery=include_discovery,
         include_refinement_loop=include_refinement_loop,
         include_email_send=include_email_send,
     )
 
-    session_service = InMemorySessionService()
-    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
-
     session_id = f"pipeline_{limit}"
-    await session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
-    )
-
     message = f"Run pipeline with limit={limit}"
     if include_discovery:
         message += ", including discovery"
 
-    user_content = types.Content(role="user", parts=[types.Part(text=message)])
-
-    stage_progress = {"current": 0}
-
-    async for event in runner.run_async(
-        user_id=USER_ID,
-        session_id=session_id,
-        new_message=user_content,
-    ):
-        if event.author and event.is_final_response():
-            stage_progress["current"] += 1
-            if progress_callback:
-                progress_callback(
-                    stage_progress["current"],
-                    4,  
-                    f"Stage complete: {event.author}",
-                )
-
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
+    state = await _run_pipeline_session(
+        agent, message, session_id, progress_callback,
     )
-    state = dict(session.state) if session is not None and session.state else {}
 
     return {
         "discovery": state.get("discovery_result"),
@@ -305,6 +269,34 @@ async def run_pipeline_async(
         "email_review": state.get("email_review_result"),
         "email_send": state.get("email_send_result"),
     }
+
+
+async def _run_pipeline_session(
+    agent, message: str, session_id: str, progress_callback: Callable | None,
+) -> dict[str, Any]:
+    """Run a pipeline agent session and return state."""
+    session_service = InMemorySessionService()
+    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
+
+    await session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
+    )
+
+    user_content = types.Content(role="user", parts=[types.Part(text=message)])
+    stage_progress = {"current": 0}
+
+    async for event in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=user_content,
+    ):
+        if event.author and event.is_final_response():
+            stage_progress["current"] += 1
+            if progress_callback:
+                progress_callback(stage_progress["current"], 4, f"Stage complete: {event.author}")
+
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
+    )
+    return dict(session.state) if session is not None and session.state else {}
 
 
 def run_pipeline(
@@ -329,47 +321,19 @@ async def run_audit_pipeline_async(
     limit: int = 20,
     progress_callback: Callable | None = None,
 ) -> dict[str, Any]:
-    """Run only the audit stage of the pipeline.
-
-    Args:
-        limit: Number of leads to audit.
-        progress_callback: Optional callback.
-
-    Returns:
-        Audit result summary.
-    """
+    """Run only the audit stage of the pipeline."""
     agent = SequentialAgent(
         name="audit_only_pipeline",
         sub_agents=[create_audit_agent()],
         description="Audit-only pipeline.",
     )
 
-    session_service = InMemorySessionService()
-    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
-
     session_id = f"audit_pipeline_{limit}"
-    await session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
+    state = await _run_adk_session(
+        agent, f"Audit {limit} pending leads", session_id,
     )
 
-    user_content = types.Content(
-        role="user",
-        parts=[types.Part(text=f"Audit {limit} pending leads")],
-    )
-
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session_id, new_message=user_content,
-    ):
-        pass
-
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
-    )
-    state = dict(session.state) if session is not None and session.state else {}
-
-    return {
-        "audit": state.get("audit_result"),
-    }
+    return {"audit": state.get("audit_result")}
 
 
 def run_audit_pipeline(

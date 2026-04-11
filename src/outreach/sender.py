@@ -3,6 +3,7 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from logging import Logger
 
 from infra.settings import (
     EMAIL_SIGNATURE,
@@ -15,7 +16,29 @@ from infra.logging import get_logger
 from database.repository import mark_email_sent
 
 
-class EmailSender:
+class _LoggableMixin:
+    """Mixin that provides style-aware logging via a self.logger attribute."""
+
+    logger: Logger
+
+    def log(self, message: str, style: str = "") -> None:
+        """Log message with level awareness.
+
+        Args:
+            message: Log message.
+            style: One of 'error', 'warning', 'success', or '' for debug.
+        """
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
+
+
+class EmailSender(_LoggableMixin):
     """SMTP Email Sender for outbound campaigns.
 
     Handles email delivery via Gmail SMTP with:
@@ -26,23 +49,12 @@ class EmailSender:
     """
 
     def __init__(self) -> None:
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = get_logger(__name__)
         self.smtp_server = SMTP_SERVER
         self.smtp_port = SMTP_PORT
         self.email = GMAIL_EMAIL
         self.password = GMAIL_PASSWORD
         self.email_signature = EMAIL_SIGNATURE
-
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness."""
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
 
     def send_email(
         self,

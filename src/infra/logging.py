@@ -1,12 +1,7 @@
-"""Standard Python Logging Setup for Web Contractor.
+"""Standard Python Logging for Web Contractor.
 
-Provides a unified logging configuration across all modules.
-No file logging - logs go to console (stderr) only.
-
-Features:
-- Colored console output with symbols
-- Thread-safe log streaming for GUI consumers
-- Multiple subscriber support
+Centralized logging with colored console output and GUI streaming.
+All logs go to stderr and GUI consumers via LogStreamer.
 """
 
 import logging
@@ -33,51 +28,39 @@ SYMBOLS = {
     "CRITICAL": "🚨",
 }
 
+_FORMAT = "[%(asctime)s] %(levelname)s (%(name)s) - %(message)s"
+_DATEFMT = "%H:%M:%S"
+
 
 class ColoredFormatter(logging.Formatter):
-    """Custom formatter with colors and symbols for console output."""
+    """Formatter with colors and symbols for console output."""
 
     def format(self, record: logging.LogRecord) -> str:
         color = COLORS.get(record.levelname, COLORS["RESET"])
         symbol = SYMBOLS.get(record.levelname, "")
         reset = COLORS["RESET"]
-
         record.msg = f"{color}{symbol} {record.msg}{reset}"
         return super().format(record)
 
 
 class LogStreamer:
-    """Thread-safe log message distributor for GUI consumers.
-    
-    Allows multiple subscribers (e.g., Tkinter GUI) to receive log messages
-    in a thread-safe manner using queues.
-    """
-    
+    """Thread-safe log message distributor for GUI consumers."""
+
     def __init__(self):
         self._subscribers: list[queue.Queue] = []
         self._lock = threading.Lock()
-    
+
     def subscribe(self) -> queue.Queue:
-        """Subscribe to log messages.
-        
-        Returns:
-            A thread-safe queue that will receive log messages.
-        """
+        """Subscribe to log messages."""
         q: queue.Queue = queue.Queue()
         with self._lock:
             self._subscribers.append(q)
         return q
-    
+
     def publish(self, message: str, level: str = "INFO") -> None:
-        """Publish a log message to all subscribers.
-        
-        Args:
-            message: The log message text.
-            level: Log level string (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-        """
+        """Publish a log message to all subscribers."""
         with self._lock:
             subscribers = list(self._subscribers)
-        
         for q in subscribers:
             try:
                 q.put_nowait((message, level))
@@ -90,11 +73,7 @@ _streamer_lock = threading.Lock()
 
 
 def get_log_streamer() -> LogStreamer:
-    """Get the global log streamer instance (creates if needed).
-    
-    Returns:
-        The singleton LogStreamer instance.
-    """
+    """Get the global log streamer instance (creates if needed)."""
     global _global_log_streamer
     with _streamer_lock:
         if _global_log_streamer is None:
@@ -103,27 +82,37 @@ def get_log_streamer() -> LogStreamer:
 
 
 class GUIHandler(logging.Handler):
-    """Logging handler that pushes messages to the GUI log streamer.
-    
-    This handler can be attached to any logger to stream its output
-    to the Tkinter GUI console.
-    """
-    
-    def __init__(self, streamer: Optional[LogStreamer] = None):
-        super().__init__()
-        self._streamer = streamer or get_log_streamer()
-    
+    """Handler that pushes log records to the GUI log streamer."""
+
     def emit(self, record: logging.LogRecord) -> None:
-        """Push log record to the streamer queue.
-        
-        Args:
-            record: The log record to publish.
-        """
         try:
             msg = self.format(record)
-            self._streamer.publish(msg, record.levelname)
+            get_log_streamer().publish(msg, record.levelname)
         except Exception:
             self.handleError(record)
+
+
+_console_handler: Optional[logging.Handler] = None
+_gui_handler: Optional[logging.Handler] = None
+_handler_lock = threading.Lock()
+
+
+def _get_handlers() -> tuple[logging.Handler, logging.Handler]:
+    """Get or create the singleton console and GUI handlers."""
+    global _console_handler, _gui_handler
+    with _handler_lock:
+        if _console_handler is None:
+            formatter = ColoredFormatter(_FORMAT, datefmt=_DATEFMT)
+
+            _console_handler = logging.StreamHandler(sys.stderr)
+            _console_handler.setFormatter(formatter)
+
+            _gui_handler = GUIHandler()
+            _gui_handler.setFormatter(formatter)
+
+        assert _console_handler is not None
+        assert _gui_handler is not None
+        return _console_handler, _gui_handler
 
 
 def get_logger(name: str, level: str = "INFO") -> logging.Logger:
@@ -139,23 +128,12 @@ def get_logger(name: str, level: str = "INFO") -> logging.Logger:
     logger = logging.getLogger(name)
 
     if not logger.handlers:
-        logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+        log_level = getattr(logging, level.upper(), logging.INFO)
+        logger.setLevel(log_level)
 
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-        formatter = ColoredFormatter(
-            "[%(asctime)s] %(levelname)s (%(name)s) - %(message)s",
-            datefmt="%H:%M:%S",
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-        gui_handler = GUIHandler()
-        gui_handler.setLevel(getattr(logging, level.upper(), logging.INFO))
-        gui_handler.setFormatter(formatter)
+        console_handler, gui_handler = _get_handlers()
+        logger.addHandler(console_handler)
         logger.addHandler(gui_handler)
-
         logger.propagate = False
 
     return logger

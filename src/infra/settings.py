@@ -6,34 +6,21 @@ Secrets (API keys, credentials) load from environment variables.
 
 import os
 import warnings
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Final
 
 from dotenv import load_dotenv
+from infra import config_defaults
 
 PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent.parent
 _ENV_FILE = PROJECT_ROOT / ".env"
 
 load_dotenv(_ENV_FILE, override=True)
 
-CONFIG_DIR = PROJECT_ROOT / "src" / "infra"
-DEFAULT_CONFIG_FILE = CONFIG_DIR / "config_defaults.py"
-
 
 def _load_config() -> dict[str, Any]:
-    """Load config from Python defaults + optional JSON override."""
-    spec = spec_from_file_location("config_defaults", DEFAULT_CONFIG_FILE)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to load config module from {DEFAULT_CONFIG_FILE}")
-
-    defaults = module_from_spec(spec)
-    spec.loader.exec_module(defaults)
-
-    config = defaults.CONFIG
-
-  
-    return config
+    """Load config from Python defaults."""
+    return config_defaults.CONFIG
 
 
 _cfg = _load_config()

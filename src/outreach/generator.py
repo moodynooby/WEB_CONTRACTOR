@@ -2,6 +2,7 @@
 
 import json
 import time
+from logging import Logger
 from typing import Callable
 
 from infra import llm
@@ -19,16 +20,18 @@ from database.repository import (
 from outreach.discovery import scrape_email_from_website
 
 
-class EmailGenerator:
-    """Generates personalized cold emails for qualified leads."""
+class _LoggableMixin:
+    """Mixin that provides style-aware logging via a self.logger attribute."""
 
-    def __init__(self) -> None:
-        self.logger = get_logger(self.__class__.__name__)
-        self.email_config = get_section("email_generation")
-        self.llm_config = get_section("llm")
+    logger: Logger
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness."""
+        """Log message with level awareness.
+
+        Args:
+            message: Log message.
+            style: One of 'error', 'warning', 'success', or '' for debug.
+        """
         if style == "error":
             self.logger.error(message)
         elif style == "warning":
@@ -37,6 +40,15 @@ class EmailGenerator:
             self.logger.info(message)
         else:
             self.logger.debug(message)
+
+
+class EmailGenerator(_LoggableMixin):
+    """Generates personalized cold emails for qualified leads."""
+
+    def __init__(self) -> None:
+        self.logger = get_logger(__name__)
+        self.email_config = get_section("email_generation")
+        self.llm_config = get_section("llm")
 
     def generate(
         self, limit: int = 20, progress_callback: Callable | None = None
@@ -168,6 +180,68 @@ class EmailGenerator:
         self.log(f"Email Generation Complete: {generated} emails generated", "success")
 
         return {"generated": generated}
+
+    def generate_for_lead(self, lead: dict) -> dict[str, str]:
+        """Generate a cold email for a single lead using the LLM.
+
+        Args:
+            lead: Dict with business_name, website, bucket, issues_json.
+
+        Returns:
+            Dict with 'subject' and 'body' keys.
+
+        Raises:
+            ValueError: If LLM returns empty or invalid response.
+        """
+        issues = lead.get("issues_json", [])
+        if isinstance(issues, str):
+            try:
+                issues = json.loads(issues)
+            except (json.JSONDecodeError, TypeError):
+                issues = []
+
+        bucket_templates = self.email_config.get("bucket_templates", {})
+        bucket = lead.get("bucket", "default")
+        bucket_template = bucket_templates.get(bucket, {})
+        angle = bucket_template.get("angle", "")
+        cta = bucket_template.get("cta", "")
+
+        from outreach.prompts import (
+            format_issues,
+            build_email_prompt,
+            get_email_system_message,
+        )
+
+        issues_text = format_issues(issues)
+        prompt = build_email_prompt(
+            business_name=lead.get("business_name", ""),
+            bucket=bucket,
+            issues_summary=issues_text,
+            url=lead.get("website", ""),
+            angle=angle,
+            cta=cta,
+        )
+        system_message = get_email_system_message()
+
+        raw = llm.generate(
+            model=DEFAULT_MODEL,
+            prompt=prompt,
+            system=system_message,
+            format_json=True,
+            max_retries=EMAIL_MAX_RETRIES,
+            timeout=self.email_config.get("timeout", 30),
+        )
+        data = json.loads(raw)
+
+        subject = (data.get("subject") or "").strip()
+        body = (data.get("body") or "").strip()
+
+        if not subject or not body:
+            raise ValueError("LLM returned empty email")
+        if len(body) < 20:
+            raise ValueError("Email too short")
+
+        return {"subject": subject, "body": body}
 
     def refine(
         self,

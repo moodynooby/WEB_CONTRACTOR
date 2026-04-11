@@ -167,77 +167,50 @@ class WebContractorGUI(QMainWindow):
 
     def _run_discovery(self) -> None:
         """Run discovery pipeline in background thread."""
-        if self.task_manager.is_running("discovery"):
-            QMessageBox.warning(self, "Busy", "Discovery is already running.")
-            return
-        if self.app is None:
-            QMessageBox.critical(self, "Error", "Application not initialized.")
-            return
-
-        app = self.app
-        self._run_task(
-            "discovery",
-            lambda: app.run_discovery(),
-            "Discovery",
-            task_type="discovery",
-        )
+        self._run_pipeline("discovery", "run_discovery", "Discovery", task_type="discovery")
 
     def _run_audit(self) -> None:
         """Run audit pipeline in background thread."""
-        if self.task_manager.is_running("audit"):
-            QMessageBox.warning(self, "Busy", "Audit is already running.")
-            return
-        if self.app is None:
-            QMessageBox.critical(self, "Error", "Application not initialized.")
-            return
-
-        app = self.app
-        self._run_task(
-            "audit",
-            lambda: app.run_audit(limit=20),
-            "Audit",
-            task_type="audit",
-        )
+        self._run_pipeline("audit", "run_audit", "Audit", task_type="audit")
 
     def _run_email_generation(self) -> None:
         """Run email generation in background thread."""
-        if self.task_manager.is_running("email"):
-            QMessageBox.warning(self, "Busy", "Email generation is already running.")
+        self._run_pipeline("email", "generate_emails", "Email Generation", task_type="email")
+
+    def _run_full_pipeline(self) -> None:
+        """Run full unified pipeline in background thread."""
+        self._run_pipeline("pipeline", "run_unified_pipeline", "Full Pipeline", task_type="pipeline")
+
+    def _run_pipeline(self, task_name: str, method_name: str, display_name: str, task_type: str | None = None) -> None:
+        """Generic handler for running a pipeline task.
+
+        Args:
+            task_name: Internal task identifier.
+            method_name: Method name on WebContractorApp to call.
+            display_name: Human-readable task name.
+            task_type: Type of task for selective button control.
+        """
+        if self.task_manager.is_running(task_name):
+            QMessageBox.warning(self, "Busy", f"{display_name} is already running.")
             return
         if self.app is None:
             QMessageBox.critical(self, "Error", "Application not initialized.")
             return
 
         app = self.app
-        self._run_task(
-            "email",
-            lambda: app.generate_emails(limit=20),
-            "Email Generation",
-            task_type="email",
-        )
+        method = getattr(app, method_name)
+        limit = 20 if method_name != "run_discovery" else None
+
+        def task_func():
+            return method(limit=limit) if limit else method()
+
+        self._run_task(task_name, task_func, display_name, task_type=task_type)
 
     def _open_review_dialog(self) -> None:
         """Open the email review dialog."""
         dialog = EmailReviewDialog(self)
         dialog.review_complete.connect(self._refresh_stats)
         dialog.exec()
-
-    def _run_full_pipeline(self) -> None:
-        """Run full unified pipeline in background thread."""
-        if self.task_manager.is_running("pipeline"):
-            QMessageBox.warning(self, "Busy", "Pipeline is already running.")
-            return
-        if self.app is None:
-            QMessageBox.critical(self, "Error", "Application not initialized.")
-            return
-
-        app = self.app
-        self._run_task(
-            "pipeline",
-            lambda: app.run_unified_pipeline(limit=20),
-            "Full Pipeline",
-            task_type="pipeline",
-        )
 
     def _run_task(self, task_name: str, task_func, display_name: str, task_type: str | None = None) -> None:
         """Run a long-running task in a background thread.

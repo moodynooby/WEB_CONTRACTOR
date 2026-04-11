@@ -74,22 +74,16 @@ class WebContractorApp:
 
     @property
     def scraper(self) -> PlaywrightScraper:
-        if not self._initialized:
-            self.initialize()
         assert self._scraper is not None
         return self._scraper
 
     @property
     def email_sender(self) -> EmailSender:
-        if not self._initialized:
-            self.initialize()
         assert self._email_sender is not None
         return self._email_sender
 
     @property
     def email_generator(self) -> EmailGenerator:
-        if not self._initialized:
-            self.initialize()
         assert self._email_generator is not None
         return self._email_generator
 

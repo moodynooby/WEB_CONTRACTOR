@@ -12,6 +12,7 @@ Usage:
     result = run_audit(pipeline, lead={"business_name": "Foo", "website": "...", "bucket": "Restaurants"})
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -22,9 +23,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from infra.adk_tools import (
-    fetch_website,
-)
+from infra.adk_tools import fetch_website
 from infra.logging import get_logger
 from infra.settings import get_section
 from infra.llm_models import get_llm_model
@@ -33,6 +32,43 @@ logger = get_logger(__name__)
 
 APP_NAME = "web_contractor_audit"
 USER_ID = "pipeline_user"
+
+
+async def _run_adk_session(
+    agent,
+    message: str,
+    session_id: str,
+    app_name: str = APP_NAME,
+) -> dict[str, Any]:
+    """Run an ADK agent in a session and return the session state.
+
+    Args:
+        agent: ADK agent (or SequentialAgent/ParallelAgent) to run.
+        message: User message to send.
+        session_id: Unique session identifier.
+        app_name: ADK app name for session scoping.
+
+    Returns:
+        Session state dict after agent execution.
+    """
+    session_service = InMemorySessionService()
+    runner = Runner(agent=agent, app_name=app_name, session_service=session_service)
+
+    await session_service.create_session(
+        app_name=app_name, user_id=USER_ID, session_id=session_id,
+    )
+
+    user_content = types.Content(role="user", parts=[types.Part(text=message)])
+
+    async for _ in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=user_content,
+    ):
+        pass
+
+    session = await session_service.get_session(
+        app_name=app_name, user_id=USER_ID, session_id=session_id,
+    )
+    return dict(session.state) if session is not None and session.state else {}
 
 
 
@@ -473,30 +509,14 @@ async def run_audit_for_lead(lead: dict) -> dict[str, Any]:
         Audit result dict with ``score``, ``issues``, ``qualified``, etc.
     """
     agent = build_audit_with_lead(lead)
-    session_service = InMemorySessionService()
-    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
-
     session_id = f"audit_{lead.get('id', 'unknown')}"
-    await session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
-    )
-
-    user_content = types.Content(
-        role="user",
-        parts=[types.Part(text=f"Audit the website at {lead.get('website', '')}")],
-    )
-
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session_id, new_message=user_content,
-    ):
-        pass  
-
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id,
+    state = await _run_adk_session(
+        agent,
+        f"Audit the website at {lead.get('website', '')}",
+        session_id,
     )
 
     aggregator = AuditResultAggregator()
-    state = dict(session.state) if session is not None and session.state else {}
     result = aggregator.aggregate(state)
 
     return {
@@ -511,6 +531,5 @@ async def run_audit_for_lead(lead: dict) -> dict[str, Any]:
 
 
 def run_audit_sync(lead: dict) -> dict[str, Any]:
-    """Synchronous convenience wrapper for :func:`run_audit_for_lead`."""
-    import asyncio
+    """Synchronous wrapper for :func:`run_audit_for_lead`."""
     return asyncio.run(run_audit_for_lead(lead))

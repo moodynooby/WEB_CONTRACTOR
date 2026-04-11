@@ -3,8 +3,6 @@
 Main dialog for reviewing and managing generated emails.
 """
 
-import json
-
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -322,58 +320,8 @@ class EmailReviewDialog(QDialog):
                 QMessageBox.warning(self, "Error", "Lead not found for regeneration.")
                 return
 
-            issues = lead.get("issues_json", [])
-            if isinstance(issues, str):
-                try:
-                    issues = json.loads(issues)
-                except (json.JSONDecodeError, TypeError):
-                    issues = []
-
-            email_config = self.email_generator.email_config
-            bucket_templates = email_config.get("bucket_templates", {})
-            bucket = lead.get("bucket", "default")
-            bucket_template = bucket_templates.get(bucket, {})
-            angle = bucket_template.get("angle", "")
-            cta = bucket_template.get("cta", "")
-
-            from outreach.prompts import (
-                format_issues,
-                build_email_prompt,
-                get_email_system_message,
-            )
-
-            issues_text = format_issues(issues)
-            prompt = build_email_prompt(
-                business_name=lead.get("business_name", ""),
-                bucket=bucket,
-                issues_summary=issues_text,
-                url=lead.get("website", ""),
-                angle=angle,
-                cta=cta,
-            )
-            system_message = get_email_system_message()
-            llm_config = self.email_generator.llm_config
-
-            from infra import llm as llm_module
-
-            raw = llm_module.generate(
-                model=llm_config.get("default_model", "llama-3.1-8b-instant"),
-                prompt=prompt,
-                system=system_message,
-                format_json=True,
-                max_retries=llm_config.get("max_retries", 2),
-                timeout=llm_config.get("timeout_seconds", 30),
-            )
-            data = json.loads(raw)
-
-            new_subject = (data.get("subject") or "").strip()
-            new_body = (data.get("body") or "").strip()
-
-            if not new_subject or not new_body:
-                QMessageBox.warning(self, "Error", "LLM returned empty email on regeneration.")
-                return
-
-            card.update_content(new_subject, new_body)
+            result = self.email_generator.generate_for_lead(lead)
+            card.update_content(result["subject"], result["body"])
             card.regenerate_btn.setText("🔁 Regenerate")
             logger.info(f"Regenerated email {campaign_id}")
         except Exception as e:

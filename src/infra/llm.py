@@ -15,7 +15,8 @@ from typing import Any
 import litellm
 
 from infra.logging import get_logger
-from infra.settings import get_section
+from infra.llm_models import get_llm_model_string
+from infra.settings import GROQ_API_KEY, OPENROUTER_API_KEY
 
 logger = get_logger(__name__)
 
@@ -28,61 +29,6 @@ class LLMError(Exception):
 class ProviderError(LLMError):
     """Raised when all providers and retries are exhausted."""
     pass
-
-
-def _get_model_string() -> str:
-    """Get the LiteLLM-formatted model string from LLM config.
-
-    Returns model in LiteLLM format: "provider/model_name"
-    Examples: "groq/llama-3.3-70b-versatile", "openrouter/google/gemma-2-9b-it:free"
-    """
-    llm_config = get_section("llm")
-    provider = llm_config.get("provider", "groq")
-
-    if provider == "gemini":
-        gemini_cfg = llm_config.get("gemini", {})
-        model_id = gemini_cfg.get("model", "gemini-2.0-flash")
-        return f"gemini/{model_id}"
-
-    if provider == "ollama":
-        ollama_cfg = llm_config.get("ollama", {})
-        model_id = ollama_cfg.get("model", "llama3.2:latest")
-        base_url = ollama_cfg.get("base_url", "http://localhost:11434")
-        import os
-        os.environ.setdefault("OLLAMA_API_BASE", base_url)
-        return f"ollama/{model_id}"
-
-    if provider == "lm_studio":
-        lm_cfg = llm_config.get("lm_studio", {})
-        model_id = lm_cfg.get("model", "local-model")
-        base_url = lm_cfg.get("base_url", "http://localhost:1234/v1")
-        api_key = lm_cfg.get("api_key", "") or "lm-studio"
-        import os
-        os.environ.setdefault("OPENAI_API_BASE", base_url)
-        os.environ.setdefault("OPENAI_API_KEY", api_key)
-        return f"openai/{model_id}"
-
-    provider_cfg = llm_config.get(provider, {})
-    model_id = provider_cfg.get("model", "")
-
-    if not model_id:
-        logger.warning(f"No model configured for '{provider}', falling back to groq/llama-3.3-70b-versatile")
-        return "groq/llama-3.3-70b-versatile"
-
-    return f"{provider}/{model_id}"
-
-
-def _get_api_keys() -> dict[str, str]:
-    """Ensure LiteLLM has the necessary API keys from environment."""
-    import os
-    from infra.settings import GROQ_API_KEY, OPENROUTER_API_KEY
-
-    if GROQ_API_KEY and not os.environ.get("GROQ_API_KEY"):
-        os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-    if OPENROUTER_API_KEY and not os.environ.get("OPENROUTER_API_KEY"):
-        os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
-
-    return {}
 
 
 def generate(
@@ -98,8 +44,7 @@ def generate(
     """Generate text from LLM using LiteLLM.
 
     Args:
-        model: Model name in LiteLLM format (e.g., "groq/llama-3.3-70b-versatile").
-               Overrides config default if provided.
+        model: Model name in LiteLLM format. Overrides config if provided.
         prompt: User prompt.
         system: Optional system message.
         format_json: If True, request JSON output.
@@ -114,9 +59,13 @@ def generate(
     Raises:
         ProviderError: All retries exhausted.
     """
-    _get_api_keys()
+    import os
+    if GROQ_API_KEY and not os.environ.get("GROQ_API_KEY"):
+        os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+    if OPENROUTER_API_KEY and not os.environ.get("OPENROUTER_API_KEY"):
+        os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
 
-    model_str = model or _get_model_string()
+    model_str = model or get_llm_model_string()
 
     messages: list[dict] = []
     if system:

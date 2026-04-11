@@ -2,10 +2,13 @@
 
 import re
 from abc import ABC, abstractmethod
+from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 from playwright.sync_api import Page
+
+from infra.logging import get_logger
 
 try:
     from email_scraper import scrape_emails
@@ -103,18 +106,27 @@ class BaseScraper(ABC):
 
     def __init__(
         self,
-        logger: Callable | None = None,
+        logger: Optional[Logger] = None,
         settings: Optional[Dict[str, Any]] = None,
     ):
-        self.logger = logger
+        self.logger = logger or get_logger(self.__class__.__name__)
         self.settings = settings or {}
 
     def log(self, message: str, style: str = "") -> None:
-        """Log message using provided logger or print."""
-        if self.logger:
-            self.logger(message, style)
+        """Log message with level awareness.
+
+        Args:
+            message: Log message.
+            style: One of 'error', 'warning', 'success', or '' for debug.
+        """
+        if style == "error":
+            self.logger.error(message)
+        elif style == "warning":
+            self.logger.warning(message)
+        elif style == "success":
+            self.logger.info(message)
         else:
-            print(message)
+            self.logger.debug(message)
 
     @abstractmethod
     def search(
@@ -258,3 +270,21 @@ class ScraperRegistry:
 
         enabled.sort(key=lambda x: x[1])
         return [s[0] for s in enabled]
+
+    @classmethod
+    def create_instance(
+        cls,
+        source_class: type[BaseScraper],
+        config: Optional[Dict[str, Any]] = None,
+    ) -> BaseScraper:
+        """Create a scraper instance with proper logger and settings.
+
+        Args:
+            source_class: The scraper class to instantiate.
+            config: Optional settings dictionary.
+
+        Returns:
+            Configured scraper instance with logger.
+        """
+        instance = source_class(settings=config)
+        return instance
