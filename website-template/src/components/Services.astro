@@ -1,6 +1,40 @@
 ---
 // Services.astro — Services/Products section
-// TODO: Replace with client's actual services
+const SECTION_HEADLINE = "Our Services";
+const SECTION_SUBHEADLINE = "Comprehensive solutions tailored to your needs. We deliver results that matter.";
+
+const SERVICES = [
+  {
+    icon: '🎯',
+    title: 'Service One',
+    description: 'Clear description of your first service offering and what makes it valuable.',
+  },
+  {
+    icon: '⚡',
+    title: 'Service Two',
+    description: 'Clear description of your second service offering and the benefit it provides.',
+  },
+  {
+    icon: '🏆',
+    title: 'Service Three',
+    description: 'Clear description of your third service offering and why customers choose it.',
+  },
+  {
+    icon: '🔧',
+    title: 'Service Four',
+    description: 'Clear description of your fourth service offering and its key features.',
+  },
+  {
+    icon: '📈',
+    title: 'Service Five',
+    description: 'Clear description of your fifth service offering and the results it delivers.',
+  },
+  {
+    icon: '💬',
+    title: 'Service Six',
+    description: 'Clear description of your sixth service offering and customer testimonials.',
+  },
+];
 ---
 
 <section id="services" class="py-20 bg-white">
@@ -16,54 +50,16 @@
 
     <!-- Services Grid -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-      {
-        SERVICES.map((service) => (
-          <div class="bg-gray-50 rounded-xl p-6 hover:shadow-lg transition-shadow border border-gray-100">
-            <!-- Icon placeholder -->
-            <div class="w-12 h-12 bg-brand-100 rounded-lg flex items-center justify-center mb-4">
-              <span class="text-2xl">{service.icon}</span>
-            </div>
-            <h3 class="text-xl font-semibold text-gray-900 mb-2">{service.title}</h3>
-            <p class="text-gray-600 text-sm">{service.description}</p>
+      {SERVICES.map((service) => (
+        <div class="bg-gray-50 rounded-xl p-6 hover:shadow-lg transition-shadow border border-gray-100">
+          <!-- Icon placeholder -->
+          <div class="w-12 h-12 bg-brand-100 rounded-lg flex items-center justify-center mb-4">
+            <span class="text-2xl">{service.icon}</span>
           </div>
-        ))
-      }
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">{service.title}</h3>
+          <p class="text-gray-600 text-sm">{service.description}</p>
+        </div>
+      ))}
     </div>
   </div>
 </section>
-
-<script>
-  // Define services data — replace with actual client services
-  const SERVICES = [
-    {
-      icon: '🎯',
-      title: 'Service One',
-      description: 'Clear description of your first service offering and what makes it valuable to customers.',
-    },
-    {
-      icon: '⚡',
-      title: 'Service Two',
-      description: 'Clear description of your second service offering and the benefit it provides.',
-    },
-    {
-      icon: '🏆',
-      title: 'Service Three',
-      description: 'Clear description of your third service offering and why customers choose it.',
-    },
-    {
-      icon: '🔧',
-      title: 'Service Four',
-      description: 'Clear description of your fourth service offering and its key features.',
-    },
-    {
-      icon: '📈',
-      title: 'Service Five',
-      description: 'Clear description of your fifth service offering and the results it delivers.',
-    },
-    {
-      icon: '💬',
-      title: 'Service Six',
-      description: 'Clear description of your sixth service offering and customer testimonials.',
-    },
-  ];
-</script>
