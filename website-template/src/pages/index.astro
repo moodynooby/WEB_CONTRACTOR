@@ -1,0 +1,35 @@
+---
+// index.astro — Main homepage
+// This is the base template assembled from components.
+// Each section can be customized per client.
+
+import Base from '../layouts/Base.astro';
+import Navbar from '../components/Navbar.astro';
+import Hero from '../components/Hero.astro';
+import Services from '../components/Services.astro';
+import About from '../components/About.astro';
+import Contact from '../components/Contact.astro';
+import Footer from '../components/Footer.astro';
+
+// Page metadata — replace with client-specific data
+const PAGE_TITLE = 'Your Business Name | Professional Services in City';
+const META_DESCRIPTION = 'Professional business services in City. Contact us for expert solutions.';
+---
+
+<Base>
+  <Navbar />
+  
+  <!-- Hero Section -->
+  <Hero />
+  
+  <!-- Services Section -->
+  <Services />
+  
+  <!-- About Section -->
+  <About />
+  
+  <!-- Contact Section -->
+  <Contact />
+  
+  <Footer />
+</Base>

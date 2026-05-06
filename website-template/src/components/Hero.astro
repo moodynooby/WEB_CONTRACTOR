@@ -1,0 +1,58 @@
+---
+// Hero.astro — Homepage hero section
+// TODO: Replace with client's actual headline, subheadline, and CTA
+---
+
+<section id="home" class="relative bg-gradient-to-br from-brand-50 to-brand-100 py-20 lg:py-32">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+      <!-- Text Content -->
+      <div>
+        <!-- Eyebrow label -->
+        <span class="inline-block px-3 py-1 text-sm font-medium text-brand-700 bg-brand-100 rounded-full mb-6">
+          {EYEBROW_TEXT}
+        </span>
+
+        <!-- Main Headline -->
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight mb-6">
+          {HEADLINE}
+        </h1>
+
+        <!-- Subheadline -->
+        <p class="text-lg text-gray-600 mb-8 max-w-lg">
+          {SUBHEADLINE}
+        </p>
+
+        <!-- CTA Buttons -->
+        <div class="flex flex-wrap gap-4">
+          <a
+            href="#contact"
+            class="bg-brand-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-brand-700 transition-colors shadow-md"
+          >
+            {PRIMARY_CTA}
+          </a>
+          <a
+            href="#services"
+            class="bg-white text-brand-700 px-6 py-3 rounded-lg font-medium hover:bg-brand-50 transition-colors border border-brand-200"
+          >
+            {SECONDARY_CTA}
+          </a>
+        </div>
+      </div>
+
+      <!-- Hero Image / Illustration -->
+      <div class="relative">
+        <!-- TODO: Replace with client's actual image -->
+        <img
+          src="https://picsum.photos/600/400"
+          alt="Hero illustration"
+          class="rounded-2xl shadow-2xl"
+          loading="eager"
+        />
+        <!-- Decorative element -->
+        <div class="absolute -bottom-6 -left-6 w-24 h-24 bg-brand-400 rounded-xl -z-10 opacity-50"></div>
+        <div class="absolute -top-6 -right-6 w-32 h-32 bg-brand-200 rounded-full -z-10"></div>
+      </div>
+    </div>
+  </div>
+</section>
