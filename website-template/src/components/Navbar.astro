@@ -1,6 +1,7 @@
 ---
-// Navbar.astro — Main site navigation
-const BUSINESS_NAME = "Your Business";
+import { SITE_CONFIG } from '../config/site.config';
+
+const { businessName } = SITE_CONFIG;
 ---
 
 <nav class="bg-white shadow-sm sticky top-0 z-50">
@@ -9,7 +10,7 @@ const BUSINESS_NAME = "Your Business";
       <!-- Logo / Brand Name -->
       <div class="flex items-center">
         <a href="/" class="text-xl font-bold text-brand-700">
-          {BUSINESS_NAME}
+          {businessName}
         </a>
       </div>
 

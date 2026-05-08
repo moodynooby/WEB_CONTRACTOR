@@ -1,12 +1,15 @@
 ---
-// Contact.astro — Contact section with form
-const CONTACT_HEADLINE = "Let's Work Together";
-const CONTACT_SUBHEADLINE = "Have a question or ready to get started? Reach out today!";
-const FORM_HEADLINE = "Send Us a Message";
-const ADDRESS = "123 Business Street, City, State 123456";
-const PHONE = "+91 XXXXX XXXXX";
-const EMAIL = "hello@yourbusiness.com";
-const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
+import { SITE_CONFIG } from '../config/site.config';
+
+const { 
+  contactHeadline, 
+  contactSubheadline, 
+  formHeadline, 
+  address, 
+  phone, 
+  email, 
+  businessHours 
+} = SITE_CONFIG;
 ---
 
 <section id="contact" class="py-20 bg-white">
@@ -17,8 +20,8 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
         <span class="inline-block px-3 py-1 text-sm font-medium text-brand-700 bg-brand-50 rounded-full mb-4">
           Get In Touch
         </span>
-        <h2 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-6">{CONTACT_HEADLINE}</h2>
-        <p class="text-gray-600 mb-8">{CONTACT_SUBHEADLINE}</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-6">{contactHeadline}</h2>
+        <p class="text-gray-600 mb-8">{contactSubheadline}</p>
 
         <!-- Contact Details -->
         <div class="space-y-6">
@@ -32,7 +35,7 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
             </div>
             <div>
               <h4 class="font-medium text-gray-900">Address</h4>
-              <p class="text-gray-600 text-sm">{ADDRESS}</p>
+              <p class="text-gray-600 text-sm">{address}</p>
             </div>
           </div>
 
@@ -45,7 +48,7 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
             </div>
             <div>
               <h4 class="font-medium text-gray-900">Phone</h4>
-              <p class="text-gray-600 text-sm">{PHONE}</p>
+              <p class="text-gray-600 text-sm">{phone}</p>
             </div>
           </div>
 
@@ -58,7 +61,7 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
             </div>
             <div>
               <h4 class="font-medium text-gray-900">Email</h4>
-              <p class="text-gray-600 text-sm">{EMAIL}</p>
+              <p class="text-gray-600 text-sm">{email}</p>
             </div>
           </div>
 
@@ -71,7 +74,7 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
             </div>
             <div>
               <h4 class="font-medium text-gray-900">Business Hours</h4>
-              <p class="text-gray-600 text-sm">{BUSINESS_HOURS}</p>
+              <p class="text-gray-600 text-sm">{businessHours}</p>
             </div>
           </div>
         </div>
@@ -79,7 +82,7 @@ const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 6:00 PM";
 
       <!-- Contact Form -->
       <div class="bg-gray-50 rounded-2xl p-8">
-        <h3 class="text-xl font-semibold text-gray-900 mb-6">{FORM_HEADLINE}</h3>
+        <h3 class="text-xl font-semibold text-gray-900 mb-6">{formHeadline}</h3>
         <!-- TODO: Connect form to backend (Formspree, Tally, or custom) -->
         <form id="contact-form" class="space-y-4">
           <div>

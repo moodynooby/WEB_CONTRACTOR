@@ -1,10 +1,7 @@
 ---
-// Hero.astro — Homepage hero section
-const EYEBROW_TEXT = "Serving Since 2010";
-const HEADLINE = "We Help Your Business Grow Online";
-const SUBHEADLINE = "Professional website services with AI-powered design and human expertise. Get a stunning website in days, not months.";
-const PRIMARY_CTA = "Get Free Consultation";
-const SECONDARY_CTA = "View Our Services";
+import { SITE_CONFIG } from '../config/site.config';
+
+const { eyebrowText, headline, subheadline, primaryCTA, secondaryCTA } = SITE_CONFIG;
 ---
 
 <section id="home" class="relative bg-gradient-to-br from-brand-50 to-brand-100 py-20 lg:py-32">
@@ -14,17 +11,17 @@ const SECONDARY_CTA = "View Our Services";
       <div>
         <!-- Eyebrow label -->
         <span class="inline-block px-3 py-1 text-sm font-medium text-brand-700 bg-brand-100 rounded-full mb-6">
-          {EYEBROW_TEXT}
+          {eyebrowText}
         </span>
 
         <!-- Main Headline -->
         <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight mb-6">
-          {HEADLINE}
+          {headline}
         </h1>
 
         <!-- Subheadline -->
         <p class="text-lg text-gray-600 mb-8 max-w-lg">
-          {SUBHEADLINE}
+          {subheadline}
         </p>
 
         <!-- CTA Buttons -->
@@ -33,13 +30,13 @@ const SECONDARY_CTA = "View Our Services";
             href="#contact"
             class="bg-brand-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-brand-700 transition-colors shadow-md"
           >
-            {PRIMARY_CTA}
+            {primaryCTA}
           </a>
           <a
             href="#services"
             class="bg-white text-brand-700 px-6 py-3 rounded-lg font-medium hover:bg-brand-50 transition-colors border border-brand-200"
           >
-            {SECONDARY_CTA}
+            {secondaryCTA}
           </a>
         </div>
       </div>
