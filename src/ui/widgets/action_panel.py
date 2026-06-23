@@ -3,8 +3,8 @@
 Material-styled action buttons for pipeline operations.
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton
-from PyQt6.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton
+from PyQt5.QtCore import pyqtSignal
 
 
 class ActionPanel(QWidget):

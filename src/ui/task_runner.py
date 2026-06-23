@@ -3,7 +3,7 @@
 Background task execution for long-running pipeline operations.
 """
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal
 from datetime import datetime, timezone
 
 

@@ -1,4 +1,4 @@
-"""Web Contractor - PyQt6 Desktop GUI
+"""Web Contractor - PyQt5 Desktop GUI
 
 Modern desktop application for:
 - Triggering long-running pipeline tasks
@@ -12,15 +12,15 @@ import os
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
     QMessageBox,
     QApplication,
 )
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QCloseEvent
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QCloseEvent
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 
 
 class WebContractorGUI(QMainWindow):
-    """Main PyQt6 application window."""
+    """Main PyQt5 application window."""
 
     def __init__(self):
         super().__init__()
@@ -210,7 +210,7 @@ class WebContractorGUI(QMainWindow):
         """Open the email review dialog."""
         dialog = EmailReviewDialog(self)
         dialog.review_complete.connect(self._refresh_stats)
-        dialog.exec()
+        dialog.exec_()
 
     def _run_task(self, task_name: str, task_func, display_name: str, task_type: str | None = None) -> None:
         """Run a long-running task in a background thread.
@@ -259,16 +259,15 @@ class WebContractorGUI(QMainWindow):
         webbrowser.open(atlas_url)
         self.log_console.append_message(f"Opened Atlas Charts: {atlas_url}")
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event - cleanup running tasks."""
         self.task_manager.stop_all()
         self.log_poller_timer.stop()
-        if a0:
-            a0.accept()
+        event.accept()
 
 
 def main() -> None:
-    """Launch PyQt6 GUI application."""
+    """Launch PyQt5 GUI application."""
     if not is_connected():
         from main import check_db_connection as check_db
 
@@ -286,7 +285,7 @@ def main() -> None:
     gui = WebContractorGUI()
     gui.show()
 
-    sys.exit(qt_app.exec())
+    sys.exit(qt_app.exec_())
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
 """UI Module
 
-PyQt6 desktop interface with dark theme styling.
+PyQt5 desktop interface with dark theme styling.
 """

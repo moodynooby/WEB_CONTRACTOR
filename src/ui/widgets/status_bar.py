@@ -3,8 +3,8 @@
 Displays database connection status and quick stats.
 """
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
-from PyQt6.QtGui import QFont
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
+from PyQt5.QtGui import QFont
 
 
 class StatusBar(QWidget):
@@ -65,8 +65,8 @@ class StatusBar(QWidget):
         layout.addLayout(stats_layout)
 
         line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
         layout.addWidget(line)
 
     def set_db_status(self, connected: bool, database_name: str = "") -> None:

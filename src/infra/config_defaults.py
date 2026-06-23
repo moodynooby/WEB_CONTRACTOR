@@ -18,6 +18,7 @@ CONFIG: dict = {
         "email_scrape_seconds": 10,
     },
     "llm": {
+        "provider": "ollama",
         "timeout_seconds": 30,
         "max_retries": 3,
         # "groq": {"model": "llama-3.3-70b-versatile"},

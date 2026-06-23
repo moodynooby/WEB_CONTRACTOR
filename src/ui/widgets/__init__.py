@@ -1,6 +1,6 @@
 """Custom UI Widgets for Web Contractor.
 
-Lightweight, dark-themed PyQt6 widgets for the main application window.
+Lightweight, dark-themed PyQt5 widgets for the main application window.
 """
 
 from ui.widgets.status_bar import StatusBar

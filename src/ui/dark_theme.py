@@ -1,10 +1,10 @@
-"""Dark Theme Configuration for PyQt6.
+"""Dark Theme Configuration for PyQt5.
 
 Applies Breeze Dark color palette using Qt's native QPalette.
 No heavy QSS stylesheets - just clean, native dark styling.
 """
 
-from PyQt6.QtGui import QPalette, QColor
+from PyQt5.QtGui import QPalette, QColor
 
 
 def apply_dark_theme(app) -> None:
@@ -34,39 +34,39 @@ def apply_dark_theme(app) -> None:
     light = QColor(75, 84, 93)
     dark = QColor(35, 38, 41)
 
-    palette.setColor(QPalette.ColorRole.Window, window_bg)
-    palette.setColor(QPalette.ColorRole.WindowText, window_text)
+    palette.setColor(QPalette.Window, window_bg)
+    palette.setColor(QPalette.WindowText, window_text)
 
-    palette.setColor(QPalette.ColorRole.Base, base_bg)
-    palette.setColor(QPalette.ColorRole.Text, base_text)
+    palette.setColor(QPalette.Base, base_bg)
+    palette.setColor(QPalette.Text, base_text)
 
-    palette.setColor(QPalette.ColorRole.Button, button_bg)
-    palette.setColor(QPalette.ColorRole.ButtonText, button_text)
+    palette.setColor(QPalette.Button, button_bg)
+    palette.setColor(QPalette.ButtonText, button_text)
 
-    palette.setColor(QPalette.ColorRole.Highlight, highlight)
-    palette.setColor(QPalette.ColorRole.HighlightedText, highlighted_text)
-    palette.setColor(QPalette.ColorRole.Link, link)
-    palette.setColor(QPalette.ColorRole.LinkVisited, link.darker(120))
+    palette.setColor(QPalette.Highlight, highlight)
+    palette.setColor(QPalette.HighlightedText, highlighted_text)
+    palette.setColor(QPalette.Link, link)
+    palette.setColor(QPalette.LinkVisited, link.darker(120))
 
-    palette.setColor(QPalette.ColorRole.AlternateBase, alternate_base)
-    palette.setColor(QPalette.ColorRole.ToolTipBase, tool_tip_base)
-    palette.setColor(QPalette.ColorRole.ToolTipText, tool_tip_text)
+    palette.setColor(QPalette.AlternateBase, alternate_base)
+    palette.setColor(QPalette.ToolTipBase, tool_tip_base)
+    palette.setColor(QPalette.ToolTipText, tool_tip_text)
 
-    palette.setColor(QPalette.ColorRole.Mid, mid)
-    palette.setColor(QPalette.ColorRole.Shadow, shadow)
-    palette.setColor(QPalette.ColorRole.Light, light)
-    palette.setColor(QPalette.ColorRole.Dark, dark)
-    palette.setColor(QPalette.ColorRole.Midlight, light.lighter(115))
+    palette.setColor(QPalette.Mid, mid)
+    palette.setColor(QPalette.Shadow, shadow)
+    palette.setColor(QPalette.Light, light)
+    palette.setColor(QPalette.Dark, dark)
+    palette.setColor(QPalette.Midlight, light.lighter(115))
 
     disabled_text = QColor(150, 150, 150)
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, disabled_text)
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled_text)
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_text)
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor(80, 80, 80))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, disabled_text)
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, disabled_text)
+    palette.setColor(QPalette.Disabled, QPalette.Text, disabled_text)
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, disabled_text)
+    palette.setColor(QPalette.Disabled, QPalette.Highlight, QColor(80, 80, 80))
+    palette.setColor(QPalette.Disabled, QPalette.HighlightedText, disabled_text)
 
     inactive_highlight = QColor(50, 120, 170)
-    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, inactive_highlight)
-    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, highlighted_text)
+    palette.setColor(QPalette.Inactive, QPalette.Highlight, inactive_highlight)
+    palette.setColor(QPalette.Inactive, QPalette.HighlightedText, highlighted_text)
 
     app.setPalette(palette)

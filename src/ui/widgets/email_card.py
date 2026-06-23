@@ -3,7 +3,7 @@
 Individual email display card with action buttons for the review flow.
 """
 
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QInputDialog,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt
 
 
 class EmailCard(QFrame):
@@ -50,7 +50,7 @@ class EmailCard(QFrame):
 
     def _setup_ui(self) -> None:
         """Build the card layout."""
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("emailCard")
         self.setStyleSheet(
             """
@@ -144,7 +144,7 @@ class EmailCard(QFrame):
         self.links_label.setObjectName("cardSubtitle")
         self.links_label.setWordWrap(True)
         self.links_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextBrowserInteraction
+            Qt.TextBrowserInteraction
         )
         layout.addWidget(self.links_label)
 
@@ -234,10 +234,10 @@ class EmailCard(QFrame):
             self,
             "Confirm Delete",
             f"Are you sure you want to delete the email for '{business}'?\n\nThis action cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.Yes:
             self.deleted.emit(self.campaign_id)
 
     def _on_refine(self) -> None:
@@ -263,10 +263,10 @@ class EmailCard(QFrame):
             "Confirm Regenerate",
             f"Regenerate the email for '{business}' from scratch?\n\n"
             "This will replace the current subject and body with a new LLM-generated version.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.Yes:
             self.regenerated.emit(self.campaign_id, self.lead_id)
 
     def _on_send(self) -> None:
@@ -284,10 +284,10 @@ class EmailCard(QFrame):
             "Confirm Send",
             f"Send this email to {self.to_email} right now?\n\n"
             "This will deliver the email via SMTP immediately.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.Yes:
             self.sent.emit(self.campaign_id, self.to_email, subject, body)
 
     def update_content(self, subject: str, body: str) -> None:

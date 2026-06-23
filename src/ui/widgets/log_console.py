@@ -3,8 +3,8 @@
 Scrolling text widget for real-time log output.
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit, QPushButton, QHBoxLayout
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit, QPushButton, QHBoxLayout
+from PyQt5.QtGui import QFont, QTextCursor
 
 
 class LogConsole(QWidget):
@@ -22,7 +22,7 @@ class LogConsole(QWidget):
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setFont(QFont("Courier", 10))
-        self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.log_text.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         layout.addWidget(self.log_text)
 
         button_layout = QHBoxLayout()
@@ -46,7 +46,7 @@ class LogConsole(QWidget):
         self.log_text.appendPlainText(message)
 
         cursor = self.log_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.movePosition(QTextCursor.End)
         self.log_text.setTextCursor(cursor)
 
     def clear(self) -> None:

@@ -3,7 +3,7 @@
 Main dialog for reviewing and managing generated emails.
 """
 
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QSpinBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QCloseEvent
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QCloseEvent
 
 from database.repository import (
     get_emails_for_review,
@@ -147,7 +147,7 @@ class EmailReviewDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
             """
             QScrollArea {
@@ -172,7 +172,7 @@ class EmailReviewDialog(QDialog):
         self.cards_container = QWidget()
         self.cards_layout = QVBoxLayout(self.cards_container)
         self.cards_layout.setSpacing(10)
-        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.cards_layout.setAlignment(Qt.AlignTop)
 
         scroll.setWidget(self.cards_container)
         layout.addWidget(scroll)
@@ -189,14 +189,13 @@ class EmailReviewDialog(QDialog):
         
         self.accept()
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event - cleanup safely."""
         self._set_cards_enabled(False)
         
         self._clear_cards()
         
-        if a0 is not None:
-            a0.accept()
+        event.accept()
 
     def _load_emails(self) -> None:
         """Fetch emails from database and populate cards."""
@@ -214,7 +213,7 @@ class EmailReviewDialog(QDialog):
             no_data = QLabel("No emails found needing review.\n\n"
                            "Run email generation first to create emails.")
             no_data.setObjectName("dialogSubtitle")
-            no_data.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_data.setAlignment(Qt.AlignCenter)
             self.cards_layout.addWidget(no_data)
             return
 
@@ -379,10 +378,10 @@ class EmailReviewDialog(QDialog):
             self,
             "Approve All",
             f"Approve all {len(self.cards)} emails with their current content?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if reply != QMessageBox.Yes:
             return
 
         approved_count = 0
