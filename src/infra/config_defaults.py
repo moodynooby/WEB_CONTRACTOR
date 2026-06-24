@@ -18,7 +18,7 @@ CONFIG: dict = {
         "email_scrape_seconds": 10,
     },
     "llm": {
-        "provider": "ollama",
+        "provider": "vllm",
         "timeout_seconds": 30,
         "max_retries": 3,
         # "groq": {"model": "llama-3.3-70b-versatile"},
@@ -34,6 +34,12 @@ CONFIG: dict = {
             "model": "local-model",
             "base_url": "http://localhost:1234/v1",
             "api_key": "",
+        },
+        "vllm": {
+            "model": "auto",
+            "tensor_parallel": 1,
+            "max_model_len": 4096,
+            "gpu_memory_utilization": 0.8,
         },
     },
     "scraper": {

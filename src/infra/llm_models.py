@@ -67,6 +67,11 @@ def get_llm_model_string() -> str:
         os.environ.setdefault("OPENAI_API_KEY", api_key)
         return f"openai/{model_id}"
 
+    if provider == "vllm":
+        vllm_cfg = config.get("vllm", {})
+        model_id = vllm_cfg.get("model", "auto")
+        return f"vllm/{model_id}"
+
     provider_cfg = config.get(provider, {})
     model_id = provider_cfg.get("model", "")
 
@@ -84,6 +89,7 @@ def get_llm_model():
 
     Returns:
         For Gemini: a plain model name string (``"gemini/gemini-2.0-flash"``).
+        For vllm: a plain model name string (``"vllm/auto"``).
         For all others: a ``LiteLlm`` instance that wraps the provider.
     """
     config = _get_llm_config()
@@ -97,6 +103,14 @@ def get_llm_model():
         logger.info(f"LLM model: Gemini — {model_name}")
         _model_cache[provider] = model_name
         return model_name
+
+    if provider == "vllm":
+        from infra.vllm_adk_model import VllmAdkModel
+
+        model = VllmAdkModel()
+        logger.info("LLM model: vLLM (embedded GPU, ADK-compatible)")
+        _model_cache[provider] = model
+        return model
 
     from google.adk.models.lite_llm import LiteLlm
 
@@ -117,7 +131,7 @@ def get_available_providers() -> list[dict[str, str]]:
     current = config.get("provider", "groq")
 
     providers = []
-    for key in ("gemini", "groq", "openrouter", "ollama", "lm_studio", "anthropic"):
+    for key in ("gemini", "groq", "openrouter", "ollama", "lm_studio", "anthropic", "vllm"):
         p_config = config.get(key, {})
         model = p_config.get("model", "")
         name = key.title()
@@ -125,6 +139,8 @@ def get_available_providers() -> list[dict[str, str]]:
             name = "Ollama (local)"
         elif key == "lm_studio":
             name = "LM Studio (local)"
+        elif key == "vllm":
+            name = "vLLM (embedded GPU)"
         elif key == "groq":
             name = "Groq"
         elif key == "openrouter":
@@ -150,7 +166,7 @@ def switch_provider(provider: str) -> str:
     Returns:
         The new provider name.
     """
-    valid = ("gemini", "groq", "openrouter", "ollama", "lm_studio", "anthropic")
+    valid = ("gemini", "groq", "openrouter", "ollama", "lm_studio", "anthropic", "vllm")
     if provider not in valid:
         raise ValueError(f"Invalid provider '{provider}'. Must be one of: {valid}")
 

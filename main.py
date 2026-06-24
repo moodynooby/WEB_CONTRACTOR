@@ -1,18 +1,17 @@
-"""Web Contractor — Desktop Application Launcher
-
-Launches the PyQt6 desktop application.
-The Telegram bot lifecycle is managed by the App class.
+"""Web Contractor — Application Launcher
 
 Usage:
-    python main.py              # Launch PyQt6 GUI
-    python main.py run          # Same as above
+    python main.py              # Launch Streamlit web app (default)
+    python main.py web          # Same as above
     python main.py bot          # Start Telegram bot only
+    python main.py status       # Check database connectivity
 
 For setup, use the scripts:
     python scripts/setup.py         # Interactive setup wizard
 """
 
 import sys
+import subprocess
 from pathlib import Path
 
 from infra.logging import get_logger
@@ -33,19 +32,15 @@ def check_db_connection() -> bool:
     return _check(PROJECT_ROOT)
 
 
-def launch_gui():
-    """Launch PyQt6 desktop application."""
-    from database.connection import init_db
-    from gui import main as gui_main
-
-    logger.info("Initializing database...")
-    init_db()
-
-    logger.info("Starting Web Contractor GUI...")
-    logger.info("Telegram bot will start automatically if configured")
+def launch_web():
+    """Launch Streamlit web application."""
+    streamlit_app = SRC_DIR / "streamlit_app" / "Home.py"
+    logger.info("Starting Web Contractor web UI...")
+    logger.info(f"Streamlit app: {streamlit_app}")
     logger.info("")
 
-    gui_main()
+    cmd = [sys.executable, "-m", "streamlit", "run", str(streamlit_app)]
+    subprocess.run(cmd)
 
 
 def launch_bot():
@@ -61,7 +56,6 @@ def launch_bot():
     init_db()
 
     logger.info("Starting Telegram bot in foreground mode...")
-    logger.info("The bot will handle pipeline execution when you use /run command")
     logger.info("Press Ctrl+C to stop")
     logger.info("")
 
@@ -80,21 +74,17 @@ def launch_bot():
 
 def main():
     """Main entry point."""
-    command = sys.argv[1] if len(sys.argv) > 1 else "run"
+    command = sys.argv[1] if len(sys.argv) > 1 else "web"
 
-    if command in ("run", "gui"):
-        if not check_db_connection():
-            logger.error("Database connectivity check failed. Application cannot start.")
-            sys.exit(1)
-
-        launch_gui()
+    if command in ("web", "run"):
+        launch_web()
     elif command == "bot":
         launch_bot()
     elif command == "status":
         check_db_connection()
     else:
         logger.error("Unknown command: %s", command)
-        logger.info("Usage: python main.py [run|gui|bot|status]")
+        logger.info("Usage: python main.py [web|bot|status]")
         sys.exit(1)
 
 

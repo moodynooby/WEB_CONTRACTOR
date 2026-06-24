@@ -6,19 +6,26 @@
 
 ```bash
 uv sync                   # install deps
-uv run python main.py     # launch PyQt6 GUI
 
-# Service manager (cross-platform):
-uv run python main.py run       # Launch PyQt6 GUI
+# Web UI (Streamlit):
+uv run python main.py web       # Launch web UI (default)
+# or:
+uv run streamlit run src/streamlit_app/Home.py
+
+# Telegram bot:
 uv run python main.py bot       # Start Telegram bot
 uv run python main.py status    # Show service status
-uv run python main.py stop      # Stop all services
+
 uv run --active mkdocs build  # serve docs
 uv run --active mkdocs gh-deploy
+
 # Scripts:
 uv run python scripts/setup.py        # Interactive setup wizard
+```
 
-# Before every commit:
+### Before every commit:
+
+```bash
 uv run ruff check --fix .
 uv run ty check
 ```

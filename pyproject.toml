@@ -13,11 +13,11 @@ dependencies = [
     "email-validator>=2.3.0",
     "email-scraper>=0.6",
     "mailscout>=0.1.1",
-    "PyQt5>=5.15.0",
-    "mkdocs>=1.6.1",
-    "mkdocstrings[python]>=1.0.3",
-    "mkdocs-material>=9.7.5",
-    "mkdocs-api-autonav>=0.4.0",
+    "streamlit>=1.35.0",
+    # "mkdocs>=1.6.1",
+    # "mkdocstrings[python]>=1.0.3",
+    # "mkdocs-material>=9.7.5",
+    # "mkdocs-api-autonav>=0.4.0",
     "google-adk[extensions]>=0.1.0",
 ]
 
@@ -50,6 +50,5 @@ src = ["src"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/__init__.py" = ["E402", "F401"]
-
-
-
+"src/streamlit_app/Home.py" = ["E402"]
+"src/streamlit_app/pages/*.py" = ["E402"]

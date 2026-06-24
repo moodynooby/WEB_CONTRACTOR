@@ -49,7 +49,7 @@ SMTP_SERVER: Final[str] = _email.get("smtp_server", "smtp.gmail.com")
 SMTP_PORT: Final[int] = _email.get("smtp_port", 587)
 
 _llm = _section("llm")
-LLM_MODE: Final[str] = "cloud"  
+LLM_MODE: Final[str] = "cloud"
 DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
 DEFAULT_MODEL: Final[str] = f"{DEFAULT_PROVIDER}/{_llm.get(DEFAULT_PROVIDER, {}).get('model', 'llama-3.3-70b-versatile')}"
 FALLBACK_MODEL: Final[str] = DEFAULT_MODEL
@@ -60,6 +60,12 @@ LOCAL_PROVIDER: Final[str] = "ollama"
 LOCAL_BASE_URL: Final[str] = _local_llm.get("base_url", "http://localhost:11434")
 LOCAL_MODEL: Final[str] = f"ollama/{_local_llm.get('model', 'llama3.2:latest')}"
 LOCAL_HARDWARE_PROFILE: Final[str] = "auto"
+
+_vllm_cfg = _llm.get("vllm", {})
+VLLM_MODEL: Final[str] = _vllm_cfg.get("model", "auto")
+VLLM_MAX_MODEL_LEN: Final[int] = _vllm_cfg.get("max_model_len", 4096)
+VLLM_GPU_MEMORY_UTILIZATION: Final[float] = _vllm_cfg.get("gpu_memory_utilization", 0.8)
+VLLM_TENSOR_PARALLEL: Final[int] = _vllm_cfg.get("tensor_parallel", 1)
 
 GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
