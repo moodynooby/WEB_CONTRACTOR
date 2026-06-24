@@ -31,10 +31,10 @@ from infra.settings import get_section
 
 logger = get_logger(__name__)
 
-_MODEL_TIERS = [
-    (8, "Qwen/Qwen2.5-1.5B-Instruct"),
-    (16, "Qwen/Qwen2.5-7B-Instruct"),
-    (32, "Qwen/Qwen2.5-14B-Instruct"),
+_GPU_MODEL_TIERS = [
+    (4, "Qwen/Qwen2.5-1.5B-Instruct"),
+    (8, "Qwen/Qwen2.5-7B-Instruct"),
+    (24, "Qwen/Qwen2.5-14B-Instruct"),
 ]
 
 _DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -43,19 +43,21 @@ _POLL_INTERVAL = 2.0
 _STARTUP_TIMEOUT = 300.0
 
 
-def _select_model_by_ram() -> str:
-    """Pick a model based on available system RAM."""
-    import psutil  # type: ignore
+def _select_model_by_gpu_memory() -> str:
+    """Pick a model based on available GPU VRAM."""
+    import gpustat
 
-    ram_gb = psutil.virtual_memory().total / (1024**3)
-    logger.info(f"System RAM: {ram_gb:.1f} GB")
+    gpu_stats = gpustat.new_query()
+    gpu = gpu_stats.gpus[0]
+    vram_gb = gpu.memory_total / 1024
+    logger.info(f"GPU VRAM: {vram_gb:.1f} GB")
 
-    for threshold, model in _MODEL_TIERS:
-        if ram_gb <= threshold:
-            logger.info(f"Selected model for {ram_gb:.0f}GB RAM: {model}")
+    for threshold, model in _GPU_MODEL_TIERS:
+        if vram_gb <= threshold:
+            logger.info(f"Selected model for {vram_gb:.0f}GB VRAM: {model}")
             return model
 
-    logger.info(f"Selected model for {ram_gb:.0f}GB RAM: {_DEFAULT_MODEL}")
+    logger.info(f"Selected model for {vram_gb:.0f}GB VRAM: {_DEFAULT_MODEL}")
     return _DEFAULT_MODEL
 
 
@@ -94,7 +96,7 @@ class VllmServer:
         """Build the ``vllm serve`` command-line arguments."""
         configured_model = self._config.get("model", "auto")
         model = (
-            _select_model_by_ram()
+            _select_model_by_gpu_memory()
             if configured_model == "auto"
             else configured_model
         )

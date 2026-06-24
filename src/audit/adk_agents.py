@@ -13,6 +13,7 @@ Usage:
 """
 
 import asyncio
+import functools
 import json
 from typing import Any
 
@@ -129,14 +130,16 @@ Return ONLY a JSON object with this exact structure:
 }}"""
 
 
-content_agent = LlmAgent(
-    name="content_auditor",
-    model=get_llm_model(),
-    instruction=_content_instruction(),
-    description="LLM-driven analysis of website content quality, CTAs, value proposition, and trust signals.",
-    tools=_audit_tools(),
-    output_key="content_result",
-)
+@functools.lru_cache(maxsize=1)
+def get_content_agent() -> LlmAgent:
+    return LlmAgent(
+        name="content_auditor",
+        model=get_llm_model(),
+        instruction=_content_instruction(),
+        description="LLM-driven analysis of website content quality, CTAs, value proposition, and trust signals.",
+        tools=_audit_tools(),
+        output_key="content_result",
+    )
 
 
 
@@ -431,7 +434,7 @@ def build_audit_pipeline() -> ParallelAgent:
     """
     return ParallelAgent(
         name="audit_pipeline",
-        sub_agents=[content_agent, business_agent, technical_agent, performance_agent],
+        sub_agents=[get_content_agent(), business_agent, technical_agent, performance_agent],
         description="Runs all 4 audit agents (content, business, technical, performance) in parallel.",
     )
 

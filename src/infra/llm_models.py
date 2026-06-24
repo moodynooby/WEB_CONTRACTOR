@@ -71,8 +71,8 @@ def get_llm_model_string() -> str:
         vllm_cfg = config.get("vllm", {})
         model_id = vllm_cfg.get("model", "auto")
         if model_id == "auto":
-            from infra.vllm_server import _select_model_by_ram
-            model_id = _select_model_by_ram()
+            from infra.vllm_server import _select_model_by_gpu_memory
+            model_id = _select_model_by_gpu_memory()
         import os
         api_base = (
             os.environ.get("OPENAI_API_BASE")
@@ -123,8 +123,8 @@ def get_llm_model():
         vllm_cfg = config.get("vllm", {})
         model_id = vllm_cfg.get("model", "auto")
         if model_id == "auto":
-            from infra.vllm_server import _select_model_by_ram
-            model_id = _select_model_by_ram()
+            from infra.vllm_server import _select_model_by_gpu_memory
+            model_id = _select_model_by_gpu_memory()
 
         from google.adk.models.lite_llm import LiteLlm
         model = LiteLlm(
