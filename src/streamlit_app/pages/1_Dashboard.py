@@ -1,5 +1,12 @@
 """Dashboard page - DB status and quick statistics."""
 
+import sys
+from pathlib import Path
+
+SRC_DIR = Path(__file__).parent.parent.parent.resolve()
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import streamlit as st
 from services.stats_service import StatsService
 from streamlit_app.components.stats_display import show_stats

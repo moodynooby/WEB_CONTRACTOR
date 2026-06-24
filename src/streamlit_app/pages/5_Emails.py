@@ -1,5 +1,12 @@
 """Emails page - generate and review outreach emails."""
 
+import sys
+from pathlib import Path
+
+SRC_DIR = Path(__file__).parent.parent.parent.resolve()
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import streamlit as st
 from services.email_service import EmailService
 from services.pipeline_service import PipelineService, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
