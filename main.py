@@ -2,12 +2,8 @@
 
 Usage:
     python main.py              # Launch Streamlit web app (default)
-    python main.py web          # Same as above
     python main.py bot          # Start Telegram bot only
     python main.py status       # Check database connectivity
-
-For setup, use the scripts:
-    python scripts/setup.py         # Interactive setup wizard
 """
 
 import subprocess
@@ -75,7 +71,7 @@ def main():
     """Main entry point."""
     command = sys.argv[1] if len(sys.argv) > 1 else "web"
 
-    if command in ("web", "run"):
+    if command in ("web"):
         launch_web()
     elif command == "bot":
         launch_bot()

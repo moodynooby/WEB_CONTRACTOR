@@ -1,8 +1,7 @@
-"""ADK Pipeline — SequentialAgent chaining discovery → audit → email → send.
+"""ADK Pipeline — Agent chaining discovery → audit → email → send.
 
-This replaces the manual ``run_unified_pipeline()`` in ``app.py`` with an
-ADK ``SequentialAgent`` where each stage is an ``LlmAgent`` or workflow
-agent.  Data flows between stages via ``output_key`` + ``{key}`` instruction
+Uses the unified ``Agent`` class (ADK 2.0) with ``sub_agents`` for
+sequential orchestration. Data flows between stages via ``output_key``
 interpolation in session state.
 
 Usage:
@@ -15,14 +14,14 @@ Usage:
 import asyncio
 from typing import Any, Callable
 
-from google.adk.agents.llm_agent import LlmAgent
-from google.adk.agents.sequential_agent import SequentialAgent
-from google.adk.agents.loop_agent import LoopAgent
+from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.workflow._retry_config import RetryConfig
 from google.genai import types
 
 from audit.adk_agents import _run_adk_session
+from audit.adk_callbacks import on_agent_end, on_agent_start, on_tool_error
 from infra.adk_tools import (
     fetch_website,
     discover_leads,
@@ -44,9 +43,9 @@ USER_ID = "pipeline_user"
 
 
 
-def create_discovery_agent() -> LlmAgent:
-    """Create a fresh LlmAgent instance for lead discovery."""
-    return LlmAgent(
+def create_discovery_agent() -> Agent:
+    """Create a fresh Agent instance for lead discovery."""
+    return Agent(
         name="discovery_agent",
         model=get_llm_model(),
         instruction="""You are a lead discovery coordinator.
@@ -59,6 +58,10 @@ After calling the tool, summarize what it returned.""",
         description="Runs lead discovery via Playwright scraper.",
         tools=[discover_leads],
         output_key="discovery_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
@@ -87,15 +90,19 @@ Your workflow:
 Be thorough and critical in your analysis."""
 
 
-def create_audit_agent() -> LlmAgent:
-    """Create a fresh LlmAgent instance for audit coordination."""
-    return LlmAgent(
+def create_audit_agent() -> Agent:
+    """Create a fresh Agent instance for audit coordination."""
+    return Agent(
         name="audit_agent",
         model=get_llm_model(),
         instruction=_audit_coordinator_instruction(),
         description="Coordinates audit of pending leads: fetches websites, analyzes content/SEO/performance, scores, and qualifies.",
         tools=[get_pending_audits, fetch_website, save_audit_result],
         output_key="audit_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
@@ -118,60 +125,55 @@ Your workflow:
 Emails should be short (max 120 words), personalized, and reference specific website issues found during the audit."""
 
 
-def create_email_generator_agent() -> LlmAgent:
-    """Create a fresh LlmAgent instance for email generation."""
-    return LlmAgent(
+def create_email_generator_agent() -> Agent:
+    """Create a fresh Agent instance for email generation."""
+    return Agent(
         name="email_generator_agent",
         model=get_llm_model(),
         instruction=_email_generator_instruction(),
         description="Generates personalized cold emails for qualified leads based on audit findings.",
         tools=[get_qualified_leads, generate_email, save_email],
         output_key="email_generation_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
 
-def _email_reviewer_instruction() -> str:
-    return """You are an email quality reviewer.
+def _email_refinement_instruction() -> str:
+    return """You are an email refinement coordinator.
 
-IMPORTANT: You MUST actually call the `refine_email` tool when needed — do NOT simulate or fake tool responses.
+IMPORTANT RULES:
+- You MUST actually call the provided tools — do NOT simulate, fake, or hallucinate tool responses.
+- Wait for real tool responses before proceeding to the next step.
 
-Evaluate the generated email(s) for:
-1. Personalization: Does it reference the specific business and their issues?
-2. Tone: Professional, not pushy or salesy?
-3. Brevity: Under 120 words?
-4. Clear CTA: Does it offer a specific next step?
-5. No placeholders: All {variables} replaced?
+Your workflow:
+1. Review the generated emails from the previous stage.
+2. For EACH email:
+   a. Evaluate: Is it personalized (references specific business/issues)? Professional tone? Under 120 words? Clear CTA? No placeholders?
+   b. If it passes ALL criteria, mark it as approved.
+   c. If it fails ANY criteria, call `refine_email` with specific improvement instructions.
+3. After refining, re-review. Repeat up to 3 iterations total per email.
+4. Provide a summary of how many emails passed, were refined, or need human review.
 
-If the email passes ALL criteria, respond with: STOP
-If the email fails ANY criteria, respond with specific refinement instructions.
-
-Return ONLY "STOP" or your refinement instructions."""
+Output "Email refinement complete" when done."""
 
 
-def create_email_reviewer_agent() -> LlmAgent:
-    """Create a fresh LlmAgent instance for email review."""
-    return LlmAgent(
-        name="email_reviewer_agent",
+def create_email_refinement_agent() -> Agent:
+    """Create a fresh Agent instance for email refinement (replaces old LoopAgent)."""
+    return Agent(
+        name="email_refinement_agent",
         model=get_llm_model(),
-        instruction=_email_reviewer_instruction(),
-        description="Reviews generated emails for quality and signals when refinement is complete.",
+        instruction=_email_refinement_instruction(),
+        description="Reviews and iteratively refines cold emails until quality criteria are met.",
         tools=[refine_email],
-        output_key="email_review_result",
-    )
-
-
-def build_email_refinement_loop() -> LoopAgent:
-    """Build a LoopAgent that generates and refines emails iteratively.
-
-    The loop runs: generate_email → review → refine_email → review → ...
-    It stops when the reviewer signals "STOP" or after max_iterations.
-    """
-    return LoopAgent(
-        name="email_refinement_loop",
-        sub_agents=[create_email_generator_agent(), create_email_reviewer_agent()],
-        description="Iteratively generates and refines cold emails until quality criteria are met.",
-        max_iterations=3,
+        output_key="email_refinement_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
@@ -188,15 +190,19 @@ Your workflow:
 4. After sending all emails, provide a summary of how many were sent and how many failed."""
 
 
-def create_email_sender_agent() -> LlmAgent:
-    """Create a fresh LlmAgent instance for email sending."""
-    return LlmAgent(
+def create_email_sender_agent() -> Agent:
+    """Create a fresh Agent instance for email sending."""
+    return Agent(
         name="email_sender_agent",
         model=get_llm_model(),
         instruction=_email_sender_instruction(),
         description="Sends approved cold emails via SMTP.",
         tools=[send_email],
         output_key="email_send_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
@@ -205,16 +211,16 @@ def build_full_pipeline(
     include_discovery: bool = False,
     include_refinement_loop: bool = False,
     include_email_send: bool = False,
-) -> SequentialAgent:
-    """Build the full ADK SequentialAgent pipeline.
+) -> Agent:
+    """Build the full ADK pipeline.
 
     Args:
         include_discovery: If True, prepend the discovery stage.
-        include_refinement_loop: If True, use the LoopAgent for email refinement instead of single-pass generation.
+        include_refinement_loop: If True, use refinement agent after generation.
         include_email_send: If True, append the email sending stage.
 
     Returns:
-        SequentialAgent ready for execution.
+        Agent ready for execution.
     """
     stages: list = []
 
@@ -224,14 +230,15 @@ def build_full_pipeline(
     stages.append(create_audit_agent())
 
     if include_refinement_loop:
-        stages.append(build_email_refinement_loop())
+        stages.append(create_email_generator_agent())
+        stages.append(create_email_refinement_agent())
     else:
         stages.append(create_email_generator_agent())
 
     if include_email_send:
         stages.append(create_email_sender_agent())
 
-    return SequentialAgent(
+    return Agent(
         name="web_contractor_pipeline",
         sub_agents=stages,
         description="Full lead generation pipeline: discovery → audit → email generation → (optional) sending.",
@@ -266,7 +273,7 @@ async def run_pipeline_async(
         "discovery": state.get("discovery_result"),
         "audit": state.get("audit_result"),
         "email_generation": state.get("email_generation_result"),
-        "email_review": state.get("email_review_result"),
+        "email_refinement": state.get("email_refinement_result"),
         "email_send": state.get("email_send_result"),
     }
 
@@ -322,7 +329,7 @@ async def run_audit_pipeline_async(
     progress_callback: Callable | None = None,
 ) -> dict[str, Any]:
     """Run only the audit stage of the pipeline."""
-    agent = SequentialAgent(
+    agent = Agent(
         name="audit_only_pipeline",
         sub_agents=[create_audit_agent()],
         description="Audit-only pipeline.",

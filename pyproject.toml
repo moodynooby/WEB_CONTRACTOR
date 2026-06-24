@@ -18,7 +18,7 @@ dependencies = [
     # "mkdocstrings[python]>=1.0.3",
     # "mkdocs-material>=9.7.5",
     # "mkdocs-api-autonav>=0.4.0",
-    "google-adk[extensions]>=0.1.0",
+    "google-adk[extensions]>=2.0.0",
     "gpustat>=1.1.1",
 ]
 

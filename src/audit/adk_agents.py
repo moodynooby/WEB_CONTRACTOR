@@ -1,9 +1,7 @@
-"""ADK Audit Agents — LlmAgent + ParallelAgent definitions for website auditing.
+"""ADK Audit Agents — Agent definitions for website auditing.
 
-Replaces the old audit/agents/ (BaseAgent, ContentAgent, BusinessAgent,
-TechnicalAgent, PerformanceAgent) and audit/orchestrator.py with ADK-native
-agents that benefit from built-in retry, JSON mode, tool calling, and
-structured session state.
+Uses the unified ``Agent`` class (ADK 2.0) with built-in retry, JSON mode,
+tool calling, and structured session state.
 
 Usage:
     from audit.adk_agents import build_audit_pipeline, run_audit
@@ -17,13 +15,13 @@ import functools
 import json
 from typing import Any
 
-from google.adk.agents.llm_agent import LlmAgent
-from google.adk.agents.parallel_agent import ParallelAgent
-from google.adk.agents.sequential_agent import SequentialAgent
+from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.workflow._retry_config import RetryConfig
 from google.genai import types
 
+from audit.adk_callbacks import on_agent_end, on_agent_start, on_tool_error
 from infra.adk_tools import fetch_website
 from infra.logging import get_logger
 from infra.settings import get_section
@@ -44,7 +42,7 @@ async def _run_adk_session(
     """Run an ADK agent in a session and return the session state.
 
     Args:
-        agent: ADK agent (or SequentialAgent/ParallelAgent) to run.
+        agent: ADK Agent to run.
         message: User message to send.
         session_id: Unique session identifier.
         app_name: ADK app name for session scoping.
@@ -131,14 +129,18 @@ Return ONLY a JSON object with this exact structure:
 
 
 @functools.lru_cache(maxsize=1)
-def get_content_agent() -> LlmAgent:
-    return LlmAgent(
+def get_content_agent() -> Agent:
+    return Agent(
         name="content_auditor",
         model=get_llm_model(),
         instruction=_content_instruction(),
         description="LLM-driven analysis of website content quality, CTAs, value proposition, and trust signals.",
         tools=_audit_tools(),
         output_key="content_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
 
@@ -193,14 +195,20 @@ Return ONLY a JSON object with this exact structure:
 }}"""
 
 
-business_agent = LlmAgent(
-    name="business_auditor",
-    model=get_llm_model(),
-    instruction=_business_instruction(),
-    description="Industry-specific business strategy checks with LLM audit.",
-    tools=_audit_tools(),
-    output_key="business_result",
-)
+@functools.lru_cache(maxsize=1)
+def get_business_agent() -> Agent:
+    return Agent(
+        name="business_auditor",
+        model=get_llm_model(),
+        instruction=_business_instruction(),
+        description="Industry-specific business strategy checks with LLM audit.",
+        tools=_audit_tools(),
+        output_key="business_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
+    )
 
 
 
@@ -247,14 +255,20 @@ Return ONLY a JSON object with this exact structure:
 }}"""
 
 
-technical_agent = LlmAgent(
-    name="technical_auditor",
-    model=get_llm_model(),
-    instruction=_technical_instruction(),
-    description="Rule-based SEO analysis: meta tags, structured data, Open Graph, H1 hierarchy, alt text, HTTPS.",
-    tools=_audit_tools(),
-    output_key="technical_result",
-)
+@functools.lru_cache(maxsize=1)
+def get_technical_agent() -> Agent:
+    return Agent(
+        name="technical_auditor",
+        model=get_llm_model(),
+        instruction=_technical_instruction(),
+        description="Rule-based SEO analysis: meta tags, structured data, Open Graph, H1 hierarchy, alt text, HTTPS.",
+        tools=_audit_tools(),
+        output_key="technical_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
+    )
 
 
 
@@ -301,22 +315,25 @@ Return ONLY a JSON object with this exact structure:
 }}"""
 
 
-performance_agent = LlmAgent(
-    name="performance_auditor",
-    model=get_llm_model(),
-    instruction=_performance_instruction(),
-    description="Rule-based performance analysis: HTML size, inline CSS/JS, resource count, render-blocking scripts, lazy loading.",
-    tools=_audit_tools(),
-    output_key="performance_result",
-)
+@functools.lru_cache(maxsize=1)
+def get_performance_agent() -> Agent:
+    return Agent(
+        name="performance_auditor",
+        model=get_llm_model(),
+        instruction=_performance_instruction(),
+        description="Rule-based performance analysis: HTML size, inline CSS/JS, resource count, render-blocking scripts, lazy loading.",
+        tools=_audit_tools(),
+        output_key="performance_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
+    )
 
 
 
 class AuditResultAggregator:
-    """Merges parallel audit agent results into a final score and issue list.
-
-    This replaces the old ``AuditOrchestrator._aggregate_results()`` method.
-    """
+    """Merges parallel audit agent results into a final score and issue list."""
 
     def __init__(self) -> None:
         self.weights = get_section("agents").get("weights", {
@@ -426,75 +443,89 @@ class AuditResultAggregator:
 
 
 
-def build_audit_pipeline() -> ParallelAgent:
-    """Build the ADK ParallelAgent that runs all 4 audit agents in parallel.
+def build_audit_pipeline() -> Agent:
+    """Build the ADK Agent that runs all 4 audit agents in parallel.
 
     Returns:
-        ParallelAgent ready to be run via ADK Runner.
+        Agent ready to be run via ADK Runner.
     """
-    return ParallelAgent(
+    return Agent(
         name="audit_pipeline",
-        sub_agents=[get_content_agent(), business_agent, technical_agent, performance_agent],
+        sub_agents=[get_content_agent(), get_business_agent(), get_technical_agent(), get_performance_agent()],
         description="Runs all 4 audit agents (content, business, technical, performance) in parallel.",
     )
 
 
-def build_audit_with_lead(lead: dict) -> SequentialAgent:
-    """Build a SequentialAgent that first fetches the lead's website, then runs the audit.
+def build_audit_with_lead(lead: dict) -> Agent:
+    """Build an Agent that audits a lead's website.
 
-    The first stage (``website_fetcher``) calls ``fetch_website`` and stores
-    the HTML in session state.  The second stage (``audit_pipeline``) reads
-    it and runs all 4 audit agents.
+    Runs all 4 audit agents in parallel with lead-specific instructions.
 
     Args:
         lead: Dict with ``business_name``, ``website``, ``bucket``.
 
     Returns:
-        SequentialAgent ready for execution.
+        Agent ready for execution.
     """
     business_name = lead.get("business_name", "")
     bucket = lead.get("bucket", "")
 
-    lead_content = LlmAgent(
+    lead_content = Agent(
         name="content_auditor",
         model=get_llm_model(),
         instruction=_content_instruction(bucket, business_name),
         description="Content quality audit.",
         tools=_audit_tools(),
         output_key="content_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
-    lead_business = LlmAgent(
+    lead_business = Agent(
         name="business_auditor",
         model=get_llm_model(),
         instruction=_business_instruction(bucket, business_name),
         description="Business strategy audit.",
         tools=_audit_tools(),
         output_key="business_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
-    lead_technical = LlmAgent(
+    lead_technical = Agent(
         name="technical_auditor",
         model=get_llm_model(),
         instruction=_technical_instruction(bucket, business_name),
         description="Technical SEO audit.",
         tools=_audit_tools(),
         output_key="technical_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
-    lead_performance = LlmAgent(
+    lead_performance = Agent(
         name="performance_auditor",
         model=get_llm_model(),
         instruction=_performance_instruction(bucket, business_name),
         description="Performance audit.",
         tools=_audit_tools(),
         output_key="performance_result",
+        before_agent_callback=on_agent_start,
+        after_agent_callback=on_agent_end,
+        on_tool_error_callback=on_tool_error,
+        retry_config=RetryConfig(max_attempts=3),
     )
 
-    parallel = ParallelAgent(
+    parallel = Agent(
         name="audit_parallel",
         sub_agents=[lead_content, lead_business, lead_technical, lead_performance],
         description="Run all 4 audit agents in parallel.",
     )
 
-    return SequentialAgent(
+    return Agent(
         name=f"audit_for_{business_name.replace(' ', '_')}",
         sub_agents=[parallel],
         description=f"Full website audit for {business_name}.",
@@ -528,7 +559,7 @@ async def run_audit_for_lead(lead: dict) -> dict[str, Any]:
         "score": result["score"],
         "issues": result["issues"],
         "qualified": 1 if result["qualified"] else 0,
-        "duration": 0,  
+        "duration": 0,
         "agents_run": result["agents_run"],
     }
 

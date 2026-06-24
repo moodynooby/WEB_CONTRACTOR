@@ -31,31 +31,27 @@ def fetch_website(url: str) -> dict[str, Any]:
     if not url.startswith("http"):
         url = f"https://{url}"
 
-    try:
-        resp = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (WebContractor ADK Audit)"},
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            for tag in soup(["script", "style", "noscript"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n", strip=True)
-            return {
-                "status": "success",
-                "html": resp.text[:50000],  
-                "soup_text": text[:10000],
-                "status_code": resp.status_code,
-            }
+    resp = requests.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (WebContractor ADK Audit)"},
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
         return {
-            "status": "error",
-            "error": f"HTTP {resp.status_code}",
+            "status": "success",
+            "html": resp.text[:50000],
+            "soup_text": text[:10000],
             "status_code": resp.status_code,
         }
-    except Exception as e:
-        logger.warning(f"fetch_website failed for {url}: {e}")
-        return {"status": "error", "error": str(e)}
+    return {
+        "status": "error",
+        "error": f"HTTP {resp.status_code}",
+        "status_code": resp.status_code,
+    }
 
 
 def discover_leads(limit: int = 20) -> dict[str, Any]:
@@ -75,17 +71,13 @@ def discover_leads(limit: int = 20) -> dict[str, Any]:
     from discovery.engine import PlaywrightScraper
 
     scraper = PlaywrightScraper()
-    try:
-        result = scraper.run(max_queries=limit)
-        return {
-            "status": "success",
-            "queries_executed": result["queries_executed"],
-            "leads_found": result["leads_found"],
-            "leads_saved": result["leads_saved"],
-        }
-    except Exception as e:
-        logger.error(f"discover_leads failed: {e}")
-        return {"status": "error", "error": str(e)}
+    result = scraper.run(max_queries=limit)
+    return {
+        "status": "success",
+        "queries_executed": result["queries_executed"],
+        "leads_found": result["leads_found"],
+        "leads_saved": result["leads_saved"],
+    }
 
 
 
@@ -101,12 +93,8 @@ def get_pending_audits(limit: int = 20) -> dict[str, Any]:
     """
     from database.repository import get_pending_audits as _repo_get
 
-    try:
-        leads = _repo_get(limit)
-        return {"status": "success", "leads": leads}
-    except Exception as e:
-        logger.error(f"get_pending_audits failed: {e}")
-        return {"status": "error", "error": str(e)}
+    leads = _repo_get(limit)
+    return {"status": "success", "leads": leads}
 
 
 def save_audit_result(lead_id: str, audit_data: str) -> dict[str, Any]:
@@ -122,13 +110,9 @@ def save_audit_result(lead_id: str, audit_data: str) -> dict[str, Any]:
     """
     from database.repository import save_audits_batch
 
-    try:
-        data = json.loads(audit_data) if isinstance(audit_data, str) else audit_data
-        save_audits_batch([{"lead_id": lead_id, "data": data}])
-        return {"status": "success", "message": f"Audit saved for lead {lead_id}"}
-    except Exception as e:
-        logger.error(f"save_audit_result failed: {e}")
-        return {"status": "error", "error": str(e)}
+    data = json.loads(audit_data) if isinstance(audit_data, str) else audit_data
+    save_audits_batch([{"lead_id": lead_id, "data": data}])
+    return {"status": "success", "message": f"Audit saved for lead {lead_id}"}
 
 
 def get_qualified_leads(limit: int = 20) -> dict[str, Any]:
@@ -143,12 +127,8 @@ def get_qualified_leads(limit: int = 20) -> dict[str, Any]:
     """
     from database.repository import get_qualified_leads as _repo_get
 
-    try:
-        leads = _repo_get(limit)
-        return {"status": "success", "leads": leads}
-    except Exception as e:
-        logger.error(f"get_qualified_leads failed: {e}")
-        return {"status": "error", "error": str(e)}
+    leads = _repo_get(limit)
+    return {"status": "success", "leads": leads}
 
 
 
@@ -201,30 +181,26 @@ def generate_email(
     )
     system_message = get_email_system_message()
 
-    try:
-        raw = llm.generate(
-            model=DEFAULT_MODEL,
-            prompt=prompt,
-            system=system_message,
-            format_json=True,
-            max_retries=EMAIL_MAX_RETRIES,
-        )
-        data = json.loads(raw)
-        subject = (data.get("subject") or "").strip()
-        body = (data.get("body") or "").strip()
+    raw = llm.generate(
+        model=DEFAULT_MODEL,
+        prompt=prompt,
+        system=system_message,
+        format_json=True,
+        max_retries=EMAIL_MAX_RETRIES,
+    )
+    data = json.loads(raw)
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
 
-        if not subject or not body:
-            return {"status": "error", "error": "LLM returned empty email"}
+    if not subject or not body:
+        return {"status": "error", "error": "LLM returned empty email"}
 
-        return {
-            "status": "success",
-            "lead_id": lead_id,
-            "subject": subject,
-            "body": body,
-        }
-    except Exception as e:
-        logger.error(f"generate_email failed: {e}")
-        return {"status": "error", "error": str(e)}
+    return {
+        "status": "success",
+        "lead_id": lead_id,
+        "subject": subject,
+        "body": body,
+    }
 
 
 def save_email(
@@ -248,19 +224,15 @@ def save_email(
     """
     from database.repository import save_emails_batch
 
-    try:
-        save_emails_batch([{
-            "lead_id": lead_id,
-            "to_email": to_email,
-            "subject": subject,
-            "body": body,
-            "status": status,
-            "variation": "default",
-        }])
-        return {"status": "success", "message": f"Email saved for lead {lead_id}"}
-    except Exception as e:
-        logger.error(f"save_email failed: {e}")
-        return {"status": "error", "error": str(e)}
+    save_emails_batch([{
+        "lead_id": lead_id,
+        "to_email": to_email,
+        "subject": subject,
+        "body": body,
+        "status": status,
+        "variation": "default",
+    }])
+    return {"status": "success", "message": f"Email saved for lead {lead_id}"}
 
 
 def send_email(
@@ -284,21 +256,17 @@ def send_email(
     """
     from outreach.sender import EmailSender
 
-    try:
-        sender = EmailSender()
-        success = sender.send_email(
-            to_email=to_email,
-            subject=subject,
-            body=body,
-            campaign_id=int(campaign_id) if campaign_id else None,
-            lead_id=lead_id or None,
-        )
-        if success:
-            return {"status": "success", "message": f"Email sent to {to_email}"}
-        return {"status": "error", "error": "SMTP send returned False"}
-    except Exception as e:
-        logger.error(f"send_email failed: {e}")
-        return {"status": "error", "error": str(e)}
+    sender = EmailSender()
+    success = sender.send_email(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        campaign_id=int(campaign_id) if campaign_id else None,
+        lead_id=lead_id or None,
+    )
+    if success:
+        return {"status": "success", "message": f"Email sent to {to_email}"}
+    return {"status": "error", "error": "SMTP send returned False"}
 
 
 def refine_email(
@@ -324,20 +292,16 @@ def refine_email(
     llm_config = get_section("llm")
     prompt = build_refine_prompt(subject, body, instructions)
 
-    try:
-        raw = llm.generate(
-            model=llm_config.get("default_model", "llama-3.1-8b-instant"),
-            prompt=prompt,
-            system="You are a professional email editor. Output ONLY valid JSON.",
-            format_json=True,
-            max_retries=llm_config.get("max_retries", 2),
-        )
-        data = _json.loads(raw)
-        return {
-            "status": "success",
-            "subject": data.get("subject", subject),
-            "body": data.get("body", body),
-        }
-    except Exception as e:
-        logger.error(f"refine_email failed: {e}")
-        return {"status": "error", "error": str(e), "subject": subject, "body": body}
+    raw = llm.generate(
+        model=llm_config.get("default_model", "llama-3.1-8b-instant"),
+        prompt=prompt,
+        system="You are a professional email editor. Output ONLY valid JSON.",
+        format_json=True,
+        max_retries=llm_config.get("max_retries", 2),
+    )
+    data = _json.loads(raw)
+    return {
+        "status": "success",
+        "subject": data.get("subject", subject),
+        "body": data.get("body", body),
+    }

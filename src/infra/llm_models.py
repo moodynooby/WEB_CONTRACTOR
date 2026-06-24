@@ -15,7 +15,7 @@ Usage:
     from infra.llm_models import get_llm_model
 
     model = get_llm_model()
-    agent = LlmAgent(model=model, name="...", instruction="...")
+    agent = Agent(model=model, name="...", instruction="...")
 """
 
 from typing import Any
@@ -96,52 +96,33 @@ def get_llm_model_string() -> str:
     return f"{provider}/{model_id}"
 
 
-def get_llm_model():
-    """Get the configured LLM model.
+def get_llm_model() -> str:
+    """Get the configured LLM model string.
+
+    The unified ``Agent`` class accepts model strings directly — no
+    ``LiteLlm`` wrapper needed. ADK's built-in ``LLMRegistry`` resolves
+    provider/model strings automatically via LiteLLM.
+
+    For vLLM: the local server is started and env vars are set so that
+    ``openai/<model_id>`` resolves to the local vLLM endpoint.
 
     Returns:
-        For Gemini: a plain model name string (``"gemini/gemini-2.0-flash"``).
-        For vllm: a ``LiteLlm`` instance that connects to the local vLLM server.
-        For all others: a ``LiteLlm`` instance that wraps the provider.
+        Model string in LiteLLM format (e.g. ``"groq/llama-3.3-70b-versatile"``).
     """
     config = _get_llm_config()
     provider = config.get("provider", "groq")
 
     if provider in _model_cache:
-        return _model_cache[provider]
-
-    if provider == "gemini":
-        model_name = get_llm_model_string()
-        logger.info(f"LLM model: Gemini — {model_name}")
-        _model_cache[provider] = model_name
-        return model_name
+        return _model_cache[provider]  # type: ignore[return-value]
 
     if provider == "vllm":
         from infra.vllm_server import get_server
         get_server().start()
 
-        vllm_cfg = config.get("vllm", {})
-        model_id = vllm_cfg.get("model", "auto")
-        if model_id == "auto":
-            from infra.vllm_server import _select_model_by_gpu_memory
-            model_id = _select_model_by_gpu_memory()
-
-        from google.adk.models.lite_llm import LiteLlm
-        model = LiteLlm(
-            model=f"openai/{model_id}",
-            api_base=get_server().api_base,
-        )
-        logger.info(f"LLM model: vLLM (local server) — {model_id} at {get_server().api_base}")
-        _model_cache[provider] = model
-        return model
-
-    from google.adk.models.lite_llm import LiteLlm
-
-    lite_model = get_llm_model_string()
-    logger.info(f"LLM model: LiteLLm — {lite_model}")
-    model = LiteLlm(model=lite_model)
-    _model_cache[provider] = model
-    return model
+    model_str = get_llm_model_string()
+    logger.info(f"LLM model: {model_str}")
+    _model_cache[provider] = model_str
+    return model_str
 
 
 def get_available_providers() -> list[dict[str, str | bool]]:
