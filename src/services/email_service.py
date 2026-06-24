@@ -3,12 +3,12 @@
 Provides all email CRUD + LLM operations as framework-agnostic methods.
 """
 
-from database.repository import (
+from database.email_repo import (
     get_emails_for_review,
     update_email_content,
     delete_email as repo_delete_email,
-    get_lead_by_id,
 )
+from database.lead_repo import get_lead_by_id
 from outreach.generator import EmailGenerator
 from outreach.sender import EmailSender
 from infra.logging import get_logger

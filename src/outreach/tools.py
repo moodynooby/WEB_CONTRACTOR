@@ -1,9 +1,4 @@
-"""ADK FunctionTools — wrap existing business logic as ADK-callable tools.
-
-Each tool is a plain Python function with type hints and a docstring.
-ADK auto-generates the tool schema from the signature, enabling LLMs
-to discover and invoke them autonomously.
-"""
+"""ADK tools for the outreach domain — email generation, saving, sending, refinement."""
 
 import json
 from typing import Any
@@ -11,125 +6,6 @@ from typing import Any
 from infra.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-
-def fetch_website(url: str) -> dict[str, Any]:
-    """Fetch a website URL and return parsed HTML content.
-
-    Args:
-        url: The website URL to fetch (must include http/https scheme).
-
-    Returns:
-        Dict with keys: ``status`` (``success``/``error``), ``html`` (raw HTML
-        string), ``soup_text`` (extracted text content), ``status_code`` (int),
-        and ``error`` (error message on failure).
-    """
-    import requests
-    from bs4 import BeautifulSoup
-
-    if not url.startswith("http"):
-        url = f"https://{url}"
-
-    resp = requests.get(
-        url,
-        headers={"User-Agent": "Mozilla/5.0 (WebContractor ADK Audit)"},
-        timeout=15,
-    )
-    if resp.status_code == 200:
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup(["script", "style", "noscript"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
-        return {
-            "status": "success",
-            "html": resp.text[:50000],
-            "soup_text": text[:10000],
-            "status_code": resp.status_code,
-        }
-    return {
-        "status": "error",
-        "error": f"HTTP {resp.status_code}",
-        "status_code": resp.status_code,
-    }
-
-
-def discover_leads(limit: int = 20) -> dict[str, Any]:
-    """Run lead discovery pipeline and return newly discovered leads.
-
-    Wraps :class:`discovery.engine.PlaywrightScraper`.  Returns a summary
-    rather than raw lead data — the leads are persisted to MongoDB and
-    downstream agents query them from the database.
-
-    Args:
-        limit: Maximum number of search queries to execute.
-
-    Returns:
-        Dict with keys: ``status``, ``queries_executed``, ``leads_found``,
-        ``leads_saved``.
-    """
-    from discovery.engine import PlaywrightScraper
-
-    scraper = PlaywrightScraper()
-    result = scraper.run(max_queries=limit)
-    return {
-        "status": "success",
-        "queries_executed": result["queries_executed"],
-        "leads_found": result["leads_found"],
-        "leads_saved": result["leads_saved"],
-    }
-
-
-
-def get_pending_audits(limit: int = 20) -> dict[str, Any]:
-    """Fetch leads that have not yet been audited from the database.
-
-    Args:
-        limit: Maximum number of leads to return.
-
-    Returns:
-        Dict with keys: ``status``, ``leads`` (list of lead dicts with
-        ``id``, ``business_name``, ``website``, ``bucket``, ``email``).
-    """
-    from database.repository import get_pending_audits as _repo_get
-
-    leads = _repo_get(limit)
-    return {"status": "success", "leads": leads}
-
-
-def save_audit_result(lead_id: str, audit_data: str) -> dict[str, Any]:
-    """Persist an audit result to the database.
-
-    Args:
-        lead_id: The MongoDB ObjectId of the lead.
-        audit_data: JSON string containing the full audit result (score,
-            issues, qualified flag, etc.).
-
-    Returns:
-        Dict with keys: ``status``, ``message``.
-    """
-    from database.repository import save_audits_batch
-
-    data = json.loads(audit_data) if isinstance(audit_data, str) else audit_data
-    save_audits_batch([{"lead_id": lead_id, "data": data}])
-    return {"status": "success", "message": f"Audit saved for lead {lead_id}"}
-
-
-def get_qualified_leads(limit: int = 20) -> dict[str, Any]:
-    """Fetch leads that passed the audit qualification threshold.
-
-    Args:
-        limit: Maximum number of leads to return.
-
-    Returns:
-        Dict with keys: ``status``, ``leads`` (list of lead dicts with
-        audit results attached).
-    """
-    from database.repository import get_qualified_leads as _repo_get
-
-    leads = _repo_get(limit)
-    return {"status": "success", "leads": leads}
-
 
 
 def generate_email(
@@ -141,9 +17,6 @@ def generate_email(
     cta: str = "",
 ) -> dict[str, Any]:
     """Generate a personalized cold email for a qualified lead using the LLM.
-
-    The email references specific audit findings (critical/warning issues)
-    and uses bucket-specific angles and CTAs when provided.
 
     Args:
         lead_id: MongoDB ObjectId of the lead.
@@ -222,7 +95,7 @@ def save_email(
     Returns:
         Dict with keys: ``status``, ``message``.
     """
-    from database.repository import save_emails_batch
+    from database.email_repo import save_emails_batch
 
     save_emails_batch([{
         "lead_id": lead_id,

@@ -10,7 +10,7 @@ from database.connection import init_db, close_db
 from discovery.engine import PlaywrightScraper
 from outreach.sender import EmailSender
 from outreach.generator import EmailGenerator
-from audit.adk_pipeline import (
+from audit.pipeline import (
     run_pipeline,
     run_audit_pipeline,
 )

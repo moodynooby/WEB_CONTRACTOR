@@ -43,10 +43,9 @@ from playwright.sync_api import Playwright, Page, sync_playwright
 
 from infra.settings import DEFAULT_USER_AGENT, get_section
 from infra.logging import get_logger
-from database.repository import (
-    get_all_buckets,
-    get_bucket_id_by_name,
-    save_leads_batch,
+from database.bucket_repo import get_all_buckets, get_bucket_id_by_name
+from database.lead_repo import save_leads_batch
+from database.query_perf_repo import (
     get_or_create_query_performance,
     update_query_performance,
     mark_query_as_stale,

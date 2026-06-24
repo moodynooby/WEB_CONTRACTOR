@@ -4,7 +4,7 @@ Extracted from BucketManager in repository.py.
 Provides all bucket CRUD + validation as framework-agnostic methods.
 """
 
-from database.repository import BucketManager
+from database.bucket_repo import BucketManager
 from infra.logging import get_logger
 
 logger = get_logger(__name__)

@@ -11,11 +11,8 @@ from infra.settings import (
     get_section,
 )
 from infra.logging import get_logger
-from database.repository import (
-    get_qualified_leads,
-    save_emails_batch,
-    update_lead_status,
-)
+from database.lead_repo import get_qualified_leads, update_lead_status
+from database.email_repo import save_emails_batch
 from outreach.discovery import scrape_email_from_website
 
 

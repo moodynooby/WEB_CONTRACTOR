@@ -45,8 +45,9 @@ _app_ref: Any = None
 
 def _get_stats() -> str:
     """Format current stats as text message."""
-    from database.connection import get_database, get_email_campaign_stats, DatabaseUnavailableError
-    from database.repository import count_leads
+    from database.connection import get_database, DatabaseUnavailableError
+    from database.lead_repo import count_leads
+    from database.email_repo import get_email_campaign_stats
 
     try:
         total_leads = count_leads()
@@ -267,7 +268,7 @@ def _handle_leads() -> str:
 
 def _handle_buckets() -> str:
     try:
-        from database.repository import BucketManager
+        from database.bucket_repo import BucketManager
 
         buckets = BucketManager.list()
         if not buckets:

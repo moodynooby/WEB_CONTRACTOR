@@ -1,6 +1,7 @@
 """Emails page - generate and review outreach emails."""
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -10,15 +11,33 @@ if str(SRC_DIR) not in sys.path:
 
 import streamlit as st
 from services.email_service import EmailService
-from services.pipeline_service import PipelineService, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
 from services.stats_service import StatsService
 from streamlit_app.components.email_card import show_email_card
 from streamlit_app.components.log_viewer import append_log, show_log_viewer
-from streamlit_app.state import init_session_state
+from streamlit_app.state import init_session_state, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
 
 init_session_state()
 
 email_service = EmailService()
+
+
+def _run_email_gen_bg(progress: dict, limit: int) -> None:
+    from app import WebContractorApp
+    app = WebContractorApp()
+    app.initialize()
+    try:
+        def on_progress(current, total, msg):
+            progress["current"] = current
+            progress["total"] = total
+            progress["message"] = msg
+        result = app.generate_emails(limit=limit, progress_callback=on_progress)
+        progress["status"] = PROGRESS_STATUS_DONE
+        progress["result"] = result
+    except Exception as e:
+        progress["status"] = PROGRESS_STATUS_ERROR
+        progress["error"] = str(e)
+    finally:
+        app.shutdown()
 
 
 def render():
@@ -46,7 +65,7 @@ def render():
         ):
             progress["status"] = PROGRESS_STATUS_RUNNING
             progress["message"] = "Starting email generation..."
-            PipelineService.generate_emails(progress, limit=int(limit))
+            threading.Thread(target=_run_email_gen_bg, args=(progress, int(limit)), daemon=True).start()
             st.rerun()
 
         if is_running:
@@ -72,6 +91,7 @@ def render():
                     st.rerun()
                 elif progress.get("status") == PROGRESS_STATUS_ERROR:
                     status.update(label="Generation Failed", state="error")
+                    bar.progress(1.0, text="Failed")
                     st.error(progress.get("error", "Unknown error"))
                     append_log(f"Email generation failed: {progress.get('error')}")
                     progress["status"] = "idle"

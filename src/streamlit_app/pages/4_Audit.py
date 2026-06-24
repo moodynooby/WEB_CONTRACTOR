@@ -1,6 +1,7 @@
 """Audit page - run lead audit pipeline."""
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -9,12 +10,30 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import streamlit as st
-from services.pipeline_service import PipelineService, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
 from services.stats_service import StatsService
 from streamlit_app.components.log_viewer import append_log, show_log_viewer, clear_logs
-from streamlit_app.state import init_session_state
+from streamlit_app.state import init_session_state, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
 
 init_session_state()
+
+
+def _run_audit_bg(progress: dict, limit: int) -> None:
+    from app import WebContractorApp
+    app = WebContractorApp()
+    app.initialize()
+    try:
+        def on_progress(current, total, msg):
+            progress["current"] = current
+            progress["total"] = total
+            progress["message"] = msg
+        result = app.run_audit(limit=limit, progress_callback=on_progress)
+        progress["status"] = PROGRESS_STATUS_DONE
+        progress["result"] = result
+    except Exception as e:
+        progress["status"] = PROGRESS_STATUS_ERROR
+        progress["error"] = str(e)
+    finally:
+        app.shutdown()
 
 
 def render():
@@ -44,7 +63,7 @@ def render():
         ):
             progress["status"] = PROGRESS_STATUS_RUNNING
             progress["message"] = "Starting audit..."
-            PipelineService.run_audit(progress, limit=int(limit))
+            threading.Thread(target=_run_audit_bg, args=(progress, int(limit)), daemon=True).start()
             st.rerun()
 
     if is_running:

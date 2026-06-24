@@ -40,7 +40,7 @@ def prompt(question: str, default: str = "") -> str:
 
 def list_buckets():
     """List all existing buckets with details."""
-    from database.repository import BucketManager
+    from database.bucket_repo import BucketManager
 
     print("\n" + "=" * 70)
     print("  📦 Existing Buckets")
@@ -66,7 +66,7 @@ def list_buckets():
 
 def _do_create(business_type: str, locations: list[str], max_queries: int, max_results: int):
     """Shared create logic used by both interactive and non-interactive modes."""
-    from database.repository import BucketManager
+    from database.bucket_repo import BucketManager
 
     print(f"\n[→] Creating bucket for '{business_type}' in {len(locations)} locations...")
 
@@ -110,7 +110,7 @@ def create_bucket_interactive():
     success = _do_create(business_type, target_locations, max_queries, max_results)
 
     if success:
-        from database.repository import BucketManager
+        from database.bucket_repo import BucketManager
 
         config = BucketManager.get_by_name(
             business_type.lower().replace(" ", "_").replace("-", "_")
@@ -133,7 +133,7 @@ def create_bucket_non_interactive(
 
 def delete_bucket():
     """Delete a bucket with confirmation."""
-    from database.repository import BucketManager
+    from database.bucket_repo import BucketManager
 
     print("\n" + "=" * 70)
     print("  🗑️  Delete Bucket")

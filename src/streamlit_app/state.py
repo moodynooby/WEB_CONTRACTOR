@@ -1,10 +1,26 @@
 """Session state management for Streamlit app.
 
-Centralizes all session_state key definitions and initialization.
+Centralizes all session state key definitions and initialization.
 """
 
 import streamlit as st
-from services.pipeline_service import make_progress_dict
+
+PROGRESS_STATUS_IDLE = "idle"
+PROGRESS_STATUS_RUNNING = "running"
+PROGRESS_STATUS_DONE = "done"
+PROGRESS_STATUS_ERROR = "error"
+
+
+def make_progress_dict() -> dict:
+    """Create a fresh progress dict for pipeline tracking."""
+    return {
+        "status": PROGRESS_STATUS_IDLE,
+        "message": "",
+        "current": 0,
+        "total": 0,
+        "result": None,
+        "error": None,
+    }
 
 
 def init_session_state():

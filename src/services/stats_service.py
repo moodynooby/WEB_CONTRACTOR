@@ -4,12 +4,9 @@ Provides database statistics as framework-agnostic methods.
 """
 
 from database.connection import is_connected, get_connection_status
-from database.repository import (
-    count_buckets,
-    count_leads_pending_audit,
-    count_qualified_leads_without_emails,
-    count_emails_for_review,
-)
+from database.bucket_repo import count_buckets
+from database.lead_repo import count_leads_pending_audit, count_qualified_leads_without_emails
+from database.email_repo import count_emails_for_review
 from infra.logging import get_logger
 
 logger = get_logger(__name__)

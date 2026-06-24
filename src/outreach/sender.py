@@ -12,7 +12,7 @@ from infra.settings import (
     GMAIL_PASSWORD,
 )
 from infra.logging import get_logger
-from database.repository import mark_email_sent
+from database.email_repo import mark_email_sent
 
 
 class EmailSender:
