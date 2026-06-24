@@ -20,6 +20,8 @@ dependencies = [
     # "mkdocs-api-autonav>=0.4.0",
     "google-adk[extensions]>=2.0.0",
     "gpustat>=1.1.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
 ]
 
 [project.scripts]

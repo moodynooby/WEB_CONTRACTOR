@@ -5,7 +5,7 @@ Benefits:
 - 100+ providers via OpenAI-compatible API (Groq, OpenRouter, Gemini, Anthropic, Ollama, etc.)
 - Built-in retry/fallback via LiteLLM
 - No manual rate limiting or HTTP session management
-- Single config source (llm section in config_defaults.py)
+- Single config source (config/default.yaml)
 """
 
 import json

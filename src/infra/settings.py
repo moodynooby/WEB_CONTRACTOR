@@ -1,6 +1,6 @@
 """Application Settings — single source of truth.
 
-All config in Python. Edit directly in infra/config_defaults.py.
+Config loaded from config/default.yaml with Pydantic validation.
 Secrets (API keys, credentials) load from environment variables.
 """
 
@@ -9,72 +9,66 @@ import warnings
 from pathlib import Path
 from typing import Any, Final
 
+import yaml
 from dotenv import load_dotenv
-from infra import config_defaults
+from pydantic import ValidationError
+
+from infra.config_schema import AppConfig
 
 PROJECT_ROOT: Final[Path] = Path(__file__).parent.parent.parent
 _ENV_FILE = PROJECT_ROOT / ".env"
+_CONFIG_FILE = PROJECT_ROOT / "config" / "default.yaml"
 
 load_dotenv(_ENV_FILE, override=True)
 
 
-def _load_config() -> dict[str, Any]:
-    """Load config from Python defaults."""
-    return config_defaults.CONFIG
+def _load_config() -> AppConfig:
+    """Load config from YAML file with validation."""
+    if _CONFIG_FILE.exists():
+        with open(_CONFIG_FILE, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        try:
+            return AppConfig(**raw)
+        except ValidationError as e:
+            warnings.warn(f"Invalid config in {_CONFIG_FILE}: {e}", RuntimeWarning)
+    return AppConfig()
 
 
-_cfg = _load_config()
+_config: AppConfig = _load_config()
 
 
-def _section(name: str) -> dict[str, Any]:
-    """Return a top-level section dict from the already-loaded _cfg (empty if missing)."""
-    section = _cfg.get(name)
-    return section if isinstance(section, dict) else {}
+def get_config() -> AppConfig:
+    """Return the validated config object."""
+    return _config
 
 
 def get_section(name: str) -> dict[str, Any]:
-    """Return a config section from the already-loaded _cfg dict.
+    """Return a config section as a dict for backward compatibility."""
+    section = getattr(_config, name, None)
+    if section is None:
+        return {}
+    return section.model_dump() if hasattr(section, "model_dump") else {}
 
-    This is an O(1) dict lookup — no file I/O or re-parsing.
-    """
-    return _section(name)
 
-_email = _section("email")
-EMAIL_SIGNATURE: Final[str] = _email.get(
-    "signature", "\n\nBest regards,\nWeb Contractor"
-)
-SMTP_SERVER: Final[str] = _email.get("smtp_server", "smtp.gmail.com")
-SMTP_PORT: Final[int] = _email.get("smtp_port", 587)
+EMAIL_SIGNATURE: Final[str] = _config.email.signature
+SMTP_SERVER: Final[str] = _config.email.smtp_server
+SMTP_PORT: Final[int] = _config.email.smtp_port
 
-_llm = _section("llm")
-DEFAULT_PROVIDER: Final[str] = _llm.get("provider", "groq")
-DEFAULT_MODEL: Final[str] = f"{DEFAULT_PROVIDER}/{_llm.get(DEFAULT_PROVIDER, {}).get('model', 'llama-3.3-70b-versatile')}"
-
-_email_discovery = _section("email_discovery")
-EMAIL_COMMON_PREFIXES: Final[list[str]] = _email_discovery.get(
-    "common_prefixes", ["info", "contact", "hello", "support", "admin"]
+DEFAULT_PROVIDER: Final[str] = _config.llm.provider
+DEFAULT_MODEL: Final[str] = (
+    f"{DEFAULT_PROVIDER}/{getattr(_config.llm, DEFAULT_PROVIDER, _config.llm.ollama).model}"
 )
 
-_timeouts = _section("timeouts")
-EMAIL_SCRAPE_TIMEOUT: Final[int] = _timeouts.get("email_scrape_seconds", 10)
+EMAIL_COMMON_PREFIXES: Final[list[str]] = ["info", "contact", "hello", "support", "admin"]
 
-_scraper = _section("scraper")
-_DEFAULT_USER_AGENTS: Final[list[str]] = _scraper.get(
-    "user_agents",
-    [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-    ],
-)
-DEFAULT_USER_AGENT: Final[str] = _DEFAULT_USER_AGENTS[0]
+EMAIL_SCRAPE_TIMEOUT: Final[int] = _config.timeouts.email_scrape_seconds
 
-_qualification = _section("qualification")
-EMAIL_MAX_RETRIES: Final[int] = _qualification.get("email_max_retries", 3)
+DEFAULT_USER_AGENT: Final[str] = _config.scraper.user_agents[0] if _config.scraper.user_agents else ""
 
-_query_mgmt = _section("query_management")
-STALE_QUERY_THRESHOLD: Final[int] = _query_mgmt.get("stale_threshold", 3)
-STALE_QUERY_CLEANUP_DAYS: Final[int] = _query_mgmt.get("stale_cleanup_days", 30)
+EMAIL_MAX_RETRIES: Final[int] = 3
+
+STALE_QUERY_THRESHOLD: Final[int] = _config.query_management.stale_query_threshold
+STALE_QUERY_CLEANUP_DAYS: Final[int] = _config.query_management.stale_cleanup_days
 
 GROQ_API_KEY: Final[str] = os.getenv("GROQ_API_KEY", "")
 OPENROUTER_API_KEY: Final[str] = os.getenv("OPENROUTER_API_KEY", "")
@@ -147,7 +141,9 @@ def _validate_secrets() -> None:
             parsed = urlparse(url)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex((parsed.hostname or "localhost", parsed.port or 11434))
+            result = sock.connect_ex(
+                (parsed.hostname or "localhost", parsed.port or 11434)
+            )
             sock.close()
             if result != 0:
                 warnings.warn(

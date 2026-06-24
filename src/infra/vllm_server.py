@@ -2,7 +2,6 @@
 
 Manages the lifecycle of a ``vllm serve`` process so that the rest of
 the application can connect to it via the OpenAI-compatible endpoint
-(through LiteLlm / ADK's ``LiteLlm`` wrapper).
 
 Usage:
     from infra.vllm_server import VllmServer
@@ -22,8 +21,8 @@ import socket
 import subprocess
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import Any
 
 from infra.logging import get_logger
@@ -185,8 +184,7 @@ class VllmServer:
             if not ready:
                 self.stop()
                 raise RuntimeError(
-                    f"vLLM server did not become ready within "
-                    f"{_STARTUP_TIMEOUT:.0f}s"
+                    f"vLLM server did not become ready within {_STARTUP_TIMEOUT:.0f}s"
                 )
 
             logger.info(f"vLLM server ready at {self.api_base}")

@@ -3,13 +3,7 @@
 Entry point: streamlit run src/streamlit_app/Home.py
 """
 
-import sys
 from pathlib import Path
-
-# Ensure src/ is on sys.path so imports work
-SRC_DIR = Path(__file__).parent.parent.resolve()
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
 import streamlit as st
 from infra.logging import get_logger

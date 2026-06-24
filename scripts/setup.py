@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 class SetupWizard:
@@ -176,7 +175,6 @@ class SetupWizard:
             print("  ✓ Connected to MongoDB successfully")
 
             print("  Initializing database...")
-            sys.path.insert(0, str(PROJECT_ROOT / "src"))
             from database.connection import init_db
             init_db()
             print("  ✓ Database initialized")
