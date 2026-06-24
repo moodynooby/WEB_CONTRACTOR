@@ -37,9 +37,13 @@ CONFIG: dict = {
         },
         "vllm": {
             "model": "auto",
-            "tensor_parallel": 1,
+            "host": "localhost",
+            "port": 8000,
             "max_model_len": 4096,
             "gpu_memory_utilization": 0.8,
+            "tensor_parallel": 1,
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": None,
         },
     },
     "scraper": {

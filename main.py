@@ -10,17 +10,17 @@ For setup, use the scripts:
     python scripts/setup.py         # Interactive setup wizard
 """
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
-
-from infra.logging import get_logger
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 SRC_DIR = PROJECT_ROOT / "src"
 
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+from infra.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,6 @@ def launch_web():
     streamlit_app = SRC_DIR / "streamlit_app" / "Home.py"
     logger.info("Starting Web Contractor web UI...")
     logger.info(f"Streamlit app: {streamlit_app}")
-    logger.info("")
 
     cmd = [sys.executable, "-m", "streamlit", "run", str(streamlit_app)]
     subprocess.run(cmd)
@@ -45,8 +44,9 @@ def launch_web():
 
 def launch_bot():
     """Launch Telegram bot only (foreground mode)."""
-    from database.connection import init_db, is_connected
     import time
+
+    from database.connection import init_db, is_connected
 
     if not is_connected():
         logger.error("Database not connected. Bot cannot start.")
@@ -57,7 +57,6 @@ def launch_bot():
 
     logger.info("Starting Telegram bot in foreground mode...")
     logger.info("Press Ctrl+C to stop")
-    logger.info("")
 
     from app import WebContractorApp
 

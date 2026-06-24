@@ -63,9 +63,10 @@ LOCAL_HARDWARE_PROFILE: Final[str] = "auto"
 
 _vllm_cfg = _llm.get("vllm", {})
 VLLM_MODEL: Final[str] = _vllm_cfg.get("model", "auto")
-VLLM_MAX_MODEL_LEN: Final[int] = _vllm_cfg.get("max_model_len", 4096)
-VLLM_GPU_MEMORY_UTILIZATION: Final[float] = _vllm_cfg.get("gpu_memory_utilization", 0.8)
-VLLM_TENSOR_PARALLEL: Final[int] = _vllm_cfg.get("tensor_parallel", 1)
+VLLM_HOST: Final[str] = _vllm_cfg.get("host", "localhost")
+VLLM_PORT: Final[int] = _vllm_cfg.get("port", 8000)
+VLLM_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = _vllm_cfg.get("enable_auto_tool_choice", True)
+VLLM_TOOL_CALL_PARSER: Final[str | None] = _vllm_cfg.get("tool_call_parser")
 
 GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"

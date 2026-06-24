@@ -21,7 +21,6 @@ Usage:
 from typing import Any
 
 from infra.logging import get_logger
-from infra.settings import get_section
 
 logger = get_logger(__name__)
 
@@ -30,6 +29,7 @@ _model_cache: dict[str, Any] = {}
 
 def _get_llm_config() -> dict[str, Any]:
     """Load the LLM configuration section."""
+    from infra.settings import get_section
     return get_section("llm")
 
 
@@ -70,7 +70,19 @@ def get_llm_model_string() -> str:
     if provider == "vllm":
         vllm_cfg = config.get("vllm", {})
         model_id = vllm_cfg.get("model", "auto")
-        return f"vllm/{model_id}"
+        if model_id == "auto":
+            from infra.vllm_server import _select_model_by_ram
+            model_id = _select_model_by_ram()
+        import os
+        api_base = (
+            os.environ.get("OPENAI_API_BASE")
+            or vllm_cfg.get("api_base")
+            or f'http://{vllm_cfg.get("host", "localhost")}:{vllm_cfg.get("port", 8000)}/v1'
+        )
+        api_key = os.environ.get("OPENAI_API_KEY") or vllm_cfg.get("api_key", "") or "not-needed"
+        os.environ.setdefault("OPENAI_API_BASE", api_base)
+        os.environ.setdefault("OPENAI_API_KEY", api_key)
+        return f"openai/{model_id}"
 
     provider_cfg = config.get(provider, {})
     model_id = provider_cfg.get("model", "")
@@ -85,11 +97,11 @@ def get_llm_model_string() -> str:
 
 
 def get_llm_model():
-    """Get the configured LLM model (string or LiteLlm instance).
+    """Get the configured LLM model.
 
     Returns:
         For Gemini: a plain model name string (``"gemini/gemini-2.0-flash"``).
-        For vllm: a plain model name string (``"vllm/auto"``).
+        For vllm: a ``LiteLlm`` instance that connects to the local vLLM server.
         For all others: a ``LiteLlm`` instance that wraps the provider.
     """
     config = _get_llm_config()
@@ -105,10 +117,21 @@ def get_llm_model():
         return model_name
 
     if provider == "vllm":
-        from infra.vllm_adk_model import VllmAdkModel
+        from infra.vllm_server import get_server
+        get_server().start()
 
-        model = VllmAdkModel()
-        logger.info("LLM model: vLLM (embedded GPU, ADK-compatible)")
+        vllm_cfg = config.get("vllm", {})
+        model_id = vllm_cfg.get("model", "auto")
+        if model_id == "auto":
+            from infra.vllm_server import _select_model_by_ram
+            model_id = _select_model_by_ram()
+
+        from google.adk.models.lite_llm import LiteLlm
+        model = LiteLlm(
+            model=f"openai/{model_id}",
+            api_base=get_server().api_base,
+        )
+        logger.info(f"LLM model: vLLM (local server) — {model_id} at {get_server().api_base}")
         _model_cache[provider] = model
         return model
 
@@ -121,7 +144,7 @@ def get_llm_model():
     return model
 
 
-def get_available_providers() -> list[dict[str, str]]:
+def get_available_providers() -> list[dict[str, str | bool]]:
     """List all configured providers with their model IDs.
 
     Returns:
@@ -140,7 +163,7 @@ def get_available_providers() -> list[dict[str, str]]:
         elif key == "lm_studio":
             name = "LM Studio (local)"
         elif key == "vllm":
-            name = "vLLM (embedded GPU)"
+            name = "vLLM (local server)"
         elif key == "groq":
             name = "Groq"
         elif key == "openrouter":

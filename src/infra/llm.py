@@ -61,13 +61,11 @@ def generate(
     """
     model_str = model or get_llm_model_string()
 
-    if model_str.startswith("vllm/"):
-        return _generate_vllm(
-            prompt=prompt,
-            system=system,
-            format_json=format_json,
-            max_tokens=max_tokens,
-        )
+    from infra.settings import get_section
+    provider = get_section("llm").get("provider", "groq")
+    if provider == "vllm":
+        from infra.vllm_server import get_server
+        get_server().start()
 
     import os
     if GROQ_API_KEY and not os.environ.get("GROQ_API_KEY"):
@@ -117,37 +115,6 @@ def generate(
     raise ProviderError(
         f"LLM failed after {max_retries} attempt(s). Last error: {last_error}"
     )
-
-
-def _generate_vllm(
-    prompt: str | None = None,
-    system: str | None = None,
-    format_json: bool = False,
-    max_tokens: int = 2048,
-) -> str:
-    """Generate text using the embedded vLLM engine."""
-    from infra.vllm_engine import generate as vllm_generate
-
-    messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt or ""})
-
-    try:
-        content = vllm_generate(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.5,
-            format_json=format_json,
-        )
-        if not content or not content.strip():
-            raise LLMError("Empty response from vLLM")
-        logger.info("vLLM success")
-        return content
-    except LLMError:
-        raise
-    except Exception as e:
-        raise LLMError(f"vLLM generation failed: {e}")
 
 
 def _extract_json(text: str) -> str:

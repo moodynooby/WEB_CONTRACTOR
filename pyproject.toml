@@ -49,6 +49,8 @@ root = ["./src"]
 src = ["src"]
 
 [tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
 "src/__init__.py" = ["E402", "F401"]
+"main.py" = ["E402"]
 "src/streamlit_app/Home.py" = ["E402"]
 "src/streamlit_app/pages/*.py" = ["E402"]

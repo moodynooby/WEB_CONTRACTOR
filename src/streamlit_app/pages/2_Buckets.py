@@ -98,12 +98,13 @@ def render():
                     st.session_state.confirmed_delete_bucket = bucket.get("id")
                     st.rerun()
 
-            if st.session_state.get("confirmed_delete_bucket") == bucket.get("id"):
+            bucket_id: str | None = bucket.get("id")
+            if bucket_id and st.session_state.get("confirmed_delete_bucket") == bucket_id:
                 st.warning(f"Delete bucket '{bucket.get('name')}'? This will also remove related leads and query data.")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Yes, Delete", key=f"confirm_del_{bucket.get('id')}"):
-                        success, msg = BucketService.delete(bucket.get("id"), cascade=True)
+                    if st.button("Yes, Delete", key=f"confirm_del_{bucket_id}"):
+                        success, msg = BucketService.delete(bucket_id, cascade=True)
                         if success:
                             st.success(msg)
                             append_log(f"Deleted bucket: {bucket.get('name')}")
