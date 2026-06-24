@@ -76,7 +76,8 @@ def main():
     elif command == "bot":
         launch_bot()
     elif command == "status":
-        check_db_connection()
+        ok = check_db_connection()
+        sys.exit(0 if ok else 1)
     else:
         logger.error("Unknown command: %s", command)
         logger.info("Usage: python main.py [web|bot|status]")

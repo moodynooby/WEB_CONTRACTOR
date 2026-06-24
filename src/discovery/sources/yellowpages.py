@@ -49,7 +49,7 @@ class YellowPagesIndiaScraper(BaseScraper):
                     timeout=self.settings.get("search_wait_timeout_ms", 10000),
                 )
             except Exception:
-                self.log(f"No results found for query: {query}", "error")
+                self.logger.error(f"No results found for query: {query}")
                 return leads
 
             page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
@@ -64,11 +64,11 @@ class YellowPagesIndiaScraper(BaseScraper):
                     if lead:
                         leads.append(lead)
                 except Exception as e:
-                    self.log(f"Error extracting lead from card: {e}", "error")
+                    self.logger.error(f"Error extracting lead from card: {e}")
                     continue
 
         except Exception as e:
-            self.log(f"Error searching YellowPages India: {e}", "error")
+            self.logger.error(f"Error searching YellowPages India: {e}")
 
         return leads
 
@@ -107,7 +107,7 @@ class YellowPagesIndiaScraper(BaseScraper):
             if name_elem:
                 return name_elem.inner_text().strip()
         except Exception as e:
-            self.log(f"Error extracting business name: {e}", "error")
+            self.logger.error(f"Error extracting business name: {e}")
         return "Unknown Business"
 
     def _extract_phone(self, card: Any) -> str | None:
@@ -117,7 +117,7 @@ class YellowPagesIndiaScraper(BaseScraper):
             if phone_elem:
                 return phone_elem.inner_text().strip()
         except Exception as e:
-            self.log(f"Error extracting phone: {e}", "error")
+            self.logger.error(f"Error extracting phone: {e}")
         return None
 
     def _extract_address(self, card: Any) -> str | None:
@@ -127,7 +127,7 @@ class YellowPagesIndiaScraper(BaseScraper):
             if addr_elem:
                 return addr_elem.inner_text().strip()
         except Exception as e:
-            self.log(f"Error extracting address: {e}", "error")
+            self.logger.error(f"Error extracting address: {e}")
         return None
 
     def _extract_website(self, card: Any) -> str | None:
@@ -139,7 +139,7 @@ class YellowPagesIndiaScraper(BaseScraper):
                 if href and href.startswith("http"):
                     return href
         except Exception as e:
-            self.log(f"Error extracting website: {e}", "error")
+            self.logger.error(f"Error extracting website: {e}")
         return None
 
 

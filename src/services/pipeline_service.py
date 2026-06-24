@@ -1,6 +1,5 @@
 """Pipeline service - decoupled pipeline execution operations.
 
-Extracted from BackgroundTaskRunner and WebContractorApp GUI coupling.
 Provides long-running pipeline operations with progress tracking
 via shared progress dicts (UI-agnostic).
 """

@@ -37,8 +37,7 @@ References:
 import json
 import threading
 from contextlib import contextmanager
-from logging import Logger
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Generator
 
 from playwright.sync_api import Playwright, Page, sync_playwright
 
@@ -92,29 +91,7 @@ def _build_discovery_settings() -> dict[str, Any]:
     return all_cfg
 
 
-class _LoggableMixin:
-    """Mixin that provides style-aware logging via a self.logger attribute."""
-
-    logger: Logger
-
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness.
-
-        Args:
-            message: Log message.
-            style: One of 'error', 'warning', 'success', or '' for debug.
-        """
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
-
-
-class PlaywrightScraper(_LoggableMixin):
+class PlaywrightScraper:
     """Consolidated Stage 0 (Planning) + Stage A (Scraping).
 
     Handles query generation and lead scraping using Playwright browser
@@ -146,10 +123,6 @@ class PlaywrightScraper(_LoggableMixin):
         if self._buckets_cache is None:
             self._buckets_cache = get_all_buckets()
         return self._buckets_cache
-
-    @buckets.setter
-    def buckets(self, value: list[dict[str, Any]]) -> None:
-        self._buckets_cache = value
 
     @contextmanager
     def managed_session(self):
@@ -199,13 +172,9 @@ class PlaywrightScraper(_LoggableMixin):
         finally:
             page.close()
 
-    def _load_buckets(self) -> List[Dict[str, Any]]:
-        """Load bucket configuration from DB"""
-        return get_all_buckets()
-
     def create_search_queries(
-        self, bucket_name: Optional[str] = None, limit: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+        self, bucket_name: str | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         """Generate search queries from bucket patterns, filtering out stale queries
 
         Args:
@@ -215,7 +184,7 @@ class PlaywrightScraper(_LoggableMixin):
         limit = limit or self._settings.get("max_queries_per_run", 500)
         stale_threshold = self._settings.get("stale_query_threshold", 3)
 
-        queries: List[Dict[str, Any]] = []
+        queries: list[dict[str, Any]] = []
         buckets = [
             b for b in self.buckets if not bucket_name or b["name"] == bucket_name
         ]
@@ -246,7 +215,7 @@ class PlaywrightScraper(_LoggableMixin):
                 try:
                     search_patterns = json.loads(search_patterns)
                 except json.JSONDecodeError as e:
-                    self.log(f"Invalid JSON in search_patterns: {e}", "error")
+                    self.logger.error(f"Invalid JSON in search_patterns: {e}")
                     search_patterns = []
 
             for pattern in search_patterns[:bucket_max_queries]:
@@ -256,7 +225,7 @@ class PlaywrightScraper(_LoggableMixin):
                     try:
                         segments = json.loads(segments)
                     except json.JSONDecodeError as e:
-                        self.log(f"Invalid JSON in geographic_segments: {e}", "error")
+                        self.logger.error(f"Invalid JSON in geographic_segments: {e}")
                         segments = []
 
                 if not segments:
@@ -274,19 +243,17 @@ class PlaywrightScraper(_LoggableMixin):
                         cities.append(seg_name)
 
                 if not cities:
-                    self.log(
+                    self.logger.error(
                         f"No cities found for bucket '{bucket['name']}' pattern '{pattern}'. "
                         f"Configure geographic_focus in settings.",
-                        "error",
                     )
                     continue
 
                 for city in cities:
                     if (pattern, city) in stale_query_set:
-                        self.log(
+                        self.logger.warning(
                             f"  Skipping stale query: '{pattern.replace('{city}', city)}' "
                             f"({stale_threshold}+ consecutive failures)",
-                            "warning",
                         )
                         continue
 
@@ -306,10 +273,10 @@ class PlaywrightScraper(_LoggableMixin):
 
     def _scrape_sources(
         self,
-        query_data: Dict,
-        bucket_max_results: Optional[int],
-        query_perf: Optional[Any],
-    ) -> tuple[list[dict], Optional[Any]]:
+        query_data: dict,
+        bucket_max_results: int | None,
+        query_perf: Any | None,
+    ) -> tuple[list[dict], Any | None]:
         """Scrape a query across all enabled sources sequentially.
 
         ⚠️  THREAD-SAFETY: Playwright sync API is NOT thread-safe.
@@ -337,14 +304,13 @@ class PlaywrightScraper(_LoggableMixin):
         enabled_sources = get_all_enabled_sources(self._settings, region=region)
 
         if not enabled_sources:
-            self.log(f"  No enabled sources found for region: {region}", "warning")
+            self.logger.warning(f"  No enabled sources found for region: {region}")
             return query_leads, query_perf
 
         sources_scrape_settings = self._settings.get("scraper_settings", {})
 
-        self.log(
+        self.logger.info(
             f"  Scraping {len(enabled_sources)} sources ({region})...",
-            "info",
         )
 
         pw = _get_playwright()
@@ -374,13 +340,12 @@ class PlaywrightScraper(_LoggableMixin):
                             for lead in leads
                         ]
                         query_leads.extend(normalized)
-                        self.log(
+                        self.logger.info(
                             f"  [{scraper.SOURCE_NAME}] Found {len(leads)} leads",
-                            "success",
                         )
 
                 except Exception as e:
-                    self.log(f"  [{scraper.SOURCE_NAME}] Failed: {e}", "error")
+                    self.logger.error(f"  [{scraper.SOURCE_NAME}] Failed: {e}")
                 finally:
                     if page:
                         page.close()
@@ -389,14 +354,14 @@ class PlaywrightScraper(_LoggableMixin):
         finally:
             browser.close()
 
-        self.log(f"  Total: {len(query_leads)} leads from all sources", "success")
+        self.logger.info(f"  Total: {len(query_leads)} leads from all sources")
         return query_leads, query_perf
 
     def run(
         self,
-        bucket_name: Optional[str] = None,
-        max_queries: Optional[int] = None,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        bucket_name: str | None = None,
+        max_queries: int | None = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> dict:
         """Execute full discovery pipeline - sequential query processing.
 
@@ -420,25 +385,23 @@ class PlaywrightScraper(_LoggableMixin):
         Returns:
             Dict with keys: queries_executed, leads_found, leads_saved
         """
-        self.buckets = self._load_buckets()
         max_queries = max_queries or self._settings.get("max_queries_per_run", 500)
 
         cleanup_days = self._settings.get("stale_query_cleanup_days", 30)
         cleaned = cleanup_stale_queries(days_threshold=cleanup_days)
         if cleaned > 0:
-            self.log(f"Cleaned up {cleaned} old stale queries", "info")
+            self.logger.info(f"Cleaned up {cleaned} old stale queries")
 
-        self.log("DISCOVERY: Query Generation + Lead Scraping")
+        self.logger.info("DISCOVERY: Query Generation + Lead Scraping")
 
         queries = self.create_search_queries(bucket_name, max_queries)
-        self.log(f"Generated {len(queries)} search queries", "info")
+        self.logger.info(f"Generated {len(queries)} search queries")
 
         stale_threshold = self._settings.get("stale_query_threshold", 3)
         all_stale = get_stale_queries(max_failures=stale_threshold)
         if all_stale:
-            self.log(
+            self.logger.warning(
                 f"\n{len(all_stale)} stale queries disabled (≥{stale_threshold} consecutive failures)",
-                "warning",
             )
 
         total_leads = 0
@@ -447,7 +410,7 @@ class PlaywrightScraper(_LoggableMixin):
         with self.managed_session():
             for i, q in enumerate(queries, 1):
                 msg = f"Processing query: {q['query']}"
-                self.log(f"\n[{i}/{len(queries)}] {q['query']}", "info")
+                self.logger.info(f"\n[{i}/{len(queries)}] {q['query']}")
 
                 if progress_callback:
                     progress_callback(i, len(queries), msg)
@@ -485,24 +448,21 @@ class PlaywrightScraper(_LoggableMixin):
 
                         if query_perf.get("consecutive_failures", 0) >= stale_threshold:
                             mark_query_as_stale(query_perf["id"])
-                            self.log(
+                            self.logger.error(
                                 f"  Query marked as STALE: {q['query']} "
                                 f"({query_perf.get('consecutive_failures', 0)} consecutive failures)",
-                                "error",
                             )
 
                     total_saved += saved
                     total_leads += len(query_leads)
 
                     if duplicates > 0:
-                        self.log(
+                        self.logger.warning(
                             f"  Found {len(query_leads)} leads, saved {saved} ({duplicates} duplicates - website exists)",
-                            "warning",
                         )
                     else:
-                        self.log(
+                        self.logger.info(
                             f"  Found {len(query_leads)} leads, saved {saved}",
-                            "success",
                         )
                 else:
                     if query_perf:
@@ -515,19 +475,18 @@ class PlaywrightScraper(_LoggableMixin):
 
                         if query_perf.get("consecutive_failures", 0) >= stale_threshold:
                             mark_query_as_stale(query_perf["id"])
-                            self.log(
+                            self.logger.error(
                                 f"  Query marked as STALE: {q['query']} "
                                 f"({query_perf.get('consecutive_failures', 0)} consecutive failures)",
-                                "error",
                             )
 
-                    self.log("  No leads found", "error")
+                    self.logger.error("  No leads found")
 
-        self.log(f"\n{'=' * 60}")
-        self.log(
-            f"Discovery Complete: {total_leads} found, {total_saved} saved", "success"
+        self.logger.info(f"\n{'=' * 60}")
+        self.logger.info(
+            f"Discovery Complete: {total_leads} found, {total_saved} saved"
         )
-        self.log(f"{'=' * 60}\n")
+        self.logger.info(f"{'=' * 60}\n")
 
         return {
             "queries_executed": len(queries),

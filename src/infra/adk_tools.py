@@ -284,7 +284,6 @@ def refine_email(
     Returns:
         Dict with keys: ``status``, ``subject``, ``body``.
     """
-    import json as _json
     from infra import llm
     from infra.settings import get_section
     from outreach.prompts import build_refine_prompt
@@ -299,7 +298,7 @@ def refine_email(
         format_json=True,
         max_retries=llm_config.get("max_retries", 2),
     )
-    data = _json.loads(raw)
+    data = json.loads(raw)
     return {
         "status": "success",
         "subject": data.get("subject", subject),

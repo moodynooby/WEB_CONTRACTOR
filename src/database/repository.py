@@ -185,8 +185,6 @@ def delete_bucket(bucket_id: str, cascade: bool = True) -> tuple[bool, str]:
     db = _get_db()
 
     try:
-        from bson import ObjectId
-
         oid = ObjectId(bucket_id) if isinstance(bucket_id, str) else bucket_id
     except Exception as e:
         return (False, f"Invalid bucket ID: {e}")

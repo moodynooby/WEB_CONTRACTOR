@@ -3,7 +3,7 @@
 import re
 from abc import ABC, abstractmethod
 from logging import Logger
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from playwright.sync_api import Page
@@ -14,18 +14,6 @@ try:
     from email_scraper import scrape_emails
 except ImportError:
     scrape_emails: Callable | None = None
-
-
-class ScraperError(Exception):
-    """Base exception for scraper errors."""
-
-    pass
-
-
-class SourceUnavailableError(ScraperError):
-    """Raised when source is unavailable or blocked."""
-
-    pass
 
 
 class EmailExtractor:
@@ -40,14 +28,14 @@ class EmailExtractor:
     )
 
     @classmethod
-    def extract_from_text(cls, text: str) -> List[str]:
+    def extract_from_text(cls, text: str) -> list[str]:
         """Extract emails from plain text using regex."""
         if not text:
             return []
         return list(set(cls.EMAIL_PATTERN.findall(text)))
 
     @classmethod
-    def extract_from_html(cls, html: str) -> List[str]:
+    def extract_from_html(cls, html: str) -> list[str]:
         """Extract emails from HTML content using email-scraper."""
         if not html:
             return []
@@ -59,7 +47,7 @@ class EmailExtractor:
         return cls.extract_from_text(html)
 
     @classmethod
-    def extract_first(cls, text: str) -> Optional[str]:
+    def extract_first(cls, text: str) -> str | None:
         """Extract first email from text."""
         matches = cls.extract_from_text(text)
         return matches[0] if matches else None
@@ -75,7 +63,7 @@ class PhoneExtractor:
     ]
 
     @classmethod
-    def extract_from_text(cls, text: str) -> List[str]:
+    def extract_from_text(cls, text: str) -> list[str]:
         """Extract phone numbers from plain text."""
         if not text:
             return []
@@ -86,7 +74,7 @@ class PhoneExtractor:
         return list(set(numbers))
 
     @classmethod
-    def extract_first(cls, text: str) -> Optional[str]:
+    def extract_first(cls, text: str) -> str | None:
         """Extract first phone number from text."""
         matches = cls.extract_from_text(text)
         return matches[0] if matches else None
@@ -102,36 +90,20 @@ class BaseScraper(ABC):
     SOURCE_NAME: str = ""
     BASE_URL: str = ""
 
-    DEFAULT_SELECTORS: Dict[str, str] = {}
+    DEFAULT_SELECTORS: dict[str, str] = {}
 
     def __init__(
         self,
-        logger: Optional[Logger] = None,
-        settings: Optional[Dict[str, Any]] = None,
+        logger: Logger | None = None,
+        settings: dict[str, Any] | None = None,
     ):
         self.logger = logger or get_logger(self.__class__.__name__)
         self.settings = settings or {}
 
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness.
-
-        Args:
-            message: Log message.
-            style: One of 'error', 'warning', 'success', or '' for debug.
-        """
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
-
     @abstractmethod
     def search(
         self, query: str, page: Page, max_results: int = 5
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search for businesses and extract lead data.
 
         Args:
@@ -146,10 +118,10 @@ class BaseScraper(ABC):
 
     def normalize_lead(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         bucket: str = "",
         query: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Normalize lead data to common schema.
 
         Args:
@@ -176,7 +148,7 @@ class BaseScraper(ABC):
             "listing_url": data.get("listing_url") or data.get("url") or "",
         }
 
-    def _normalize_url(self, url: Optional[str]) -> Optional[str]:
+    def _normalize_url(self, url: str | None) -> str | None:
         """Normalize URL to consistent format."""
         if not url:
             return None
@@ -188,7 +160,7 @@ class BaseScraper(ABC):
             if parsed.netloc:
                 return url
         except Exception as e:
-            self.log(f"Error normalizing URL: {e}", "error")
+            self.logger.error(f"Error normalizing URL: {e}")
         return None
 
     def _extract_category_from_query(self, query: str) -> str:
@@ -197,25 +169,25 @@ class BaseScraper(ABC):
             return "Unknown"
         return query.split()[0] if " " in query else query
 
-    def _extract_emails_from_page(self, page: Page) -> List[str]:
+    def _extract_emails_from_page(self, page: Page) -> list[str]:
         """Extract emails visible on current page."""
         try:
             content = page.content()
             return EmailExtractor.extract_from_html(content)
         except Exception as e:
-            self.log(f"Error extracting emails from page: {e}", "error")
+            self.logger.error(f"Error extracting emails from page: {e}")
             return []
 
-    def _extract_phones_from_page(self, page: Page) -> List[str]:
+    def _extract_phones_from_page(self, page: Page) -> list[str]:
         """Extract phone numbers visible on current page."""
         try:
             content = page.content()
             return PhoneExtractor.extract_from_text(content)
         except Exception as e:
-            self.log(f"Error extracting phones from page: {e}", "error")
+            self.logger.error(f"Error extracting phones from page: {e}")
             return []
 
-    def get_source_config(self) -> Dict[str, Any]:
+    def get_source_config(self) -> dict[str, Any]:
         """Get source-specific configuration."""
         return self.settings.get(self.SOURCE_NAME, {})
 
@@ -238,7 +210,7 @@ class BaseScraper(ABC):
 class ScraperRegistry:
     """Registry for managing all available scraper sources."""
 
-    _sources: Dict[str, type[BaseScraper]] = {}
+    _sources: dict[str, type[BaseScraper]] = {}
 
     @classmethod
     def register(cls, source_class: type[BaseScraper]) -> None:
@@ -249,33 +221,20 @@ class ScraperRegistry:
         cls._sources[instance.SOURCE_NAME] = source_class
 
     @classmethod
-    def get(cls, source_name: str) -> Optional[type[BaseScraper]]:
+    def get(cls, source_name: str) -> type[BaseScraper] | None:
         """Get scraper class by source name."""
         return cls._sources.get(source_name)
 
     @classmethod
-    def get_all_sources(cls) -> Dict[str, type[BaseScraper]]:
+    def get_all_sources(cls) -> dict[str, type[BaseScraper]]:
         """Get all registered scraper sources."""
         return cls._sources.copy()
-
-    @classmethod
-    def get_enabled_sources(cls, config: Dict[str, Any]) -> List[type[BaseScraper]]:
-        """Get all enabled sources sorted by priority."""
-        enabled = []
-        for source_class in cls._sources.values():
-            instance = source_class()
-            if instance.is_enabled():
-                instance.settings = config
-                enabled.append((source_class, instance.get_priority()))
-
-        enabled.sort(key=lambda x: x[1])
-        return [s[0] for s in enabled]
 
     @classmethod
     def create_instance(
         cls,
         source_class: type[BaseScraper],
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> BaseScraper:
         """Create a scraper instance with proper logger and settings.
 

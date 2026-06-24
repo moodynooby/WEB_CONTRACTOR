@@ -63,7 +63,7 @@ class JustDialScraper(BaseScraper):
                     timeout=self.settings.get("search_wait_timeout_ms", 10000),
                 )
             except Exception:
-                self.log(f"No results found for query: {query}", "error")
+                self.logger.error(f"No results found for query: {query}")
                 return leads
 
             page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
@@ -80,11 +80,11 @@ class JustDialScraper(BaseScraper):
                     if i < len(result_cards) - 1:
                         time.sleep(0.5)
                 except Exception as e:
-                    self.log(f"Error extracting lead from card: {e}", "error")
+                    self.logger.error(f"Error extracting lead from card: {e}")
                     continue
 
         except Exception as e:
-            self.log(f"Error searching JustDial: {e}", "error")
+            self.logger.error(f"Error searching JustDial: {e}")
 
         return leads
 
@@ -148,7 +148,7 @@ class JustDialScraper(BaseScraper):
             if name_elem_alt:
                 return name_elem_alt.inner_text().strip()
         except Exception as e:
-            self.log(f"Error extracting business name: {e}", "error")
+            self.logger.error(f"Error extracting business name: {e}")
         return "Unknown Business"
 
     def _extract_phone(self, card: Any) -> str | None:
@@ -166,7 +166,7 @@ class JustDialScraper(BaseScraper):
                 if phone_class:
                     return phone_class
         except Exception as e:
-            self.log(f"Error extracting phone: {e}", "error")
+            self.logger.error(f"Error extracting phone: {e}")
 
         try:
             phone_link = card.query_selector("a[href*='tel:']")
@@ -175,7 +175,7 @@ class JustDialScraper(BaseScraper):
                 if href:
                     return href.replace("tel:", "").strip()
         except Exception as e:
-            self.log(f"Error extracting phone from tel link: {e}", "error")
+            self.logger.error(f"Error extracting phone from tel link: {e}")
 
         return None
 
@@ -186,7 +186,7 @@ class JustDialScraper(BaseScraper):
             if addr_elem:
                 return addr_elem.inner_text().strip()
         except Exception as e:
-            self.log(f"Error extracting address: {e}", "error")
+            self.logger.error(f"Error extracting address: {e}")
         return None
 
     def _extract_website(self, card: Any) -> str | None:
@@ -201,7 +201,7 @@ class JustDialScraper(BaseScraper):
                     if href.startswith("/"):
                         return f"{self.BASE_URL}{href}"
         except Exception as e:
-            self.log(f"Error extracting website: {e}", "error")
+            self.logger.error(f"Error extracting website: {e}")
         return None
 
     def _extract_listing_url(self, card: Any) -> str | None:
@@ -216,7 +216,7 @@ class JustDialScraper(BaseScraper):
                     if href.startswith("/"):
                         return f"{self.BASE_URL}{href}"
         except Exception as e:
-            self.log(f"Error extracting listing URL: {e}", "error")
+            self.logger.error(f"Error extracting listing URL: {e}")
         return None
 
 

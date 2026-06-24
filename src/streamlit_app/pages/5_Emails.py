@@ -1,6 +1,7 @@
 """Emails page - generate and review outreach emails."""
 
 import sys
+import time
 from pathlib import Path
 
 SRC_DIR = Path(__file__).parent.parent.parent.resolve()
@@ -11,7 +12,7 @@ import streamlit as st
 from services.email_service import EmailService
 from services.pipeline_service import PipelineService, PROGRESS_STATUS_RUNNING, PROGRESS_STATUS_DONE, PROGRESS_STATUS_ERROR
 from services.stats_service import StatsService
-from streamlit_app.components.email_card import show_email_card, append_log_to_state
+from streamlit_app.components.email_card import show_email_card
 from streamlit_app.components.log_viewer import append_log, show_log_viewer
 from streamlit_app.state import init_session_state
 
@@ -57,7 +58,6 @@ def render():
                     pct = min(current / max(total, 1), 1.0)
                     bar.progress(pct, text=progress.get("message", ""))
                     st.rerun()
-                    import time
                     time.sleep(0.5)
 
                 if progress.get("status") == PROGRESS_STATUS_DONE:
@@ -112,7 +112,7 @@ def render():
                     if st.button("Confirm Delete", key=f"confirm_del_{cid}"):
                         email_service.delete(cid)
                         st.session_state.confirmed_delete_email = None
-                        append_log_to_state(f"Deleted email for {email.get('business_name', '')}")
+                        append_log(f"Deleted email for {email.get('business_name', '')}")
                         st.rerun()
                 with col_cancel:
                     if st.button("Cancel", key=f"cancel_del_{cid}"):

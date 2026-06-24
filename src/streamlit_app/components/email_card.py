@@ -5,6 +5,7 @@ Renders a single email with editable subject/body and action buttons.
 
 import streamlit as st
 from services.email_service import EmailService
+from streamlit_app.components.log_viewer import append_log
 
 
 def show_email_card(email: dict, email_service: EmailService) -> bool:
@@ -78,7 +79,7 @@ def show_email_card(email: dict, email_service: EmailService) -> bool:
                 try:
                     email_service.approve(cid, subject, body)
                     st.session_state[f"card_disabled_{cid}"] = True
-                    append_log_to_state(f"Approved email for {email.get('business_name', '')}")
+                    append_log(f"Approved email for {email.get('business_name', '')}")
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))
@@ -95,7 +96,7 @@ def show_email_card(email: dict, email_service: EmailService) -> bool:
                         st.session_state[f"subj_{cid}"] = result["subject"]
                         st.session_state[f"body_{cid}"] = result["body"]
                         st.session_state[f"refine_instr_{cid}"] = ""
-                        append_log_to_state(f"Refined email for {email.get('business_name', '')}")
+                        append_log(f"Refined email for {email.get('business_name', '')}")
                         st.rerun()
                     except ValueError as e:
                         st.error(str(e))
@@ -115,7 +116,7 @@ def show_email_card(email: dict, email_service: EmailService) -> bool:
                     result = email_service.regenerate(cid, email.get("lead_id", ""))
                     st.session_state[f"subj_{cid}"] = result["subject"]
                     st.session_state[f"body_{cid}"] = result["body"]
-                    append_log_to_state(f"Regenerated email for {email.get('business_name', '')}")
+                    append_log(f"Regenerated email for {email.get('business_name', '')}")
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))
@@ -131,7 +132,7 @@ def show_email_card(email: dict, email_service: EmailService) -> bool:
                     )
                     if success:
                         st.session_state[f"card_disabled_{cid}"] = True
-                        append_log_to_state(f"Sent email to {email.get('to_email', '')}")
+                        append_log(f"Sent email to {email.get('to_email', '')}")
                         st.rerun()
                     else:
                         st.error("Send failed. Check logs.")
@@ -141,11 +142,3 @@ def show_email_card(email: dict, email_service: EmailService) -> bool:
         st.divider()
 
     return False
-
-
-def append_log_to_state(message: str):
-    if "log_lines" not in st.session_state:
-        st.session_state.log_lines = []
-    st.session_state.log_lines.append(message)
-    if len(st.session_state.log_lines) > 500:
-        st.session_state.log_lines = st.session_state.log_lines[-500:]

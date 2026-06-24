@@ -55,11 +55,11 @@ class WordPressScraper(BaseScraper):
                     if lead:
                         leads.append(lead)
                 except Exception as e:
-                    self.log(f"Error extracting lead: {e}", "error")
+                    self.logger.error(f"Error extracting lead: {e}")
                     continue
 
         except Exception as e:
-            self.log(f"Error searching WordPress: {e}", "error")
+            self.logger.error(f"Error searching WordPress: {e}")
 
         return leads
 
@@ -118,7 +118,7 @@ class WordPressScraper(BaseScraper):
             return self.normalize_lead(raw_data, query=query)
 
         except Exception as e:
-            self.log(f"Error extracting WordPress lead: {e}", "error")
+            self.logger.error(f"Error extracting WordPress lead: {e}")
             return None
 
 

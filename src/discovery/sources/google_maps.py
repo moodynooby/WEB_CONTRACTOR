@@ -60,7 +60,7 @@ class GoogleMapsScraper(BaseScraper):
                     timeout=self.settings.get("search_wait_timeout_ms", 10000),
                 )
             except Exception:
-                self.log(f"No results found for query: {query}", "error")
+                self.logger.error(f"No results found for query: {query}")
                 return leads
 
             business_elements = page.query_selector_all(self.SELECTORS["result_link"])
@@ -72,11 +72,11 @@ class GoogleMapsScraper(BaseScraper):
                     if lead:
                         leads.append(lead)
                 except Exception as e:
-                    self.log(f"Error extracting lead: {e}", "error")
+                    self.logger.error(f"Error extracting lead: {e}")
                     continue
 
         except Exception as e:
-            self.log(f"Error searching Google Maps: {e}", "error")
+            self.logger.error(f"Error searching Google Maps: {e}")
 
         return leads
 
@@ -100,7 +100,7 @@ class GoogleMapsScraper(BaseScraper):
             element.click()
             page.wait_for_timeout(self.settings.get("result_click_delay_ms", 2000))
         except Exception as e:
-            self.log(f"Error clicking business element: {e}", "error")
+            self.logger.error(f"Error clicking business element: {e}")
             return {}
 
         name = self._extract_business_name(page)
@@ -127,7 +127,7 @@ class GoogleMapsScraper(BaseScraper):
             if name_elem:
                 return name_elem.inner_text()
         except Exception as e:
-            self.log(f"Error extracting business name: {e}", "error")
+            self.logger.error(f"Error extracting business name: {e}")
         return "Unknown Business"
 
     def _extract_website(self, page: Page) -> str | None:
@@ -147,7 +147,7 @@ class GoogleMapsScraper(BaseScraper):
                         if "q" in params:
                             return params["q"][0]
         except Exception as e:
-            self.log(f"Error extracting website: {e}", "error")
+            self.logger.error(f"Error extracting website: {e}")
         return None
 
     def _extract_phone(self, page: Page) -> str | None:
@@ -159,7 +159,7 @@ class GoogleMapsScraper(BaseScraper):
                 if aria_label:
                     return aria_label.replace("Phone: ", "").strip()
         except Exception as e:
-            self.log(f"Error extracting phone: {e}", "error")
+            self.logger.error(f"Error extracting phone: {e}")
         return None
 
     def _extract_address(self, page: Page) -> str | None:
@@ -171,7 +171,7 @@ class GoogleMapsScraper(BaseScraper):
                 if aria_label:
                     return aria_label.replace("Address: ", "").strip()
         except Exception as e:
-            self.log(f"Error extracting address: {e}", "error")
+            self.logger.error(f"Error extracting address: {e}")
         return None
 
 

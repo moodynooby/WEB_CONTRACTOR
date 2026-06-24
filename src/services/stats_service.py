@@ -1,6 +1,5 @@
 """Stats service - decoupled dashboard statistics.
 
-Extracted from StatusBar._refresh_stats() in the PyQt5 GUI.
 Provides database statistics as framework-agnostic methods.
 """
 

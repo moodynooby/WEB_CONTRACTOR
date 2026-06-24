@@ -1,6 +1,7 @@
 """Discovery page - run lead discovery pipeline."""
 
 import sys
+import time
 from pathlib import Path
 
 SRC_DIR = Path(__file__).parent.parent.parent.resolve()
@@ -58,7 +59,6 @@ def render():
                 bar.progress(pct, text=progress.get("message", ""))
                 placeholder.info(f"Progress: {current}/{total}")
                 st.rerun()
-                import time
                 time.sleep(0.5)
 
             if progress.get("status") == PROGRESS_STATUS_DONE:

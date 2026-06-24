@@ -16,10 +16,7 @@ Commands:
 Usage:
     from infra.notifications.bot import start_bot_thread, stop_bot
 
-    # Start (called by App.initialize())
     start_bot_thread(app_instance)
-
-    # Stop (called by App.shutdown())
     stop_bot()
 """
 

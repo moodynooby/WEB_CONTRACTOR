@@ -2,7 +2,6 @@
 
 import json
 import time
-from logging import Logger
 from typing import Callable
 
 from infra import llm
@@ -20,29 +19,7 @@ from database.repository import (
 from outreach.discovery import scrape_email_from_website
 
 
-class _LoggableMixin:
-    """Mixin that provides style-aware logging via a self.logger attribute."""
-
-    logger: Logger
-
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness.
-
-        Args:
-            message: Log message.
-            style: One of 'error', 'warning', 'success', or '' for debug.
-        """
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
-
-
-class EmailGenerator(_LoggableMixin):
+class EmailGenerator:
     """Generates personalized cold emails for qualified leads."""
 
     def __init__(self) -> None:
@@ -54,10 +31,10 @@ class EmailGenerator(_LoggableMixin):
         self, limit: int = 20, progress_callback: Callable | None = None
     ) -> dict:
         """Generate emails for qualified leads."""
-        self.log("\n=== EMAIL GENERATION ===", "info")
+        self.logger.info("\n=== EMAIL GENERATION ===")
 
         leads = get_qualified_leads(limit)
-        self.log(f"Found {len(leads)} qualified leads", "info")
+        self.logger.info(f"Found {len(leads)} qualified leads")
 
         if not leads:
             return {"generated": 0}
@@ -68,38 +45,34 @@ class EmailGenerator(_LoggableMixin):
         for i, lead in enumerate(leads, 1):
             lead_email = (lead.get("email") or "").strip()
             if not lead_email:
-                self.log(
+                self.logger.info(
                     f"  [{i}/{len(leads)}] {lead['business_name']} - "
                     "No email, attempting to scrape...",
-                    "info",
                 )
                 website = lead.get("website", "")
                 if website:
                     lead_email = scrape_email_from_website(website)
                     if lead_email:
-                        self.log(
+                        self.logger.info(
                             f"  [{i}/{len(leads)}] {lead['business_name']} - "
                             f"Found email: {lead_email}",
-                            "success",
                         )
                     else:
-                        self.log(
+                        self.logger.warning(
                             f"  [{i}/{len(leads)}] {lead['business_name']} - "
                             "No email found, skipping",
-                            "warning",
                         )
                         update_lead_status(lead["id"], "unqualified")
                         continue
                 else:
-                    self.log(
+                    self.logger.warning(
                         f"  [{i}/{len(leads)}] {lead['business_name']} - "
                         "No website, skipping",
-                        "warning",
                     )
                     update_lead_status(lead["id"], "unqualified")
                     continue
 
-            self.log(f"  [{i}/{len(leads)}] {lead['business_name']}", "info")
+            self.logger.info(f"  [{i}/{len(leads)}] {lead['business_name']}")
 
             issues = lead.get("issues_json", [])
             if not isinstance(issues, list):
@@ -146,11 +119,11 @@ class EmailGenerator(_LoggableMixin):
                 body = (data.get("body") or "").strip()
 
                 if not subject or not body:
-                    self.log("  ⚠ LLM returned empty email, retrying...", "warning")
+                    self.logger.warning("  ⚠ LLM returned empty email, retrying...")
                     raise ValueError("Empty subject or body")
 
                 if len(body) < 20:
-                    self.log("  ⚠ Email too short, retrying...", "warning")
+                    self.logger.warning("  ⚠ Email too short, retrying...")
                     raise ValueError("Email too short")
 
                 email_data = {
@@ -166,7 +139,7 @@ class EmailGenerator(_LoggableMixin):
                 generated += 1
 
             except Exception as e:
-                self.log(f"  ⚠ Email generation failed: {e}", "error")
+                self.logger.error(f"  ⚠ Email generation failed: {e}")
 
             if progress_callback:
                 progress_callback(
@@ -175,9 +148,9 @@ class EmailGenerator(_LoggableMixin):
 
         if email_batch:
             save_emails_batch(email_batch)
-            self.log(f"  Saved {len(email_batch)} emails", "success")
+            self.logger.info(f"  Saved {len(email_batch)} emails")
 
-        self.log(f"Email Generation Complete: {generated} emails generated", "success")
+        self.logger.info(f"Email Generation Complete: {generated} emails generated")
 
         return {"generated": generated}
 
@@ -253,7 +226,7 @@ class EmailGenerator(_LoggableMixin):
         llm_settings = self.llm_config
 
         if not self.email_config.get("enabled", True):
-            self.log("Email refinement disabled", "warning")
+            self.logger.warning("Email refinement disabled")
             return {"subject": subject, "body": body}
 
         from outreach.prompts import build_refine_prompt
@@ -275,5 +248,5 @@ class EmailGenerator(_LoggableMixin):
                 "body": data.get("body", body),
             }
         except llm.ProviderError as e:
-            self.log(f"Email refinement failed: {e}", "error")
+            self.logger.error(f"Email refinement failed: {e}")
             return {"subject": subject, "body": body}

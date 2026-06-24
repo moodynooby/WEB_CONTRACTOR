@@ -74,7 +74,6 @@ def main():
     page_file = Path(__file__).parent / pages[page]
     page_code = page_file.read_text(encoding="utf-8")
 
-    # Extract the render() call and execute in context
     exec(page_code, {"st": st, "__file__": str(page_file)})
 
 

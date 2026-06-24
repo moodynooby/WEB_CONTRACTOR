@@ -1,6 +1,6 @@
 """Source factory - imports all scrapers and provides unified interface."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import BaseScraper, ScraperRegistry
 from . import (
@@ -16,27 +16,9 @@ from . import (
 )
 
 
-def get_scraper(
-    source_name: str, settings: Optional[Dict[str, Any]] = None
-) -> Optional[BaseScraper]:
-    """Get a scraper instance by source name.
-
-    Args:
-        source_name: Name of the scraper (e.g., 'google_maps', 'justdial')
-        settings: Optional settings dict to pass to scraper
-
-    Returns:
-        Scraper instance or None if not found
-    """
-    source_class = ScraperRegistry.get(source_name)
-    if source_class:
-        return source_class(settings=settings)
-    return None
-
-
 def get_all_enabled_sources(
-    settings: Dict[str, Any], region: str = "india"
-) -> List[BaseScraper]:
+    settings: dict[str, Any], region: str = "india"
+) -> list[BaseScraper]:
     """Get all enabled scraper sources sorted by priority, filtered by region.
 
     Args:
@@ -54,6 +36,8 @@ def get_all_enabled_sources(
     for source_name, source_class in all_source_classes.items():
         source_config = sources_config.get(source_name, {})
         instance = source_class(settings=source_config)
+        if not instance.is_enabled():
+            continue
         enabled_sources.append((instance, source_config.get("priority", 99)))
 
     enabled_sources.sort(key=lambda x: x[1])
@@ -63,7 +47,6 @@ def get_all_enabled_sources(
 __all__ = [
     "BaseScraper",
     "ScraperRegistry",
-    "get_scraper",
     "get_all_enabled_sources",
     "google_maps",
     "google_search",

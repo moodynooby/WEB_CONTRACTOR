@@ -35,15 +35,6 @@ _is_initialized = False
 _is_healthy = False
 
 
-def is_initialized() -> bool:
-    """Check if the database has been initialized (attempted connection).
-
-    This is True even if the connection attempt failed.
-    Use is_connected() to check if the DB is actually available.
-    """
-    return _is_initialized
-
-
 def _create_configured_client() -> MongoClient:
     """Create MongoDB client with production-grade connection pooling."""
     return MongoClient(
@@ -75,11 +66,6 @@ def _ping_database() -> bool:
         _is_healthy = False
         logger.warning(f"MongoDB ping failed: {e}")
         return False
-
-
-def is_healthy() -> bool:
-    """Check if MongoDB connection is healthy."""
-    return _is_healthy and _database is not None
 
 
 def _create_indexes(db: Any) -> None:
@@ -172,11 +158,6 @@ def init_db() -> None:
             _is_healthy = False
 
 
-def get_client() -> MongoClient | None:
-    """Get the MongoDB client instance."""
-    return _client
-
-
 def get_database() -> Any | None:
     """Get the MongoDB database instance."""
     return _database
@@ -193,8 +174,6 @@ def get_connection_status() -> dict[str, Any]:
     Returns:
         Dict with connected, healthy, and database name info.
     """
-    from infra.settings import MONGODB_DATABASE
-
     return {
         "connected": _is_initialized and _database is not None,
         "healthy": _is_healthy,
@@ -259,31 +238,6 @@ def get_email_campaign_stats() -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting email campaign stats: {e}")
         return {}
-
-
-def get_recent_email_campaigns(limit: int = 50) -> list[dict]:
-    """Get recent email campaigns sorted by creation time.
-
-    Args:
-        limit: Maximum number of campaigns to return
-
-    Returns:
-        List of campaign dictionaries
-    """
-    if not is_connected():
-        return []
-
-    try:
-        db = _database
-        if db is None:
-            return []
-        campaigns = list(db.email_campaigns.find().sort("sent_at", -1).limit(limit))
-        for campaign in campaigns:
-            campaign["id"] = str(campaign.pop("_id"))
-        return campaigns
-    except Exception as e:
-        logger.error(f"Error fetching recent email campaigns: {e}")
-        return []
 
 
 def count_email_campaigns() -> int:

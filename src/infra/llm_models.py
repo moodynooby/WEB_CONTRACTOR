@@ -24,7 +24,7 @@ from infra.logging import get_logger
 
 logger = get_logger(__name__)
 
-_model_cache: dict[str, Any] = {}
+_model_cache: dict[str, str] = {}
 
 
 def _get_llm_config() -> dict[str, Any]:
@@ -113,7 +113,7 @@ def get_llm_model() -> str:
     provider = config.get("provider", "groq")
 
     if provider in _model_cache:
-        return _model_cache[provider]  # type: ignore[return-value]
+        return _model_cache[provider]
 
     if provider == "vllm":
         from infra.vllm_server import get_server

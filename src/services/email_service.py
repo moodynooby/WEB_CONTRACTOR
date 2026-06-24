@@ -1,6 +1,5 @@
 """Email service - decoupled email review operations.
 
-Extracted from EmailReviewDialog and EmailCard PyQt5 widgets.
 Provides all email CRUD + LLM operations as framework-agnostic methods.
 """
 

@@ -3,7 +3,6 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from logging import Logger
 
 from infra.settings import (
     EMAIL_SIGNATURE,
@@ -16,29 +15,7 @@ from infra.logging import get_logger
 from database.repository import mark_email_sent
 
 
-class _LoggableMixin:
-    """Mixin that provides style-aware logging via a self.logger attribute."""
-
-    logger: Logger
-
-    def log(self, message: str, style: str = "") -> None:
-        """Log message with level awareness.
-
-        Args:
-            message: Log message.
-            style: One of 'error', 'warning', 'success', or '' for debug.
-        """
-        if style == "error":
-            self.logger.error(message)
-        elif style == "warning":
-            self.logger.warning(message)
-        elif style == "success":
-            self.logger.info(message)
-        else:
-            self.logger.debug(message)
-
-
-class EmailSender(_LoggableMixin):
+class EmailSender:
     """SMTP Email Sender for outbound campaigns.
 
     Handles email delivery via Gmail SMTP with:
@@ -84,7 +61,7 @@ class EmailSender(_LoggableMixin):
 
             return True
         except Exception as e:
-            self.log(f"Email send error: {e}", "error")
+            self.logger.error(f"Email send error: {e}")
             if campaign_id:
                 mark_email_sent(str(campaign_id), lead_id, False, str(e))
             return False

@@ -1,6 +1,7 @@
 """Pipeline page - run full audit + email generation pipeline."""
 
 import sys
+import time
 from pathlib import Path
 
 SRC_DIR = Path(__file__).parent.parent.parent.resolve()
@@ -56,7 +57,6 @@ def render():
                 pct = min(current / max(total, 1), 1.0)
                 bar.progress(pct, text=progress.get("message", ""))
                 st.rerun()
-                import time
                 time.sleep(0.5)
 
             if progress.get("status") == PROGRESS_STATUS_DONE:

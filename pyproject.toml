@@ -1,7 +1,7 @@
 [project]
 name = "web-contractor"
 version = "1"
-description = "Ultra-minimal lead generation and outreach automation with PyQt5 desktop UI"
+description = "Lead generation and outreach automation "
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
